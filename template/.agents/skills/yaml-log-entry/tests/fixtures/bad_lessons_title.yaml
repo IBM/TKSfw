@@ -1,0 +1,9 @@
+- Tstles01:
+    AuthorAgent: main
+    Model: claude-opus-4-8
+    Timestamp: "2026-07-21 10:00:00"
+    Title: "This lesson title is deliberately far too long to exceed the eighty character maximum limit"
+    Description: |-
+      x
+    Remarks: |-
+      x

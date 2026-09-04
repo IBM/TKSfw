@@ -1,0 +1,28 @@
+{
+  "name": "tksfw",
+  "version": "0.5.0",
+  "description": "TKS framework tooling: ledger-aware hooks (state injection, edit hashing, YAML ledger validation) and the Group-A skills (yaml-log-entry, register-deliverables, verify-integrity, verify-sources).",
+  "author": {
+    "name": "Carlos Veira (IBM)"
+  },
+  "keywords": [
+    "method",
+    "ledgers",
+    "hooks",
+    "governance",
+    "agents"
+  ],
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json",
+  "interface": {
+    "displayName": "TKS Framework",
+    "shortDescription": "Method hooks and skills for AGENTS.md-driven projects",
+    "longDescription": "Installs the TKS framework tooling once per user: SessionStart state injection, hash-based edit tracking, YAML ledger validation on write, Stop-time ledger reminders, and the framework skills. The method text (AGENTS.md, CLAUDE.local.md, .agents/workarea/, .codex/config.toml) is created per project from the TKSfw template.",
+    "developerName": "Carlos Veira",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ]
+  }
+}

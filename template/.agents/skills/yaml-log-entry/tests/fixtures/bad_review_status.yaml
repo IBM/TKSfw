@@ -1,0 +1,10 @@
+- Tstevt04:
+    TaskID: AAAA4444
+    AuthorAgent: main
+    Model: claude-opus-4-8
+    Timestamp: "2026-07-21 10:15:00"
+    EventType: REVIEW
+    Title: "Invalid: REVIEW with an AUDIT-only status"
+    Remarks: |-
+      REVIEW may only be OPEN|PASS|FAIL; CONFORMANT belongs to AUDIT.
+    Status: CONFORMANT

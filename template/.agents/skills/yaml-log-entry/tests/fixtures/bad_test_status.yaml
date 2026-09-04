@@ -1,0 +1,10 @@
+- Tstevt05:
+    TaskID: AAAA5555
+    AuthorAgent: main
+    Model: claude-opus-4-8
+    Timestamp: "2026-07-21 10:20:00"
+    EventType: TEST
+    Title: "Invalid: TEST with a TASK-only status"
+    Remarks: |-
+      TEST may only be OPEN|OK|KO; COMPLETED belongs to TASK.
+    Status: COMPLETED

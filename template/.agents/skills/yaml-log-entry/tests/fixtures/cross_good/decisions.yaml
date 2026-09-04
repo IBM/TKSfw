@@ -1,0 +1,26 @@
+- Tstdec09:
+    AuthorAgent: main
+    Model: claude-opus-4-8
+    LastUpdate: "2026-07-21 10:00:00"
+    Title: "Decision relating to a task and event"
+    Description: |-
+      x
+    Rationale: |-
+      x
+    Scope: |-
+      x
+    Impact: LOW
+    Reversibility: EASY
+    Implications: |-
+      x
+    Alternatives: |-
+      x
+    Remarks: |-
+      x
+    ConfirmationType: AUTO-MODE
+    Status: ACCEPTED
+    RelatedTo:
+      Tasks:
+        - AAAA1111
+      Events:
+        - Tstevt01

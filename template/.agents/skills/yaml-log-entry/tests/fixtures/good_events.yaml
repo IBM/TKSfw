@@ -1,0 +1,30 @@
+- Tstevt01:
+    TaskID: AAAA1111
+    AuthorAgent: main
+    Model: claude-opus-4-8
+    Timestamp: "2026-07-21 10:00:00"
+    EventType: TASK
+    Title: "Fixture event (valid TASK/COMPLETED)"
+    Remarks: |-
+      x
+    Status: COMPLETED
+- Tstevt02:
+    TaskID: AAAA2222
+    AuthorAgent: main
+    Model: claude-opus-4-8
+    Timestamp: "2026-07-21 10:05:00"
+    EventType: REVIEW
+    Title: "Fixture event (valid REVIEW/PASS)"
+    Remarks: |-
+      x
+    Status: PASS
+- Tstevt03:
+    TaskID: AAAA3333
+    AuthorAgent: main
+    Model: claude-opus-4-8
+    Timestamp: "2026-07-21 10:10:00"
+    EventType: TEST
+    Title: "Fixture event (valid TEST/OK)"
+    Remarks: |-
+      x
+    Status: OK

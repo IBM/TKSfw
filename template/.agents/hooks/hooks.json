@@ -1,0 +1,55 @@
+{
+  "description": "Project method hooks (single source). Mirrored verbatim to .codex/hooks.json and into .claude/settings.json by `python3 .agents/hooks/sync_harness.py` (which also links skills into .claude/skills/) — edit THIS file, then run the sync. Commands are relative to the project root (launch the harness there); the scripts resolve every other path from their own location.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact|fork",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .agents/hooks/inject_state.py",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .agents/hooks/track_edits.py --phase prompt",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .agents/hooks/track_edits.py",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .agents/hooks/check_ledgers_on_stop.py",
+            "timeout": 60
+          },
+          {
+            "type": "command",
+            "command": "python3 .agents/hooks/refresh_state.py",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

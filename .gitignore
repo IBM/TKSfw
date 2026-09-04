@@ -1,0 +1,15 @@
+# build output (release ZIPs); plugins/tksfw/ IS committed (refreshed by tools/build_plugin.py)
+dist/
+# python
+__pycache__/
+*.pyc
+# macOS / editors
+.DS_Store
+._*
+.obsidian/
+.claudian/
+# project runtime state must never be committed from a template test run
+template/.agents/workarea/.hook-state/
+template/.agents/workarea/STATE.md
+template/.claude/
+template/.codex/hooks.json

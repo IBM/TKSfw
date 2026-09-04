@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "tksfw",
+  "displayName": "TKS Framework",
+  "version": "__VERSION__",
+  "description": "TKS framework tooling: ledger-aware hooks (state injection, edit hashing, YAML ledger validation) and the Group-A skills (yaml-log-entry, register-deliverables, verify-integrity, verify-sources).",
+  "author": { "name": "Carlos Veira (IBM)" },
+  "keywords": ["method", "ledgers", "hooks", "governance", "agents"],
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json"
+}

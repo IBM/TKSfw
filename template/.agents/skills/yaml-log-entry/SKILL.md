@@ -1,0 +1,106 @@
+---
+name: yaml-log-entry
+description: >
+  Authoring reference and tooling for the project's YAML ledgers under .agents/workarea/ —
+  changes.yaml, lessons.yaml, handoffs.yaml, events.yaml, the mutable decisions.yaml log and the
+  deliverables.yaml registry. LOAD THIS SKILL BEFORE writing or editing any of those files: it holds
+  the field schemas, enums, formatting rules and canonical examples (references/schemas.md), mints
+  unique IDs + timestamps (never invent them), and validates the file. Also use it to check ledger
+  integrity after an edit. It does not decide WHEN to log (AGENTS.md § YAML-based Logs does) and it
+  does not rewrite legacy files.
+---
+
+# YAML ledger authoring + validation
+
+**When** to log is governed by `AGENTS.md § YAML-based Logs` (always in context: the trigger table and
+the Layer taxonomy). **What** to write — every field, enum, formatting rule and canonical example — lives
+in this skill: read **`references/schemas.md`** before authoring an entry. Enforcement is layered so a
+missed skill load is caught, not silently persisted:
+
+| Layer | Mechanism | Guarantee |
+|---|---|---|
+| Trigger | `AGENTS.md § YAML-based Logs` (always-on) | The when-to-log rules and the "load `yaml-log-entry` first" rule are always present |
+| Schema | `references/schemas.md` (this skill) | Single source of truth for field lists, enums, examples; the validator is derived from it |
+| Integrity | `PostToolUse` hook → `assets/validate_yaml_log.py` | A malformed ledger write is **blocked** (exit 2) and the problem list is fed back to the model, whichever tool wrote it |
+| Completeness | `Stop` hook (advisory) | Flags un-logged deliverable/framework edits and delegations from the hash journal |
+
+The hooks live in `.agents/hooks/` (single source `hooks.json`, mirrored to `.codex/hooks.json` and
+`.claude/settings.json` by `sync_harness.py`).
+
+## Procedure for a new entry
+1. Read the relevant section of `references/schemas.md` (schema + example for that ledger).
+2. Mint the ID and timestamp with `assets/new_entry_id.py` (below); never type them by hand.
+3. Append the entry (or edit in place for `decisions.yaml` / `deliverables.yaml`) following the
+   example verbatim in shape: single-key mapping, 4-space field indent, `|-` memos, block lists.
+4. Validate with `assets/validate_yaml_log.py` (the hook does it too; a failure comes back as the
+   tool result — fix it before doing anything else).
+
+## The logs (all under `.agents/workarea/`)
+Each file is a YAML **list of single-key mappings** — the entry ID is the key, its fields are the
+nested mapping (this is what makes entries foldable). Ledger IDs are 8-char base62; HandoffIDs are
+composite `<base62-8>-<BEGIN|END>`. Full field lists, enums, and canonical examples: `references/schemas.md`.
+
+| Kind | File | Update type | ID form |
+|---|---|---|---|
+| `changes` | `changes.yaml` | append-only | `<base62-8>` |
+| `lessons` | `lessons.yaml` | append-only | `<base62-8>` |
+| `handoffs` | `handoffs.yaml` | append-only | `<base62-8>-BEGIN` / `<base62-8>-END` |
+| `events` | `events.yaml` | append-only | `<base62-8>` |
+| `decisions` | `decisions.yaml` | **mutable** (edit in place as `Status` evolves) | `<base62-8>` |
+
+The `deliverables.yaml` **registry** (a mutable manifest, not a ledger; project-alphanumeric IDs, no
+timestamp) is validated by the same tool — see the `register-deliverables` skill and
+`AGENTS.md § Deliverables Registry`.
+
+## Mint an ID + timestamp — don't invent them
+An LLM is a poor RNG and has no authoritative clock, so both are computed and checked unique:
+```bash
+python3 assets/new_entry_id.py .agents/workarea/changes.yaml           # -> <ID>\t<timestamp>
+python3 assets/new_entry_id.py .agents/workarea/handoffs.yaml --handoff BEGIN     # -> <stem>-BEGIN
+python3 assets/new_entry_id.py .agents/workarea/handoffs.yaml --handoff END --stem <stem>  # END reuses stem
+```
+Pass the target file so the new ID is guaranteed absent from it. For a **historical** entry the live
+clock is wrong — keep the ID but override the timestamp with the entry's real date (unknown
+time-of-day → `00:00:00`, noted in the file header).
+
+## Validate
+Runs a whole-file parse **and** per-entry schema check (exact fields, base62 ID, timestamp format,
+`Title` ≤ 80, Event `EventType`/`Status` enum pairing, Handoff `Inputs`/`Outputs` shape and BEGIN
+`N/A` placeholders, Decision `LastUpdate` format + `Impact`/`Reversibility`/`ConfirmationType`/`Status`
+enums + `RelatedTo` block-list shape):
+```bash
+python3 assets/validate_yaml_log.py .agents/workarea/changes.yaml            # kind inferred from name
+python3 assets/validate_yaml_log.py .agents/workarea/handoffs.yaml handoffs   # or pass kind explicitly
+```
+Exit 0 = valid; exit 1 = problems (printed per entry). The `PostToolUse` hook runs this automatically
+on every write to a `.agents/workarea/*.yaml` file, so an invalid entry is caught at write time.
+
+## Cross-ledger integrity + plan lint (multi-file — run in the verify-integrity sweep)
+Per-file validity does not prove the *graph* is consistent, and `tasks.md` (Markdown) is not covered
+by the per-write validator. Two on-demand checkers close that (both stdlib, both reuse the shared
+`assets/tasks_parse.py` — the single `tasks.md` parser):
+```bash
+python3 assets/cross_check.py                 # R1: resolves FKs across ledgers + tasks.md/archive
+python3 assets/tasks_lint.py                   # R2: advisory tasks.md grammar/status/evidence lint
+```
+- `cross_check.py` — event→task, handoff→event/task + BEGIN/END pairing, decision `RelatedTo`→targets,
+  and each COMPLETED task's `[ev:<EventID>]`→a terminal-positive event. **Exit 1 on any dangling FK**
+  (open handoffs are WARNs). `--workarea <dir>` points it at a fixture dir.
+- `tasks_lint.py` — **advisory** (WARN): line grammar, status/checkbox agreement, duplicate IDs, and
+  evidence-of-closing presence on completed **leaf** tasks. Its count also surfaces in STATE.md.
+
+## Tests (the tooling guards every ledger — so it has its own regression suite)
+```bash
+python3 tests/run_tests.py     # asserts exit codes over committed good/bad fixtures (validator, lint, cross_check)
+```
+When you extend a schema/enum in `references/schemas.md`, update the validator **and** add a fixture (lesson
+`S5PIos9W` — a `TASK`-enum drift slipped through until a fixture caught it).
+
+## Notes
+- **`pyyaml`-optional, Python-only.** The validator uses PyYAML when importable, else a targeted
+  pure-Python (stdlib) parser for this constrained ledger format. It never shells out to another
+  runtime. `new_entry_id.py` is likewise stdlib-only.
+- **No legacy upgrade.** This skill does not rewrite non-conformant files. If an old-format log is
+  ever encountered, normalize it deliberately on the spot; do not run a blind converter that could
+  downgrade a conformant ledger.
+- **Scope.** These are internal `.agents/workarea/` ledgers, not `D*` deliverables.

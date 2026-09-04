@@ -1,0 +1,43 @@
+# Fixture: valid Change Log entries — one per Layer enum value.
+- Tstchg01:
+    AuthorAgent: main
+    Model: claude-opus-4-8
+    Timestamp: "2026-07-21 10:00:00"
+    Layer: METHOD
+    Title: "Fixture change (valid Layer=METHOD)"
+    Description: |-
+      x
+    StateBefore: |-
+      x
+    StateAfter: |-
+      x
+    Remarks: |-
+      x
+- Tstchg02:
+    AuthorAgent: main
+    Model: claude-opus-4-8
+    Timestamp: "2026-07-21 10:05:00"
+    Layer: ARCHETYPE
+    Title: "Fixture change (valid Layer=ARCHETYPE)"
+    Description: |-
+      x
+    StateBefore: |-
+      x
+    StateAfter: |-
+      x
+    Remarks: |-
+      x
+- Tstchg03:
+    AuthorAgent: main
+    Model: claude-opus-4-8
+    Timestamp: "2026-07-21 10:10:00"
+    Layer: PROJECT
+    Title: "Fixture change (valid Layer=PROJECT)"
+    Description: |-
+      x
+    StateBefore: |-
+      x
+    StateAfter: |-
+      x
+    Remarks: |-
+      x

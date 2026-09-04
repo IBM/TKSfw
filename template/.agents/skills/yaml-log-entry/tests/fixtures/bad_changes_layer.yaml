@@ -1,0 +1,16 @@
+# Fixture: invalid Change Log entry — Layer uses a value outside the enum
+# (METHOD|ARCHETYPE|PROJECT). Expect the validator to FAIL (exit 1).
+- Tstchg04:
+    AuthorAgent: main
+    Model: claude-opus-4-8
+    Timestamp: "2026-07-21 10:15:00"
+    Layer: FRAMEWORK
+    Title: "Fixture change (invalid Layer=FRAMEWORK)"
+    Description: |-
+      x
+    StateBefore: |-
+      x
+    StateAfter: |-
+      x
+    Remarks: |-
+      x

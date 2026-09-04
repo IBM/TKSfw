@@ -1,0 +1,10 @@
+- Tstevt02:
+    TaskID: ZZZZ9999
+    AuthorAgent: main
+    Model: claude-opus-4-8
+    Timestamp: "2026-07-21 10:00:00"
+    EventType: TASK
+    Title: "Orphan event (TaskID not in plan)"
+    Remarks: |-
+      x
+    Status: COMPLETED

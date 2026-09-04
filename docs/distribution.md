@@ -1,0 +1,110 @@
+# TKSfw — building and distributing the plugins
+
+The framework has two halves that travel through two different channels, because neither plugin
+system ships instruction files or project-root configuration:
+
+| Half | Content | Channel |
+|---|---|---|
+| Method tooling | `skills/`, `hooks/` (this is exactly what Codex and Claude Code plugins carry) | **Plugin** `plugins/tksfw/` — one directory, two manifests |
+| Method instance | `AGENTS.md`, `CLAUDE.local.md`, `.agents/workarea/`, `.codex/config.toml`, `.codex/prompts/` (+ hooks/skills in *full* mode) | **Template** `template/` via `tools/new_project.py` |
+
+## 1. Build
+
+```bash
+cd TKSfw
+python3 tests/run_tests.py          # skill suite + plugin build + plugin-mode/in-project hook runs
+python3 tools/build_plugin.py       # → plugins/tksfw/ (committed) + dist/*.zip + dist/SHA256SUMS
+```
+
+`build_plugin.py` assembles `plugins/tksfw/` from `template/.agents/{hooks,skills}` and the two
+manifest sources in `plugin/`, injects `VERSION` into both manifests, rewrites every hook command
+from `python3 .agents/hooks/X.py` to `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/X.py"`, drops
+`sync_harness.py` and the skill test fixtures, and checks that every referenced hook script exists.
+
+| Output | Contents | Use |
+|---|---|---|
+| `plugins/tksfw/` | `.codex-plugin/plugin.json`, `.claude-plugin/plugin.json`, `skills/`, `hooks/` | the plugin; committed so the repo root is itself a marketplace for both harnesses |
+| `dist/tksfw-plugin-<v>.zip` | `tksfw/` (plugin only) | Claude Code `archive` source; manual unzip into a personal marketplace |
+| `dist/tksfw-marketplace-<v>.zip` | `tksfw-marketplace/` = `.claude-plugin/marketplace.json` + `.agents/plugins/marketplace.json` + `plugins/tksfw/` | static hand-off for users without git access: unzip, add as local marketplace in either harness |
+| `dist/tksfw-template-<v>.zip` | `template/` + `tools/new_project.py` | instantiating projects on machines without the repo |
+
+Why one shared `hooks/hooks.json` works for both harnesses: Claude Code exports
+`${CLAUDE_PLUGIN_ROOT}` to hook processes ([plugins reference](https://code.claude.com/docs/en/plugins-reference)),
+and Codex sets `PLUGIN_ROOT`/`PLUGIN_DATA` **and**, for compatibility, `CLAUDE_PLUGIN_ROOT`/`CLAUDE_PLUGIN_DATA`
+([Codex plugin packaging](https://developers.openai.com/plugins/build/plugins)).
+
+## 2. Release
+
+```bash
+./tools/release.sh 0.2.0      # bumps VERSION, runs tests, rebuilds plugins/tksfw + dist/, commits, tags v0.2.0
+```
+
+Bump the version on every release: Claude Code only offers an update when the `version` in
+`plugin.json` changes ("pushing new commits without changing the version has no effect"), and the
+same value is the cache key ([plugin marketplaces](https://code.claude.com/docs/en/plugin-marketplaces)).
+Keep `version` out of the marketplace entry — `plugin.json` wins silently.
+
+## 3. Install paths for end users
+
+### 3a. From a git-hosted marketplace (team default once the repo has a remote)
+
+| Harness | Command | Notes |
+|---|---|---|
+| Codex | `codex plugin marketplace add <git-url-or-owner/repo>` then `/plugins` → install **tksfw** → restart → `/hooks` trust | reads `.agents/plugins/marketplace.json`; `codex plugin marketplace upgrade` refreshes |
+| Claude Code | `claude plugin marketplace add <owner/repo or git URL>` then `claude plugin install tksfw@tksfw` | reads `.claude-plugin/marketplace.json`; `/plugin marketplace update` + `/plugin update tksfw` for new versions |
+
+### 3b. Static ZIP (no git, no hosting) — `tksfw-marketplace-<v>.zip`
+
+1. Unzip anywhere stable, e.g. `~/tksfw-marketplace/` (the folder must stay in place).
+2. Codex: `codex plugin marketplace add ~/tksfw-marketplace`, restart, `/plugins` → install, `/hooks` → trust.
+   Codex copies local plugins to `~/.codex/plugins/cache/tksfw/tksfw/local/`; after replacing the
+   folder with a newer ZIP, restart Codex so the local install picks up the new files.
+3. Claude Code: `claude plugin marketplace add ~/tksfw-marketplace`, then `claude plugin install tksfw@tksfw`
+   (interactive: `/plugin marketplace add ~/tksfw-marketplace`, `/plugin install tksfw@tksfw`, `/reload-plugins`).
+   Updates: unzip the new version over the folder, `/plugin marketplace update`, `/plugin update tksfw`.
+
+Validation before shipping (Claude Code CLI): `claude plugin validate ~/tksfw-marketplace` — and in
+Codex `codex plugin marketplace list` shows the root it resolved.
+
+### 3c. Claude Code only — HTTPS ZIP as an `archive` source
+
+Host `tksfw-plugin-<v>.zip` on any HTTPS URL (an artifact server, GitHub release, or a Box
+**static** shared link) and publish a tiny marketplace pointing at it:
+
+```json
+{ "name": "tksfw", "owner": { "name": "Carlos Veira (IBM)" },
+  "plugins": [ { "name": "tksfw",
+    "source": { "source": "archive",
+                "url": "https://…/tksfw-plugin-0.1.0.zip",
+                "sha256": "<from dist/SHA256SUMS>" } } ] }
+```
+
+Requires Claude Code ≥ 2.1.224; the ZIP may contain the plugin directly or inside one top-level
+folder (ours is `tksfw/`); limit 256 MiB. Codex has no archive source — use 3a or 3b for Codex.
+
+### 3d. Per-user manual install (no marketplace at all)
+
+| Harness | Steps |
+|---|---|
+| Codex | unzip `tksfw-plugin-<v>.zip` to `~/.codex/plugins/tksfw`, add an entry to `~/.agents/plugins/marketplace.json` with `"source": {"source": "local", "path": "./.codex/plugins/tksfw"}` — the path is relative to `~` (the marketplace root) — restart, install, trust hooks |
+| Claude Code | session-only: `claude --plugin-dir /path/to/tksfw`; persistent without a marketplace: `claude plugin init` places plugins under `~/.claude/skills/<name>/` and loads them as `<name>@skills-dir` — unzipping the plugin to `~/.claude/skills/tksfw/` follows the same convention (verify on the target Claude Code version) |
+
+### 3e. Project instantiation (always needed — the plugin does not create AGENTS.md)
+
+```bash
+python3 tools/new_project.py /path/to/project --plugin-mode   # users with the plugin installed
+python3 tools/new_project.py /path/to/project                 # self-contained project (no plugin): hooks + skills in-tree, then sync_harness.py
+python3 tools/new_project.py /path/to/project --update        # refresh unmodified framework files; locally edited files are kept and listed
+```
+
+Both modes work inside Box-synced folders: only plain files are written, no symlinks (full mode's
+`sync_harness.py --mode auto` already switches to copies under `~/Library/CloudStorage/`).
+
+## 4. Trust and update checklist
+
+| Step | Codex | Claude Code |
+|---|---|---|
+| Hooks after install/update | `/hooks` → trust (plugin hooks are non-managed and skipped until trusted) | none (project/plugin hooks load directly); `/reload-plugins` switches to the new path |
+| Skill invocation | `$yaml-log-entry` / implicit from description | `/tksfw:yaml-log-entry` / implicit from description |
+| Where runtime state lives | project `.agents/workarea/.hook-state/`, `STATE.md` | same — never `${CLAUDE_PLUGIN_ROOT}` (ephemeral on update) |
+| Record the change | `changes.yaml`, Layer METHOD | same |

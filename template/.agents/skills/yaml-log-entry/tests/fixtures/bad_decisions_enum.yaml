@@ -1,0 +1,21 @@
+- Tstdec02:
+    AuthorAgent: main
+    Model: claude-opus-4-8
+    LastUpdate: "2026-07-21 10:00:00"
+    Title: "Fixture decision (valid)"
+    Description: |-
+      A valid decision fixture.
+    Rationale: |-
+      For the tooling test suite.
+    Scope: |-
+      Tests only.
+    Impact: SUPERHIGH
+    Reversibility: EASY
+    Implications: |-
+      None.
+    Alternatives: |-
+      None.
+    Remarks: |-
+      Fixture.
+    ConfirmationType: AUTO-MODE
+    Status: ACCEPTED

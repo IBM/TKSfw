@@ -1,0 +1,5 @@
+default_permissions = "hardened"
+
+[permissions.hardened.filesystem]
+"_archive/**" = "none"
+"_backup/**" = "none"

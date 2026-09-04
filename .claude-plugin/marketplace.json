@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "tksfw",
+  "owner": { "name": "Carlos Veira (IBM)" },
+  "description": "TKS framework plugins (Claude Code catalog; Codex reads .agents/plugins/marketplace.json)",
+  "plugins": [
+    {
+      "name": "tksfw",
+      "source": "./plugins/tksfw",
+      "description": "TKS framework hooks and skills",
+      "category": "productivity"
+    }
+  ]
+}
