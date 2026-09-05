@@ -57,13 +57,13 @@
 
 ### Subagents
 
-- Before delegating any plan step, check `.codex/agents/` for a matching agent by role.
+- Before delegating any plan step, check `.agents/agents/` (harness-neutral agent definitions; the hooks render the harness-specific copies) for a matching agent by role.
 	- If an existing agent's scope partially matches, update its definition rather than reuse or duplicate.
 	- Agent definitions should never carry task history. History lives only in the ledger.
-- If none exists, create `.codex/agents/<agent-name>.toml` — **load the `define-agent` skill first** (it owns the field rules, the naming convention and the validator; the PostToolUse hook blocks a non-conforming file). Never write `model`/`model_reasoning_effort`: models are routed by **tier** from `.agents/models.toml` (`research` = search/read-only, `build` = implementation, `judge` = planning/architecture/judgement/validation); the agent's `-<role>` suffix selects the tier via `[roles]`, `sync_harness.py --models` renders the lines, and the `route_model.py` PreToolUse hook applies the tier at every spawn (unknown role → spawn refused).
+- If none exists, create `.agents/agents/<agent-name>.toml` — **load the `define-agent` skill first** (it owns the field rules, the naming convention and the validator; the PostToolUse hook blocks a non-conforming file). Never write `model`/`model_reasoning_effort`: models are routed by **tier** from `.agents/models.toml` (`research` = search/read-only, `build` = implementation, `judge` = planning/architecture/judgement/validation); the agent's `-<role>` suffix selects the tier via `[roles]`, the hooks render the model into the harness copies, and the `route_model.py` PreToolUse hook applies the tier at every spawn (unknown role → spawn refused).
 - Persist agent files in the repo so they're reused across sessions, not recreated each time.
 - Never delegate to the `judge` tier unless the task involves planning or architectural thinking, or judgment/validation.
-- Changing models = editing `.agents/models.toml` (a METHOD-layer change), never an agent file or this document; do it only while no subagent is running, then run `sync_harness.py --models`. Record the model the hook reports in the Handoff/Event `Model` field.
+- Changing models = editing `.agents/models.toml` (a METHOD-layer change), never an agent file or this document; do it only while no subagent is running, then run `sync_harness.py --models` to re-render the harness copies. Record the model the hook reports in the Handoff/Event `Model` field.
 - Try to constrain each subagent to just one task for focused execution, improved traceability, and optimized handoffs.
 - Subagents cannot spawn further subagents — all decomposition happens from the main session only.
 - Only parallelize subagents when their tasks touch independent files/directories/domains; chain sequentially otherwise.
@@ -96,10 +96,10 @@
 
 ### Tools
 
-- Use Playwright skills to interact with websites.
+- Use the Playwright MCP tools to interact with websites.
 	- Take screenshots when needed.
 	- Keep the main folder clean: Playwright temporary files, screenshots and other related artifacts MUST be stored inside the `.playwright` folder.
-- Use Perplexity skills to search and verify data over the internet.
+- Use the Perplexity MCP tools to search and verify data over the internet.
 - Consider using the skills found in the project folder.
 
 ### Skill Layering
@@ -129,10 +129,10 @@
 - Clarifications:
 	- This file is meant to provide:
 		- actual feedback on the progress of the defined objectives
-		- facilitate the activity resume process between Codex sessions.
+		- facilitate the activity resume process between sessions, whichever harness runs them.
 		- evidence for future auditing processes.
 	- **Ordering:** TaskIDs are random base62 and carry NO order. Sequence and dependency come from **document order** — top-to-bottom, with sub-tasks nested under their parent. Never infer order from the ID or from timestamps; the "next" task is the first non-`COMPLETED` item read top-down.
-	- **Source of Truth.** `tasks.md` is the SoT for task tracking, resume, and audit evidence. Codex native task tools are a subordinate, **ephemeral in-session aid only** — they live outside `.agents/workarea/` and the audit trail, so they are NEVER the record. Do not treat the native list as authoritative; keep `tasks.md` current instead.
+	- **Source of Truth.** `tasks.md` is the SoT for task tracking, resume, and audit evidence. The harness's native task tools (Codex `update_plan`, Claude Code `TaskCreate`) are a subordinate, **ephemeral in-session aid only** — they live outside `.agents/workarea/` and the audit trail, so they are NEVER the record. Do not treat the native list as authoritative; keep `tasks.md` current instead.
 - Instructions:
 	- **Evidence of closing (`[ev:<EventID>]`).** A COMPLETED **leaf** task SHOULD carry a trailing `[ev:<EventID>]` citing the `events.yaml` entry that proves it.
 		- A Leaf Task is one with no nested sub-tasks — a parent's completion is implied by its leaves.

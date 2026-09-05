@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Validate Codex custom-agent definitions (.codex/agents/<name>.toml) against the TKS method.
+"""Validate agent definitions (.agents/agents/<name>.toml, harness-neutral source) against the TKS method.
 
 Usage:
     validate_agent.py <file.toml> [...] [--models <models.toml>] [--json] [--quiet]
-    validate_agent.py --all [--dir .codex/agents]
+    validate_agent.py --all [--dir .agents/agents]
 
 Exit codes: 0 = no errors (warnings may be printed), 2 = errors, 1 = usage / file not found.
 
@@ -30,7 +30,8 @@ DESC_PREFIXES = ("Use PROACTIVELY when", "MUST BE USED for")
 KNOWN_KEYS = {"name", "description", "developer_instructions", "model", "model_reasoning_effort",
               "sandbox_mode", "mcp_servers", "skills", "model_instructions_file", "nickname_candidates"}
 SANDBOX_MODES = {"read-only", "workspace-write", "danger-full-access"}
-SANDBOX_BY_TIER = {"research": "read-only", "judge": "read-only", "build": "workspace-write"}
+SANDBOX_BY_ROLE = {"researcher": "read-only", "reviewer": "read-only", "validator": "read-only", "planner": "read-only",
+                   "builder": "workspace-write", "writer": "workspace-write", "fetcher": "workspace-write"}
 MAX_TOKENS = 3
 MIN_TOKEN_LEN = 3
 PATH_RE = re.compile(r"(^|\s|`)[\w./-]*[/.][\w./*-]+")          # something that looks like a path/glob
@@ -91,6 +92,7 @@ def validate_text(text, path, models=None, siblings=()):
 
     name = data.get("name") if isinstance(data.get("name"), str) else ""
     tier = None
+    role = None
     if name:
         stem = os.path.splitext(os.path.basename(path))[0]
         if stem != name:
@@ -136,8 +138,8 @@ def validate_text(text, path, models=None, siblings=()):
     if sm is not None:
         if sm not in SANDBOX_MODES:
             E.append(f"`sandbox_mode` must be one of {sorted(SANDBOX_MODES)}")
-        elif tier and SANDBOX_BY_TIER.get(tier) and sm != SANDBOX_BY_TIER[tier] and sm != "danger-full-access":
-            W.append(f"tier `{tier}` normally runs `{SANDBOX_BY_TIER[tier]}`, file says `{sm}`")
+        elif role and SANDBOX_BY_ROLE.get(role) and sm != SANDBOX_BY_ROLE[role] and sm != "danger-full-access":
+            W.append(f"role `{role}` normally runs `{SANDBOX_BY_ROLE[role]}`, file says `{sm}`")
 
     if "model" in data or "model_reasoning_effort" in data:
         if mode == "strip":
@@ -188,7 +190,7 @@ def main():
         models_path = args[args.index("--models") + 1]
     files = []
     if "--all" in args:
-        d = args[args.index("--dir") + 1] if "--dir" in args else os.path.join(".codex", "agents")
+        d = args[args.index("--dir") + 1] if "--dir" in args else os.path.join(".agents", "agents")
         files = sorted(os.path.join(d, f) for f in os.listdir(d) if f.endswith(".toml")) if os.path.isdir(d) else []
     skip = {"--json", "--quiet", "--all"}
     i = 0

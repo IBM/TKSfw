@@ -17,7 +17,9 @@
   8. tksfw-tools plugin: both manifests, mcp/*.json valid with the expected secret mechanism per
      harness, marketplaces list both plugins, check_tools.py silent/advisory
   9. define-agent: skill suite; track_edits.py blocks a non-conforming .codex/agents/*.toml (exit 2)
-     and accepts a conforming one; sync --models refuses to render an invalid file; AGENTS.md kernel
+     and accepts a conforming one — then renders .codex/agents + .claude/agents mirrors (also from
+     the plugin bundle); mirrors are unwatched; deleting the source prunes them; AGENTS.md kernel is
+     harness-neutral
 """
 import sys
 sys.dont_write_bytecode = True
@@ -198,7 +200,8 @@ def main():
         check("routing from plugin bundle: validator → sol/high",
               hs.get("updatedInput", {}).get("model") == "gpt-5.6-sol" and hs["updatedInput"].get("reasoning_effort") == "high", r.stdout + r.stderr)
         # sync --models
-        agents = os.path.join(full, ".codex", "agents")
+        agents = os.path.join(full, ".agents", "agents")
+        codex_mirrors = os.path.join(full, ".codex", "agents")
         with open(os.path.join(agents, "sources-researcher.toml"), "w") as fh:
             fh.write('name = "sources-researcher"\ndescription = "Use PROACTIVELY when sources are needed."\nmodel = "stale"\n'
                      'sandbox_mode = "read-only"\ndeveloper_instructions = """\nFind sources.\n"""\n')
@@ -209,11 +212,13 @@ def main():
         r = run([PY, sync, "--models", "--check"], cwd=full, env=base_env)
         check("sync --models --check reports stale", r.returncode == 1 and "stale" in r.stdout, r.stdout + r.stderr)
         r = run([PY, sync, "--models"], cwd=full, env=base_env)
-        t1 = open(os.path.join(agents, "sources-researcher.toml")).read()
-        t2 = open(os.path.join(agents, "final-writer.toml")).read()
-        check("sync --models renders Codex TOML (name role + tier comment overrides)",
+        t1 = open(os.path.join(codex_mirrors, "sources-researcher.toml")).read()
+        t2 = open(os.path.join(codex_mirrors, "final-writer.toml")).read()
+        src1 = open(os.path.join(agents, "sources-researcher.toml")).read()
+        check("sync --models renders Codex mirrors (name role + tier comment overrides), source untouched",
               r.returncode == 0 and 'model = "gpt-5.6-luna"' in t1 and 'model_reasoning_effort = "low"' in t1
-              and 'model = "gpt-5.6-sol"' in t2 and "Find sources." in t1, r.stdout + r.stderr + t1 + t2)
+              and 'model = "gpt-5.6-sol"' in t2 and "Find sources." in t1 and t1.startswith("# tksfw:mirror")
+              and 'model = "stale"' in src1, r.stdout + r.stderr + t1 + t2)
         md = os.path.join(full, ".claude", "agents", "sources-researcher.md")
         m = open(md).read() if os.path.isfile(md) else ""
         check("sync --models writes Claude mirror with model/effort/tools",
@@ -223,18 +228,21 @@ def main():
         with open(os.path.join(full, ".claude", "agents", "manual.md"), "w") as fh:
             fh.write("---\nname: manual\ndescription: x\n---\nhand made\n")
         r = run([PY, sync, "--models", "--routing", "openrouter"], cwd=full, env=base_env)
-        t1 = open(os.path.join(agents, "sources-researcher.toml")).read()
+        t1 = open(os.path.join(codex_mirrors, "sources-researcher.toml")).read()
         check("sync --models --routing switches table", 'model = "google/gemini-3-flash"' in t1 and os.path.isfile(os.path.join(full, ".claude", "agents", "manual.md")), r.stdout + t1)
         mt = os.path.join(full, ".agents", "models.toml")
         mt_text = open(mt, encoding="utf-8").read().replace('codex_agent_files = "inline"', 'codex_agent_files = "strip"')
         with open(mt, "w", encoding="utf-8") as fh:
             fh.write(mt_text)
         r = run([PY, sync, "--models"], cwd=full, env=base_env)
-        t1 = open(os.path.join(agents, "sources-researcher.toml")).read()
-        check("sync --models strip removes model lines", "model" not in t1.replace("developer_instructions", "") and "Find sources." in t1, t1)
+        t1 = open(os.path.join(codex_mirrors, "sources-researcher.toml")).read()
+        check("sync --models strip: Codex mirror has no model lines",
+              "model" not in t1.replace("developer_instructions", "").replace("# tksfw:mirror", "") and "Find sources." in t1, t1)
         os.remove(os.path.join(agents, "final-writer.toml"))
         r = run([PY, sync, "--models"], cwd=full, env=base_env)
-        check("sync --models removes orphan mirror", not os.path.exists(os.path.join(full, ".claude", "agents", "final-writer.md")) and "removed" in r.stdout, r.stdout)
+        check("sync --models removes orphan mirrors (both harnesses)",
+              not os.path.exists(os.path.join(full, ".claude", "agents", "final-writer.md"))
+              and not os.path.exists(os.path.join(codex_mirrors, "final-writer.toml")) and "removed" in r.stdout, r.stdout)
 
         # 9 — define-agent: skill suite, hook block on write, sync refuses invalid file
         r = run([PY, os.path.join(REPO, "template", ".agents", "skills", "define-agent", "tests", "run_tests.py")])
@@ -256,13 +264,48 @@ def main():
         r = run([PY, sync, "--models"], cwd=full, env=base_env)
         check("sync --models refuses to render an invalid agent file",
               r.returncode == 1 and "conflict" in r.stdout and "atlas" in r.stdout
-              and not os.path.exists(os.path.join(full, ".claude", "agents", "atlas.md")), r.stdout)
+              and not os.path.exists(os.path.join(full, ".claude", "agents", "atlas.md"))
+              and not os.path.exists(os.path.join(codex_mirrors, "atlas.toml")), r.stdout)
         os.remove(os.path.join(agents, "atlas.toml"))
         with open(os.path.join(agents, "pricing-reviewer.toml"), "w") as fh:
             fh.write('name = "pricing-reviewer"\ndescription = "MUST BE USED for reviewing pricing tables."\nsandbox_mode = "read-only"\n'
                      'developer_instructions = "Review deliverables/pricing/*.md; return findings with acceptance criteria."\n')
+        agents_md = open(os.path.join(full, "AGENTS.md"), encoding="utf-8").read()
         r = run([PY, os.path.join(hooks_dir, "track_edits.py")], cwd=full, env=base_env, inp=post)
         check("track_edits accepts a conforming agent file", r.returncode == 0, f"rc={r.returncode} {r.stderr[-400:]}")
+        cm = os.path.join(codex_mirrors, "pricing-reviewer.toml")
+        am = os.path.join(full, ".claude", "agents", "pricing-reviewer.md")
+        check("track_edits renders both mirrors after a validated write",
+              os.path.isfile(cm) and os.path.isfile(am) and open(cm).read().startswith("# tksfw:mirror")
+              and 'model = ' not in open(cm).read()          # models.toml is in strip mode at this point
+              and "model: gpt-5.6-sol" in open(am).read() and "tools: Read" in open(am).read(),
+              f"cm={os.path.isfile(cm)} am={os.path.isfile(am)} out={r.stdout[-300:]} err={r.stderr[-300:]} ls={os.listdir(codex_mirrors) if os.path.isdir(codex_mirrors) else None}")
+        probe3 = ("import sys; sys.path.insert(0, %r); import hooklib as H; "
+                  "print(H.classify('.codex/agents/pricing-reviewer.toml'), H.classify('.claude/agents/pricing-reviewer.md'), "
+                  "H.classify('.agents/agents/pricing-reviewer.toml'))") % hooks_dir
+        r = run([PY, "-c", probe3], cwd=full, env=base_env)
+        check("mirrors are not watched; the source is a framework edit", r.stdout.strip() == "None None framework", r.stdout + r.stderr)
+        os.remove(os.path.join(agents, "pricing-reviewer.toml"))
+        r = run([PY, os.path.join(hooks_dir, "track_edits.py")], cwd=full, env=base_env, inp=post)
+        check("deleting the source prunes both mirrors", r.returncode == 0 and not os.path.exists(cm) and not os.path.exists(am), r.stdout + r.stderr)
+        # plugin mode: the hook bundle renders mirrors into the plugin-mode project
+        os.makedirs(os.path.join(proj, ".agents", "agents"), exist_ok=True)
+        penv = base_env | {"CLAUDE_PLUGIN_ROOT": plug}
+        run([PY, os.path.join(plug, "hooks", "inject_state.py")], cwd=proj, env=penv,
+            inp=json.dumps({"session_id": "p9", "turn_id": "t", "source": "startup", "cwd": proj}))
+        with open(os.path.join(proj, ".agents", "agents", "data-fetcher.toml"), "w") as fh:
+            fh.write('name = "data-fetcher"\ndescription = "Use PROACTIVELY when raw data files must be fetched."\nsandbox_mode = "workspace-write"\n'
+                     'developer_instructions = "Fetch inputs into .agents/workarea/data-fetcher/; success: files listed with checksums; return a table."\n')
+        r = run([PY, os.path.join(plug, "hooks", "track_edits.py")], cwd=proj, env=penv,
+                inp=json.dumps({"session_id": "p9", "turn_id": "t", "hook_event_name": "PostToolUse", "tool_name": "Write", "tool_use_id": "u", "cwd": proj, "tool_input": {}}))
+        pcm = os.path.join(proj, ".codex", "agents", "data-fetcher.toml")
+        check("plugin mode: hook renders agent mirrors into the project",
+              r.returncode == 0 and os.path.isfile(pcm) and 'model = "gpt-5.6-luna"' in open(pcm).read()   # fetcher → research tier
+              and os.path.isfile(os.path.join(proj, ".claude", "agents", "data-fetcher.md")),
+              f"rc={r.returncode} exists={os.path.isfile(pcm)} content={open(pcm).read()[:300] if os.path.isfile(pcm) else ''} out={r.stdout[-300:]} err={r.stderr[-300:]} "
+              f"log={open(os.path.join(proj, '.agents', 'workarea', '.hook-state', 'hooks.log')).read()[-500:] if os.path.isfile(os.path.join(proj, '.agents', 'workarea', '.hook-state', 'hooks.log')) else ''}")
+        check("AGENTS.md names no harness directory",
+              ".codex/agents" not in agents_md and "Codex sessions" not in agents_md and ".agents/agents/" in agents_md)
         agents_md = open(os.path.join(full, "AGENTS.md"), encoding="utf-8").read()
         check("AGENTS.md keeps the naming kernel and points to define-agent",
               "define-agent" in agents_md and "Reserved name `main`" in agents_md and "project-agent-1" not in agents_md

@@ -16,6 +16,7 @@ TKSfw/
 │   ├── .agents/hooks/               hook scripts + hooks.json (single source; in-project layout)
 │   ├── .agents/skills/              Group-A skills incl. define-agent (single source for both harnesses)
 │   ├── .agents/models.toml          model routing: tiers → provider tables (docs/model-routing.md)
+│   ├── .agents/agents/              agent definitions (neutral source; hooks render .codex/agents + .claude/agents)
 │   ├── .agents/workarea/.keep       ledgers, tasks.md, STATE.md live here at runtime
 │   └── .codex/                      config.toml, prompts/, agents/
 ├── plugin/                          hand-maintained plugin sources

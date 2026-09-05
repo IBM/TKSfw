@@ -3,12 +3,12 @@
 Moved verbatim from `AGENTS.md` § Subagents / § Agent Naming (0.8.0). `AGENTS.md` keeps only the
 kernel: the `<family>-<role>` pattern, "role = a key of `[roles]` in `.agents/models.toml`", the
 reserved name `main`, "a rename is a logged change", and the rule to load this skill before
-creating or renaming any `.codex/agents/*.toml`. `assets/validate_agent.py` enforces everything
+creating or renaming any `.agents/agents/*.toml`. `assets/validate_agent.py` enforces everything
 marked **[E]** (error, blocks the write) and reports everything marked **[W]** (warning).
 
-## Definition file — `.codex/agents/<agent-name>.toml`
+## Definition file — `.agents/agents/<agent-name>.toml`
 
-- Before delegating any plan step, check `.codex/agents/` for a matching agent by role.
+- Before delegating any plan step, check `.agents/agents/` for a matching agent by role.
   - If an existing agent's scope partially matches, update its definition rather than reuse or duplicate.
   - Agent definitions never carry task history. History lives only in the ledger.
 - Proper TOML key-value syntax. Keys Codex documents for custom agents: `name`, `description`,
@@ -22,15 +22,16 @@ marked **[E]** (error, blocks the write) and reports everything marked **[W]** (
     file paths, and success criteria — never vague instructions like "implement the feature."
     Request structured, concise summaries back; avoid dumping raw output into main context.
   - `sandbox_mode` **[W]**:
-    - `read-only` for read-only roles (researcher, reviewer, validator, planner → tiers `research`, `judge`)
-    - `workspace-write` for writing roles (builder, writer, fetcher → tier `build`)
+    - `read-only` for read-only roles (researcher, reviewer, validator, planner)
+    - `workspace-write` for writing roles (builder, writer, fetcher — a fetcher writes what it fetches,
+      although it runs on the `research` tier)
   - `model` / `model_reasoning_effort`: NEVER hand-written. The tier is derived from the role (or a
-    `# tksfw-tier: <tier>` comment) and rendered by `sync_harness.py --models` from
-    `.agents/models.toml`. With `codex_agent_files = "strip"` a literal `model` line is an error **[E]**;
+    `# tksfw-tier: <tier>` comment) and rendered into the Codex mirror from `.agents/models.toml`. With `codex_agent_files = "strip"` a literal `model` line is an error **[E]**;
     with `"inline"` a line that does not match the current routing is a warning **[W]** (it will be rewritten).
 - Persist agent files in the repo so they are reused across sessions, not recreated each time.
-- Claude Code mirrors (`.claude/agents/<name>.md`) are generated from the TOML by
-  `sync_harness.py --models`; never edit them by hand.
+- Harness mirrors — `.codex/agents/<name>.toml` (Codex) and `.claude/agents/<name>.md` (Claude Code) —
+  are generated from the source by the hooks (`agentlib.py`); never edit them by hand. The source
+  directory `.agents/agents/` is the only harness-neutral location and the only one AGENTS.md names.
 
 ## Agent Naming
 
@@ -53,13 +54,13 @@ marked **[E]** (error, blocks the write) and reports everything marked **[W]** (
 - The `name` is a stable identifier; the `description` drives selection.
   - Names are keyed by the Handoff and Event logs (`AgentName`); treat a rename as a logged change
     (`changes.yaml`), never a casual edit, to preserve audit continuity.
-- Constraints: lowercase letters and hyphens only; unique within `.codex/agents/` **[E]**; descriptive
+- Constraints: lowercase letters and hyphens only; unique within `.agents/agents/` **[E]**; descriptive
   but not long (2 tokens target, 3 ceiling **[E]**).
 - Reserved name — `main` **[E]**: the root session (the only non-subagent, and the sole entity that
   may spawn subagents) is named `main` in all logs (`AuthorAgent`/`TargetAgent`).
   - This is a deliberate exception to "function, not identity": the main session is a structural
     singleton with no peers to disambiguate against, so an identity name is correct.
-  - `main` is a role, not an agent definition: never create `.codex/agents/main.toml`, and no
+  - `main` is a role, not an agent definition: never create `.agents/agents/main.toml`, and no
     subagent may take the name.
   - `main` names the *identity*; "Orchestrator/Manager" names a *role* that either `main` or a
     delegated coordinator agent may hold. When the main session acts as orchestrator, it still logs

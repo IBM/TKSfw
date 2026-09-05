@@ -1,7 +1,8 @@
 # TKSfw model routing — the ONLY place where model IDs live.
 #
-# Read at every subagent spawn by .agents/hooks/route_model.py (PreToolUse hook), and by
-# `python3 .agents/hooks/sync_harness.py --models` to render agent definitions. Edit this file
+# Read at every subagent spawn by .agents/hooks/route_model.py (PreToolUse hook), and by the
+# agent-mirror renderer (agentlib.py: on every validated write of .agents/agents/*.toml, and in bulk
+# via `python3 .agents/hooks/sync_harness.py --models`). Edit this file
 # between delegations (wait for running agents to finish); the next spawn uses the new mapping —
 # no restart, no hook re-trust. Editing it is a METHOD-layer change (changes.yaml).
 #
@@ -21,12 +22,12 @@ schema = 1
 # rule: an unnamed role is a naming violation, not a routing gap.
 on_unknown_role = "deny"
 
-# How `sync_harness.py --models` treats the `model` / `model_reasoning_effort` lines of
-# .codex/agents/*.toml:
-#   "inline" (default) — render them from the tier. Codex documents that a value set in the agent
-#                        file takes precedence over the spawn value, so file and hook always agree.
-#   "strip"            — remove them, so the hook's per-spawn value is the only source (use when
-#                        agent files must stay model-free, e.g. shared across providers).
+# How the Codex mirror (.codex/agents/<name>.toml, generated from .agents/agents/<name>.toml) carries
+# `model` / `model_reasoning_effort`:
+#   "inline" (default) — rendered from the tier. Codex documents that a value set in the agent file
+#                        takes precedence over the spawn value, so mirror and hook always agree.
+#   "strip"            — omitted, so the hook's per-spawn value is the only source (use when agent
+#                        files must stay model-free, e.g. shared across providers).
 codex_agent_files = "inline"
 
 [tiers]

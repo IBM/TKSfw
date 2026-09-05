@@ -40,20 +40,25 @@ parent's model), no routing table for the provider, unparsable `models.toml`.
 
 ## Agent definition files
 
-`sync_harness.py --models` reads every `.codex/agents/*.toml`, determines the tier (`# tksfw-tier:`
-comment, else the name's role) and:
+The source is harness-neutral: `.agents/agents/<name>.toml` (same TOML fields Codex documents). The
+hooks (`agentlib.py`, called by `track_edits.py` after every validated write and by
+`sync_harness.py --models` in bulk) determine the tier (`# tksfw-tier:` comment, else the name's
+role) and render two managed mirrors:
 
-| Target | Rendering |
+| Mirror | Rendering |
 |---|---|
-| `.codex/agents/<name>.toml` | `codex_agent_files = "inline"` (default): `model` and `model_reasoning_effort` lines rewritten from the tier — Codex documents that a value set in the agent file takes precedence over the spawn value, so file and hook always agree. `"strip"`: lines removed, the hook is the only source |
-| `.claude/agents/<name>.md` | managed mirror: `name`, `description`, `model`, `effort` (Codex → Claude vocabulary), `tools` restricted for `sandbox_mode = "read-only"`, body = `developer_instructions`. Marker comment identifies mirrors; hand-made files are never touched; orphans are removed. Claude Code hot-reloads this directory |
+| `.codex/agents/<name>.toml` | source text + marker line; `codex_agent_files = "inline"` (default): `model` and `model_reasoning_effort` from the tier — Codex documents that a value set in the agent file takes precedence over the spawn value, so mirror and hook always agree. `"strip"`: no model lines, the hook is the only source |
+| `.claude/agents/<name>.md` | `name`, `description`, `model`, `effort` (Codex → Claude vocabulary), `tools` restricted for `sandbox_mode = "read-only"`, body = `developer_instructions`. Claude Code hot-reloads this directory |
+
+Mirrors are never watched by the edit-hash hook (only the source is a framework edit); a hand-made
+file at a mirror path is reported as a conflict and never touched; deleting a source prunes its mirrors.
 
 ## Changing models mid-session
 
 1. Wait for running subagents to finish.
 2. Edit `.agents/models.toml` (the hash hook journals this as a METHOD edit → `changes.yaml`).
-3. `python3 .agents/hooks/sync_harness.py --models` (in-project layout) — plugin-mode projects have
-   no agent-file rendering; the hook alone routes.
+3. `python3 .agents/hooks/sync_harness.py --models` to re-render every agent mirror with the new
+   models (in plugin-mode projects, re-save each `.agents/agents/*.toml` instead — the hook renders).
 4. Next spawn uses the new mapping. No restart; the hook **script** is unchanged, so Codex needs no
    `/hooks` re-trust.
 

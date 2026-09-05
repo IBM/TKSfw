@@ -21,6 +21,8 @@ Layout (all relative to the project root):
                                  excluded from hashing and from every ledger rule)
   .agents/skills/yaml-log-entry/assets/  shared pyyaml-optional ledger parser (load_entries)
                                  — or <plugin>/skills/yaml-log-entry/assets/ in plugin mode
+  .agents/agents/<name>.toml     agent definitions (source); .codex/agents/ and .claude/agents/ are
+                                 generated mirrors (agentlib.py) and never watched
 
 Project-root resolution (`resolve_project_root()`), first match wins:
   1. $TKSFW_PROJECT_ROOT                explicit override (tests, unusual layouts)
@@ -100,7 +102,9 @@ REGISTRY = os.path.join(WORKAREA, "deliverables.yaml")
 MODELS_TOML = os.path.join(PROJECT_ROOT, ".agents", "models.toml")   # model routing table (route_model.py)
 AGENT_VALIDATOR = os.path.join(os.path.dirname(VALIDATOR_DIR), "..", "define-agent", "assets", "validate_agent.py")
 AGENT_VALIDATOR = os.path.normpath(AGENT_VALIDATOR)                  # sibling skill: plugin or in-project layout
-AGENT_FILE_RE = re.compile(r"^\.codex/agents/[^/]+\.toml$")
+AGENTS_SRC = os.path.join(PROJECT_ROOT, ".agents", "agents")           # neutral agent definitions
+AGENT_FILE_RE = re.compile(r"^\.agents/agents/[^/]+\.toml$")
+MIRROR_PREFIXES = (".claude/skills/", ".codex/agents/", ".claude/agents/")   # generated, never watched
 STATE_MD = os.path.join(WORKAREA, "STATE.md")
 
 LEDGER_FILES = ("changes.yaml", "lessons.yaml", "handoffs.yaml", "events.yaml",
@@ -293,8 +297,8 @@ def classify(rel, globs=None):
         if base in PLAN_FILES:
             return "plan"
         return None                           # STATE.md, scratch
-    if rel.startswith(".claude/skills/"):
-        return None                           # mirror of .agents/skills, not a source
+    if rel.startswith(MIRROR_PREFIXES):
+        return None                           # generated mirrors (skills, agent definitions), not sources
     top = rel.split("/", 1)[0]
     if top in FRAMEWORK_DIRS:
         return "framework"
@@ -337,8 +341,8 @@ def watched_files():
     for d in FRAMEWORK_DIRS:
         if os.path.isdir(os.path.join(PROJECT_ROOT, d)):
             for rel in _walk(d):
-                if rel.startswith(WORKAREA_REL + "/") or rel.startswith(".claude/skills/"):
-                    continue                          # mirrors of .agents/skills (sync_harness)
+                if rel.startswith(WORKAREA_REL + "/") or rel.startswith(MIRROR_PREFIXES):
+                    continue                          # generated mirrors (sync_harness / agentlib)
                 if not _ignored(rel):
                     files.add(rel)
     for f in ROOT_INSTRUCTION_FILES:

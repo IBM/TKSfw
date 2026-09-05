@@ -2,6 +2,24 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [0.9.0] — 2026-09-05
+
+AGENTS.md is harness-neutral; agent definitions get a neutral source and generated mirrors.
+
+### Added
+- `agentlib.py`: `.agents/agents/<name>.toml` → `.codex/agents/<name>.toml` (marker + routed model lines) and `.claude/agents/<name>.md`; managed mirrors (refresh, prune orphans, conflict on hand-made files); used by `track_edits.py` (render after a validated write, prune on delete, advisory `systemMessage` on failure) and by `sync_harness.py --models` (bulk).
+- Template directory `.agents/agents/` (replaces `.codex/agents/.keep`).
+- ADR 0004.
+
+### Changed
+- `AGENTS.md`: `.agents/agents/` replaces `.codex/agents/`; "between sessions, whichever harness"; "harness-native task tools (Codex `update_plan`, Claude Code `TaskCreate`)"; "Playwright/Perplexity MCP tools".
+- `hooklib.py`: `AGENTS_SRC`, `AGENT_FILE_RE` → `.agents/agents/`, `MIRROR_PREFIXES` (`.claude/skills/`, `.codex/agents/`, `.claude/agents/`) never watched.
+- `define-agent` skill and validator: source path `.agents/agents/`; mirrors are hook-rendered.
+- `sync_harness.py --models` delegates to `agentlib`.
+
+### Migration
+- `git mv .codex/agents/*.toml .agents/agents/` in existing projects, then `python3 .agents/hooks/sync_harness.py --models`.
+
 ## [0.8.0] — 2026-09-05
 
 Agent definitions become a skill-owned, validated procedure.

@@ -71,6 +71,31 @@ def validate_agents(rel_paths):
     return "\n".join(reports)
 
 
+def render_mirrors(rel_paths):
+    """Render the Codex/Claude mirrors of validated agent sources. Advisory: returns a message when
+    something could not be rendered ('' otherwise) — the write already happened, never block."""
+    try:
+        import agentlib
+        res = agentlib.sync(check=False, only=[os.path.join(H.PROJECT_ROOT, r) for r in rel_paths])
+    except Exception as e:
+        H.log(f"track_edits: agent mirror rendering: {type(e).__name__}: {e}")
+        return ""
+    bad = [r for r in res if r[0] == "conflict"]
+    if bad:
+        return ("Agent mirrors not rendered — fix and re-save the source (or run sync_harness.py --models): "
+                + "; ".join(f"{r[1]}: {r[2] if len(r) > 2 else ''}" for r in bad))
+    return ""
+
+
+def prune_mirrors(rel_paths):
+    try:
+        import agentlib
+        for r in rel_paths:
+            agentlib.remove_mirrors(os.path.splitext(os.path.basename(r))[0], False, [])
+    except Exception as e:
+        H.log(f"track_edits: agent mirror pruning: {type(e).__name__}: {e}")
+
+
 def main():
     phase = "tool"
     if "--phase" in sys.argv:
@@ -95,6 +120,10 @@ def main():
                if (c.get("class") or "").startswith("ledger:") and c["kind"] != "deleted"]
     agents = [c["path"] for c in changed
               if H.AGENT_FILE_RE.match(c["path"]) and c["kind"] != "deleted"]
+    deleted_agents = [c["path"] for c in changed
+                      if H.AGENT_FILE_RE.match(c["path"]) and c["kind"] == "deleted"]
+    if deleted_agents:
+        prune_mirrors(deleted_agents)
     if not ledgers and not agents:
         sys.exit(0)
     messages = []
@@ -109,8 +138,11 @@ def main():
         messages.append(
             "Agent definition validation FAILED — fix the file before continuing — load the "
             f"define-agent skill (convention: {os.path.join(os.path.dirname(H.AGENT_VALIDATOR), '..', 'references', 'naming.md')}); "
-            "then run sync_harness.py --models and log the change in changes.yaml:\n" + areport)
+            "the harness mirrors are rendered automatically once the file is valid; log the change in changes.yaml:\n" + areport)
     if not messages:
+        advisory = render_mirrors(agents) if agents else ""
+        if advisory:
+            H.emit({"systemMessage": advisory})
         sys.exit(0)
     sys.stderr.write("\n".join(messages) + "\n")
     sys.exit(2)
