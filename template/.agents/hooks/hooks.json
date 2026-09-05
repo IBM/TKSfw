@@ -24,6 +24,18 @@
         ]
       }
     ],
+    "PreToolUse": [
+      {
+        "matcher": "^(Agent|Task)$|spawn_agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .agents/hooks/route_model.py",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "hooks": [

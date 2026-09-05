@@ -1,0 +1,70 @@
+# TKSfw model routing — the ONLY place where model IDs live.
+#
+# Read at every subagent spawn by .agents/hooks/route_model.py (PreToolUse hook), and by
+# `python3 .agents/hooks/sync_harness.py --models` to render agent definitions. Edit this file
+# between delegations (wait for running agents to finish); the next spawn uses the new mapping —
+# no restart, no hook re-trust. Editing it is a METHOD-layer change (changes.yaml).
+#
+# Vocabulary:  tier    = abstract capability class used by AGENTS.md (never a model ID)
+#              role    = the -<role> suffix of an agent name (AGENTS.md § Agent Naming)
+#              routing = one table per provider, keyed by the id the harness is connected to
+#
+# Every tier entry carries `model` and `reasoning_effort`. Omit reasoning_effort only as a
+# deliberate "provider default" decision (Codex then uses the model's default effort; Claude Code
+# inherits the session effort) — and say so in a comment.
+#   Codex efforts:        minimal | low | medium | high | xhigh   (xhigh not on every model)
+#   Claude Code efforts:  low | medium | high | xhigh | max       (rendered into agent frontmatter)
+schema = 1
+
+# What to do when an agent name has no role mapping: "deny" (spawn blocked with a reason) or
+# "inherit" (spawn allowed unchanged; the child inherits the parent's model). Deny is the method
+# rule: an unnamed role is a naming violation, not a routing gap.
+on_unknown_role = "deny"
+
+# How `sync_harness.py --models` treats the `model` / `model_reasoning_effort` lines of
+# .codex/agents/*.toml:
+#   "inline" (default) — render them from the tier. Codex documents that a value set in the agent
+#                        file takes precedence over the spawn value, so file and hook always agree.
+#   "strip"            — remove them, so the hook's per-spawn value is the only source (use when
+#                        agent files must stay model-free, e.g. shared across providers).
+codex_agent_files = "inline"
+
+[tiers]
+research = "search / read-only work"
+build    = "implementation and writing"
+judge    = "planning, architecture, judgement, validation and review"
+
+[roles]                          # role → tier. Full agent names may also appear here.
+researcher = "research"
+fetcher    = "research"
+builder    = "build"
+writer     = "build"
+planner    = "judge"
+reviewer   = "judge"
+validator  = "judge"
+# Built-in agent types of the harnesses (Codex / Claude Code), so they are routed too:
+explorer        = "research"
+worker          = "build"
+default         = "build"
+general-purpose = "build"
+Explore         = "research"
+Plan            = "judge"
+
+# ---------------------------------------------------------------------------------------------
+# Routing tables. Selection order at spawn time (first match wins):
+#   1. $TKSFW_ROUTING=<key>                                    operator override
+#   2. Codex: `model_provider` in $CODEX_HOME/config.toml     (default $CODEX_HOME = ~/.codex)
+#   3. Claude Code: $ANTHROPIC_BASE_URL starts with `match.claude_base_url`
+#   4. [routing.default] when present — otherwise the spawn is DENIED with a clear reason
+# ---------------------------------------------------------------------------------------------
+
+[routing.ibm]                    # Codex model_provider = "ibm" — 3rd-party endpoint
+research = { model = "gpt-5.6-luna",  reasoning_effort = "low" }
+build    = { model = "gpt-5.6-terra", reasoning_effort = "medium" }
+judge    = { model = "gpt-5.6-sol",   reasoning_effort = "high" }
+
+[routing.openrouter]             # example: one endpoint fronting several vendors
+match    = { claude_base_url = "https://openrouter.ai/api" }
+research = { model = "google/gemini-3-flash",   reasoning_effort = "low" }
+build    = { model = "openai/gpt-5.6-terra",    reasoning_effort = "medium" }
+judge    = { model = "anthropic/claude-opus-5", reasoning_effort = "high" }

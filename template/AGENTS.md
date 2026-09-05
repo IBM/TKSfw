@@ -70,9 +70,10 @@
 		- `sandbox_mode`:
 			- read-only: for "read-only" agent roles (example: researcher, reviewer, validator, etc.)
 			- workspace-write: for writing agent roles (example:  builder, writer, fetcher, etc.)
-		- `model`: gpt-5.6-luna=search/read-only, gpt-5.6-terra=implementation, gpt-5.6-sol=planning/architecture/judgement only.
+		- `model`: NEVER write a model ID. Models are routed by **tier** from `.agents/models.toml` (`research` = search/read-only, `build` = implementation, `judge` = planning/architecture/judgement/validation). The agent's `-<role>` suffix selects the tier via `[roles]`; a `# tksfw-tier: <tier>` comment in the TOML overrides it. `sync_harness.py --models` renders the `model`/`model_reasoning_effort` lines, and the `route_model.py` PreToolUse hook applies the tier at every spawn (an agent whose role is unknown is refused).
 - Persist agent files in the repo so they're reused across sessions, not recreated each time.
-- Never delegate a task via gpt-5.6-sol subagent unless it involves planning or architectural thinking, or judgment/validation.
+- Never delegate to the `judge` tier unless the task involves planning or architectural thinking, or judgment/validation.
+- Changing models = editing `.agents/models.toml` (a METHOD-layer change), never an agent file or this document; do it only while no subagent is running, then run `sync_harness.py --models`. Record the model the hook reports in the Handoff/Event `Model` field.
 - Try to constrain each subagent to just one task for focused execution, improved traceability, and optimized handoffs.
 - Subagents cannot spawn further subagents — all decomposition happens from the main session only.
 - Only parallelize subagents when their tasks touch independent files/directories/domains; chain sequentially otherwise.

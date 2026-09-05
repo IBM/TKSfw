@@ -26,6 +26,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hooklib as H  # noqa: E402
 import refresh_state  # noqa: E402
+import route_model  # noqa: E402
 
 MAX_CHARS = 9000        # < Claude 10,000-char cap and ≈ Codex 2,500-token default cap
 
@@ -45,6 +46,26 @@ def cap(text, limit=MAX_CHARS):
         return text
     marker = "\n… [STATE.md truncated to fit the hook context limit; read the file for the rest]\n"
     return text[: limit - len(marker)] + marker
+
+
+def routing_summary(payload):
+    """One line: which routing table applies to this session (or that spawns will be denied)."""
+    try:
+        table = route_model.load_table()
+        if table is None:
+            return ""
+        harness = H.harness(payload)
+        if harness == "unknown":
+            harness = "codex" if route_model.codex_model_provider() else "claude"
+        key, tab, how = route_model.select_routing(table, harness)
+        if tab is None:
+            return ("Model routing: NO [routing.*] table matches this provider — subagent spawns will be "
+                    "denied until .agents/models.toml has one (or TKSFW_ROUTING is set).\n")
+        tiers = ", ".join(f"{t}={ (tab.get(t) or {}).get('model', '?') }" for t in (table.get("tiers") or {}))
+        return f"Model routing [routing.{key}] via {how}: {tiers}.\n"
+    except Exception as e:
+        H.log(f"inject_state: routing summary: {type(e).__name__}: {e}")
+        return ""
 
 
 def main():
@@ -67,7 +88,8 @@ def main():
         sys.exit(0)                                  # nothing to inject (fresh project)
 
     head = PREAMBLE.get(source, PREAMBLE["startup"])
-    body = (f"{head}\nAuthoritative files: {H.WORKAREA_REL}/tasks.md and "
+    routing = routing_summary(payload)
+    body = (f"{head}\n{routing}Authoritative files: {H.WORKAREA_REL}/tasks.md and "
             f"{H.WORKAREA_REL}/*.yaml (STATE.md is a generated view). Before writing any of those "
             "YAML files, load the yaml-log-entry skill (schemas + ID minting).\n\n" + content)
     H.emit(H.additional_context("SessionStart", cap(body)))

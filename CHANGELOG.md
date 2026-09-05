@@ -2,7 +2,22 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
-## [0.1.0] — 2026-09-04
+## [0.6.0] — 2026-09-05
+
+Model selection becomes configuration: tiers in the method, provider tables in `.agents/models.toml`.
+
+### Added
+- `template/.agents/models.toml`: `[tiers]`, `[roles]`, `[routing.<provider>]` (ibm + openrouter example), `on_unknown_role`, `codex_agent_files`.
+- `route_model.py` PreToolUse hook (`^(Agent|Task)$|spawn_agent`): per-spawn routing via `updatedInput` (`model`, Codex `reasoning_effort`), `additionalContext` with the routed model, deny on unknown role / missing table, `routing.jsonl` journal, `--print` / `--check` / `--resolve`.
+- `sync_harness.py --models` (+ `--routing <key>`): renders `model`/`model_reasoning_effort` into `.codex/agents/*.toml` (`inline` or `strip`) and managed `.claude/agents/<name>.md` mirrors (model, effort, read-only tools).
+- `inject_state.py`: one-line routing summary at SessionStart.
+- `docs/model-routing.md`, ADR 0002; hooks README rows; tests for routing, rendering and mirrors.
+
+### Changed
+- `AGENTS.md` § Subagents: model rule rewritten in tier vocabulary; "judge tier" replaces the model name; models change only via `models.toml`.
+- `hooklib.py`: `MODELS_TOML` constant.
+
+## [0.5.0] — 2026-09-04
 
 Initial import from the `start-codex` project (Box) into a versioned repository.
 

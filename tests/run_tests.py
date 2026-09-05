@@ -10,6 +10,10 @@
   4. Same scripts in IN-PROJECT mode (legacy layout) from a different cwd — still resolve the root
   5. new_project.py: full + plugin-mode instantiation into temp dirs, --update keeps a local edit
   6. plugins/tksfw/ committed copy is up to date with the template (build --check)
+  7. Model routing: models.toml validates; route_model.py resolves Codex/Claude spawns (table
+     selection by CODEX_HOME model_provider, ANTHROPIC_BASE_URL, TKSFW_ROUTING), denies unknown
+     roles and missing tables, ignores non-spawn tools, works from the plugin bundle;
+     sync_harness.py --models renders Codex agent TOML (inline/strip) and Claude mirrors
 """
 import sys
 sys.dont_write_bytecode = True
@@ -132,6 +136,100 @@ def main():
               r.returncode == 0 and "kept (edited locally)" in r.stdout and "local L3 rule" in open(agents_md, encoding="utf-8").read(), r.stdout + r.stderr)
         r = run([PY, os.path.join(work, "tools", "new_project.py"), full, "--no-sync"])
         check("new_project.py refuses re-install without --update", r.returncode != 0)
+
+        # 7 — model routing
+        def hook(tool_name, tool_input, env=None, cwd=full, script=None, extra=None):
+            payload = {"session_id": "s", "cwd": cwd, "hook_event_name": "PreToolUse",
+                       "tool_name": tool_name, "tool_use_id": "u", "tool_input": tool_input}
+            payload.update(extra or {})
+            r = run([PY, script or os.path.join(full, ".agents", "hooks", "route_model.py")],
+                    cwd=cwd, env=env, inp=json.dumps(payload))
+            try:
+                return r, (json.loads(r.stdout) if r.stdout.strip() else {})
+            except Exception:
+                return r, {"_raw": r.stdout}
+        codex_home = os.path.join(tmp, "codexhome")
+        os.makedirs(codex_home)
+        with open(os.path.join(codex_home, "config.toml"), "w") as fh:
+            fh.write('model = "gpt-5.6-sol"\nmodel_provider = "ibm"\n\n[model_providers.ibm]\nbase_url = "https://x"\n')
+        base_env = {"CODEX_HOME": codex_home, "ANTHROPIC_BASE_URL": "", "TKSFW_ROUTING": ""}
+        base_env = {k: v for k, v in base_env.items() if v} | {"CODEX_HOME": codex_home}
+        rm = os.path.join(full, ".agents", "hooks", "route_model.py")
+        r = run([PY, rm, "--check"], cwd=full, env=base_env)
+        check("routing: models.toml --check", r.returncode == 0 and "ok" in r.stdout, r.stdout + r.stderr)
+        r = run([PY, rm, "--print", "--codex"], cwd=full, env=base_env)
+        check("routing: --print selects [routing.ibm] from CODEX_HOME", r.returncode == 0 and "routing='ibm'" in r.stdout, r.stdout)
+        r, out = hook("spawn_agent", {"task_name": "sources-researcher_scan", "message": "m", "fork_turns": "none"},
+                      env=base_env, extra={"turn_id": "t1"})
+        hs = out.get("hookSpecificOutput", {})
+        check("routing codex: researcher → luna/low via updatedInput",
+              hs.get("permissionDecision") == "allow" and hs.get("updatedInput", {}).get("model") == "gpt-5.6-luna"
+              and hs["updatedInput"].get("reasoning_effort") == "low" and hs["updatedInput"].get("task_name") == "sources-researcher_scan"
+              and "gpt-5.6-luna" in hs.get("additionalContext", ""), r.stdout + r.stderr)
+        r, out = hook("Agent", {"subagent_type": "report-builder", "prompt": "p", "description": "d"},
+                      env=base_env | {"ANTHROPIC_BASE_URL": "https://openrouter.ai/api/v1"}, extra={"prompt_id": "p1"})
+        hs = out.get("hookSpecificOutput", {})
+        check("routing claude: builder → openrouter table by ANTHROPIC_BASE_URL, model only",
+              hs.get("permissionDecision") == "allow" and hs.get("updatedInput", {}).get("model") == "openai/gpt-5.6-terra"
+              and "reasoning_effort" not in hs.get("updatedInput", {}), r.stdout + r.stderr)
+        r, out = hook("Agent", {"subagent_type": "x-planner", "prompt": "p"}, env=base_env, extra={"prompt_id": "p2"})
+        hs = out.get("hookSpecificOutput", {})
+        check("routing: TKSFW_ROUTING override", hook("Agent", {"subagent_type": "x-planner", "prompt": "p"},
+              env=base_env | {"TKSFW_ROUTING": "openrouter"}, extra={"prompt_id": "p3"})[1]
+              .get("hookSpecificOutput", {}).get("updatedInput", {}).get("model") == "anthropic/claude-opus-5")
+        check("routing claude without base URL: falls back to codex provider? no — denied (no default table)",
+              hs.get("permissionDecision") == "deny" and "no [routing.*] table" in hs.get("permissionDecisionReason", ""), r.stdout)
+        r, out = hook("spawn_agent", {"agent_type": "atlas"}, env=base_env, extra={"turn_id": "t2"})
+        hs = out.get("hookSpecificOutput", {})
+        check("routing: unknown role denied", hs.get("permissionDecision") == "deny" and "atlas" in hs.get("permissionDecisionReason", ""), r.stdout)
+        r, out = hook("Bash", {"command": "ls"}, env=base_env, extra={"turn_id": "t3"})
+        check("routing: non-spawn tool untouched", r.returncode == 0 and out == {}, r.stdout + r.stderr)
+        jl = os.path.join(full, ".agents", "workarea", ".hook-state", "routing.jsonl")
+        check("routing: decisions journaled", os.path.isfile(jl) and sum(1 for _ in open(jl)) >= 4)
+        # plugin bundle: hook runs from the plugin dir against the plugin-mode project (has models.toml)
+        check("plugin-mode project carries models.toml", os.path.isfile(os.path.join(proj, ".agents", "models.toml")))
+        r, out = hook("spawn_agent", {"agent_type": "output-validator"}, env=base_env | {"CLAUDE_PLUGIN_ROOT": plug},
+                      cwd=proj, script=os.path.join(plug, "hooks", "route_model.py"), extra={"turn_id": "t4"})
+        hs = out.get("hookSpecificOutput", {})
+        check("routing from plugin bundle: validator → sol/high",
+              hs.get("updatedInput", {}).get("model") == "gpt-5.6-sol" and hs["updatedInput"].get("reasoning_effort") == "high", r.stdout + r.stderr)
+        # sync --models
+        agents = os.path.join(full, ".codex", "agents")
+        with open(os.path.join(agents, "sources-researcher.toml"), "w") as fh:
+            fh.write('name = "sources-researcher"\ndescription = "Use PROACTIVELY when sources are needed."\nmodel = "stale"\n'
+                     'sandbox_mode = "read-only"\ndeveloper_instructions = """\nFind sources.\n"""\n')
+        with open(os.path.join(agents, "final-assembler.toml"), "w") as fh:
+            fh.write('# tksfw-tier: build\nname = "final-assembler"\ndescription = "MUST BE USED to assemble."\ndeveloper_instructions = "assemble"\n')
+        sync = os.path.join(full, ".agents", "hooks", "sync_harness.py")
+        r = run([PY, sync, "--models", "--check"], cwd=full, env=base_env)
+        check("sync --models --check reports stale", r.returncode == 1 and "stale" in r.stdout, r.stdout + r.stderr)
+        r = run([PY, sync, "--models"], cwd=full, env=base_env)
+        t1 = open(os.path.join(agents, "sources-researcher.toml")).read()
+        t2 = open(os.path.join(agents, "final-assembler.toml")).read()
+        check("sync --models renders Codex TOML (name role + tier comment)",
+              r.returncode == 0 and 'model = "gpt-5.6-luna"' in t1 and 'model_reasoning_effort = "low"' in t1
+              and 'model = "gpt-5.6-terra"' in t2 and "Find sources." in t1, r.stdout + r.stderr + t1)
+        md = os.path.join(full, ".claude", "agents", "sources-researcher.md")
+        m = open(md).read() if os.path.isfile(md) else ""
+        check("sync --models writes Claude mirror with model/effort/tools",
+              "model: gpt-5.6-luna" in m and "effort: low" in m and "tools: Read" in m and "tksfw:mirror" in m and "Find sources." in m, m)
+        r = run([PY, sync, "--models", "--check"], cwd=full, env=base_env)
+        check("sync --models idempotent", r.returncode == 0 and r.stdout.strip().endswith("ok"), r.stdout)
+        with open(os.path.join(full, ".claude", "agents", "manual.md"), "w") as fh:
+            fh.write("---\nname: manual\ndescription: x\n---\nhand made\n")
+        r = run([PY, sync, "--models", "--routing", "openrouter"], cwd=full, env=base_env)
+        t1 = open(os.path.join(agents, "sources-researcher.toml")).read()
+        check("sync --models --routing switches table", 'model = "google/gemini-3-flash"' in t1 and os.path.isfile(os.path.join(full, ".claude", "agents", "manual.md")), r.stdout + t1)
+        mt = os.path.join(full, ".agents", "models.toml")
+        mt_text = open(mt, encoding="utf-8").read().replace('codex_agent_files = "inline"', 'codex_agent_files = "strip"')
+        with open(mt, "w", encoding="utf-8") as fh:
+            fh.write(mt_text)
+        r = run([PY, sync, "--models"], cwd=full, env=base_env)
+        t1 = open(os.path.join(agents, "sources-researcher.toml")).read()
+        check("sync --models strip removes model lines", "model" not in t1.replace("developer_instructions", "") and "Find sources." in t1, t1)
+        os.remove(os.path.join(agents, "final-assembler.toml"))
+        r = run([PY, sync, "--models"], cwd=full, env=base_env)
+        check("sync --models removes orphan mirror", not os.path.exists(os.path.join(full, ".claude", "agents", "final-assembler.md")) and "removed" in r.stdout, r.stdout)
 
     # 6 — committed plugin copy is current
     r = run([PY, os.path.join(REPO, "tools", "build_plugin.py"), "--check"])

@@ -7,9 +7,10 @@ own location, so `cwd` never matters.
 | File | Event | Purpose |
 |---|---|---|
 | `hooks.json` | — | Single source of the hook config. Edit here, then `python3 .agents/hooks/sync_harness.py`. |
-| `sync_harness.py` | — | Mirrors `hooks.json` → `.codex/hooks.json` (verbatim) and → `hooks` key of `.claude/settings.json`; mirrors every `.agents/skills/<name>` into `.claude/skills/<name>` — per-skill relative symlink, or a managed copy with a `.mirror.json` marker where symlinks do not sync (Box Drive; `--mode auto` detects `~/Library/CloudStorage/`). Orphan mirrors are removed; hand-made directories are never touched. `--check` reports drift; `--hooks` / `--skills` restrict scope. |
+| `sync_harness.py` | — | `--models`: renders `model`/`model_reasoning_effort` into `.codex/agents/*.toml` from each agent's tier and writes managed `.claude/agents/<name>.md` mirrors (hot-reloaded by Claude Code). Mirrors `hooks.json` → `.codex/hooks.json` (verbatim) and → `hooks` key of `.claude/settings.json`; mirrors every `.agents/skills/<name>` into `.claude/skills/<name>` — per-skill relative symlink, or a managed copy with a `.mirror.json` marker where symlinks do not sync (Box Drive; `--mode auto` detects `~/Library/CloudStorage/`). Orphan mirrors are removed; hand-made directories are never touched. `--check` reports drift; `--hooks` / `--skills` restrict scope. |
 | `hooklib.py` | — | Shared helpers: payload normalization (`turn_id`/`prompt_id`), hashing, journal, lock, ledger parsing via `yaml-log-entry`. |
 | `inject_state.py` | `SessionStart` (`startup\|resume\|clear\|compact\|fork`) | Re-baselines the hash state, regenerates `STATE.md`, injects it as `additionalContext` (capped at 9,000 chars). |
+| `route_model.py` | `PreToolUse` (`^(Agent|Task)$\|spawn_agent`) | Reads `.agents/models.toml` at every spawn, resolves the agent's role → tier → model for the provider this session is connected to, and rewrites the spawn arguments (`updatedInput`: `model`, plus `reasoning_effort` on Codex). Unknown role or no routing table for the provider → the spawn is denied with the reason. `--print` shows the resolved table, `--check` validates the file. Decisions are journaled in `.hook-state/routing.jsonl`. |
 | `track_edits.py` | `PostToolUse` (all tools) | Hashes the watched set, journals the delta per tool call, validates changed ledgers against `.agents/skills/yaml-log-entry/references/schemas.md` (exit 2 = blocked with report). |
 | `track_edits.py --phase prompt` | `UserPromptSubmit` | Journals edits made between turns as external, so the agent is not blamed for them. |
 | `check_ledgers_on_stop.py` | `Stop` | Reads the journal for the turn; advisory `systemMessage` for un-logged deliverable/framework edits or delegations. `LEDGER_STOP_MODE=block` turns it into a continuation prompt. |
@@ -29,7 +30,19 @@ Never watched: `STATE.md`, `.agents/workarea/.hook-state/**`, `.claude/skills/**
 
 Runtime state lives in `.agents/workarea/.hook-state/`: `hashes.json` (last baseline),
 `journal.jsonl` (one line per tool call that changed something, plus `stop` markers),
+`routing.jsonl` (one line per subagent spawn: agent, tier, model, routing table),
 `hooks.log` (internal errors; hooks are fail-open and never wedge a turn).
+
+## Model routing (`.agents/models.toml`)
+
+Tiers (`research`, `build`, `judge`) are the only model vocabulary in AGENTS.md; one
+`[routing.<provider>]` table per provider maps tiers to model IDs + reasoning effort. Table
+selection at spawn time: `$TKSFW_ROUTING` → Codex `model_provider` (`$CODEX_HOME/config.toml`) →
+Claude `$ANTHROPIC_BASE_URL` prefix (`match.claude_base_url`) → `[routing.default]` → deny.
+Changing models mid-session: wait for running agents, edit `models.toml`, run
+`sync_harness.py --models`; the next spawn uses the new mapping (the hook script is unchanged,
+so Codex needs no `/hooks` re-trust). All models in a table must be served by the single provider
+the session is connected to — neither harness lets a subagent use a different provider.
 
 ## Operations
 

@@ -96,6 +96,7 @@ VALIDATOR = os.path.join(VALIDATOR_DIR, "validate_yaml_log.py")
 SCHEMAS_MD = os.path.normpath(os.path.join(VALIDATOR_DIR, "..", "references", "schemas.md"))
 PLUGIN_MODE = os.path.basename(os.path.dirname(HERE)) != ".agents"    # scripts run from a plugin
 REGISTRY = os.path.join(WORKAREA, "deliverables.yaml")
+MODELS_TOML = os.path.join(PROJECT_ROOT, ".agents", "models.toml")   # model routing table (route_model.py)
 STATE_MD = os.path.join(WORKAREA, "STATE.md")
 
 LEDGER_FILES = ("changes.yaml", "lessons.yaml", "handoffs.yaml", "events.yaml",
