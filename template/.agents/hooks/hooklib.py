@@ -40,6 +40,7 @@ import glob
 import time
 import hashlib
 import fnmatch
+import re
 from contextlib import contextmanager
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -97,6 +98,9 @@ SCHEMAS_MD = os.path.normpath(os.path.join(VALIDATOR_DIR, "..", "references", "s
 PLUGIN_MODE = os.path.basename(os.path.dirname(HERE)) != ".agents"    # scripts run from a plugin
 REGISTRY = os.path.join(WORKAREA, "deliverables.yaml")
 MODELS_TOML = os.path.join(PROJECT_ROOT, ".agents", "models.toml")   # model routing table (route_model.py)
+AGENT_VALIDATOR = os.path.join(os.path.dirname(VALIDATOR_DIR), "..", "define-agent", "assets", "validate_agent.py")
+AGENT_VALIDATOR = os.path.normpath(AGENT_VALIDATOR)                  # sibling skill: plugin or in-project layout
+AGENT_FILE_RE = re.compile(r"^\.codex/agents/[^/]+\.toml$")
 STATE_MD = os.path.join(WORKAREA, "STATE.md")
 
 LEDGER_FILES = ("changes.yaml", "lessons.yaml", "handoffs.yaml", "events.yaml",

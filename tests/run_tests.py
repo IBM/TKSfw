@@ -16,6 +16,8 @@
      sync_harness.py --models renders Codex agent TOML (inline/strip) and Claude mirrors
   8. tksfw-tools plugin: both manifests, mcp/*.json valid with the expected secret mechanism per
      harness, marketplaces list both plugins, check_tools.py silent/advisory
+  9. define-agent: skill suite; track_edits.py blocks a non-conforming .codex/agents/*.toml (exit 2)
+     and accepts a conforming one; sync --models refuses to render an invalid file; AGENTS.md kernel
 """
 import sys
 sys.dont_write_bytecode = True
@@ -71,7 +73,7 @@ def main():
               cmds and all('"${CLAUDE_PLUGIN_ROOT}/hooks/' in c and ".agents/hooks" not in c for c in cmds), str(cmds))
         check("sync_harness.py excluded from plugin", not os.path.exists(os.path.join(plug, "hooks", "sync_harness.py")))
         skills = sorted(os.listdir(os.path.join(plug, "skills")))
-        check("skills bundled", skills == ["register-deliverables", "verify-integrity", "verify-sources", "yaml-log-entry"], str(skills))
+        check("skills bundled", skills == ["define-agent", "register-deliverables", "verify-integrity", "verify-sources", "yaml-log-entry"], str(skills))
         check("skill tests dropped from bundle", not os.path.exists(os.path.join(plug, "skills", "yaml-log-entry", "tests")))
         check("validator present in bundle", os.path.isfile(os.path.join(plug, "skills", "yaml-log-entry", "assets", "validate_yaml_log.py")))
 
@@ -200,17 +202,18 @@ def main():
         with open(os.path.join(agents, "sources-researcher.toml"), "w") as fh:
             fh.write('name = "sources-researcher"\ndescription = "Use PROACTIVELY when sources are needed."\nmodel = "stale"\n'
                      'sandbox_mode = "read-only"\ndeveloper_instructions = """\nFind sources.\n"""\n')
-        with open(os.path.join(agents, "final-assembler.toml"), "w") as fh:
-            fh.write('# tksfw-tier: build\nname = "final-assembler"\ndescription = "MUST BE USED to assemble."\ndeveloper_instructions = "assemble"\n')
+        with open(os.path.join(agents, "final-writer.toml"), "w") as fh:
+            fh.write('# tksfw-tier: judge\nname = "final-writer"\ndescription = "MUST BE USED for assembling the final report."\n'
+                     'developer_instructions = "Assemble deliverables/report.md from validated inputs; success: all sections present."\n')
         sync = os.path.join(full, ".agents", "hooks", "sync_harness.py")
         r = run([PY, sync, "--models", "--check"], cwd=full, env=base_env)
         check("sync --models --check reports stale", r.returncode == 1 and "stale" in r.stdout, r.stdout + r.stderr)
         r = run([PY, sync, "--models"], cwd=full, env=base_env)
         t1 = open(os.path.join(agents, "sources-researcher.toml")).read()
-        t2 = open(os.path.join(agents, "final-assembler.toml")).read()
-        check("sync --models renders Codex TOML (name role + tier comment)",
+        t2 = open(os.path.join(agents, "final-writer.toml")).read()
+        check("sync --models renders Codex TOML (name role + tier comment overrides)",
               r.returncode == 0 and 'model = "gpt-5.6-luna"' in t1 and 'model_reasoning_effort = "low"' in t1
-              and 'model = "gpt-5.6-terra"' in t2 and "Find sources." in t1, r.stdout + r.stderr + t1)
+              and 'model = "gpt-5.6-sol"' in t2 and "Find sources." in t1, r.stdout + r.stderr + t1 + t2)
         md = os.path.join(full, ".claude", "agents", "sources-researcher.md")
         m = open(md).read() if os.path.isfile(md) else ""
         check("sync --models writes Claude mirror with model/effort/tools",
@@ -229,9 +232,41 @@ def main():
         r = run([PY, sync, "--models"], cwd=full, env=base_env)
         t1 = open(os.path.join(agents, "sources-researcher.toml")).read()
         check("sync --models strip removes model lines", "model" not in t1.replace("developer_instructions", "") and "Find sources." in t1, t1)
-        os.remove(os.path.join(agents, "final-assembler.toml"))
+        os.remove(os.path.join(agents, "final-writer.toml"))
         r = run([PY, sync, "--models"], cwd=full, env=base_env)
-        check("sync --models removes orphan mirror", not os.path.exists(os.path.join(full, ".claude", "agents", "final-assembler.md")) and "removed" in r.stdout, r.stdout)
+        check("sync --models removes orphan mirror", not os.path.exists(os.path.join(full, ".claude", "agents", "final-writer.md")) and "removed" in r.stdout, r.stdout)
+
+        # 9 — define-agent: skill suite, hook block on write, sync refuses invalid file
+        r = run([PY, os.path.join(REPO, "template", ".agents", "skills", "define-agent", "tests", "run_tests.py")])
+        check("define-agent suite", r.returncode == 0 and "cases passed" in r.stdout, r.stdout[-400:] + r.stderr[-300:])
+        check("define-agent bundled in plugin with validator",
+              os.path.isfile(os.path.join(plug, "skills", "define-agent", "assets", "validate_agent.py"))
+              and os.path.isfile(os.path.join(plug, "skills", "define-agent", "references", "naming.md")))
+        hooks_dir = os.path.join(full, ".agents", "hooks")
+        sess = json.dumps({"session_id": "s9", "turn_id": "t9", "source": "startup", "cwd": full})
+        run([PY, os.path.join(hooks_dir, "inject_state.py")], cwd=full, env=base_env, inp=sess)       # baseline
+        with open(os.path.join(agents, "atlas.toml"), "w") as fh:
+            fh.write('name = "atlas"\ndescription = "Use PROACTIVELY when anything."\ndeveloper_instructions = "do stuff"\n')
+        post = json.dumps({"session_id": "s9", "turn_id": "t9", "hook_event_name": "PostToolUse", "tool_name": "apply_patch",
+                           "tool_use_id": "u9", "cwd": full, "tool_input": {}})
+        r = run([PY, os.path.join(hooks_dir, "track_edits.py")], cwd=full, env=base_env, inp=post)
+        check("track_edits blocks a non-conforming agent file (exit 2, define-agent pointer)",
+              r.returncode == 2 and "Agent definition validation FAILED" in r.stderr and "define-agent" in r.stderr
+              and "not in the vocabulary" in r.stderr, f"rc={r.returncode} {r.stdout[-200:]} {r.stderr[-400:]}")
+        r = run([PY, sync, "--models"], cwd=full, env=base_env)
+        check("sync --models refuses to render an invalid agent file",
+              r.returncode == 1 and "conflict" in r.stdout and "atlas" in r.stdout
+              and not os.path.exists(os.path.join(full, ".claude", "agents", "atlas.md")), r.stdout)
+        os.remove(os.path.join(agents, "atlas.toml"))
+        with open(os.path.join(agents, "pricing-reviewer.toml"), "w") as fh:
+            fh.write('name = "pricing-reviewer"\ndescription = "MUST BE USED for reviewing pricing tables."\nsandbox_mode = "read-only"\n'
+                     'developer_instructions = "Review deliverables/pricing/*.md; return findings with acceptance criteria."\n')
+        r = run([PY, os.path.join(hooks_dir, "track_edits.py")], cwd=full, env=base_env, inp=post)
+        check("track_edits accepts a conforming agent file", r.returncode == 0, f"rc={r.returncode} {r.stderr[-400:]}")
+        agents_md = open(os.path.join(full, "AGENTS.md"), encoding="utf-8").read()
+        check("AGENTS.md keeps the naming kernel and points to define-agent",
+              "define-agent" in agents_md and "Reserved name `main`" in agents_md and "project-agent-1" not in agents_md
+              and len(agents_md.encode()) < 19000)
 
         # 8 — tksfw-tools
         tools = os.path.join(work, "plugins", "tksfw-tools")

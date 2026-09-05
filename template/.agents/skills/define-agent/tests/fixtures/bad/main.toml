@@ -1,0 +1,3 @@
+name = "main"
+description = "MUST BE USED for orchestration."
+developer_instructions = "Orchestrate everything under ./ and return the plan."

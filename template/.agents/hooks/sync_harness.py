@@ -280,6 +280,24 @@ def agent_files():
                   if f.endswith(".toml") and not f.startswith("."))
 
 
+def agent_errors(path, text):
+    """Errors from the define-agent validator for the text ABOUT TO BE WRITTEN (so a strip/inline
+    re-render is judged on its result, not on the stale file). Empty when valid or validator absent."""
+    v = os.path.join(SKILLS_SRC, "define-agent", "assets", "validate_agent.py")
+    if not os.path.isfile(v):
+        return []
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("validate_agent", v)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        models = mod.load_models(RM.models_path())
+        E, _W, _d = mod.validate_text(text, path, models, mod.sibling_names(path))
+        return E
+    except Exception as e:
+        return [f"validator error: {e}"]
+
+
 def agent_tier(table, text, data):
     """Tier from a `# tksfw-tier: <tier>` comment, else from the agent name via [roles]."""
     m = TIER_COMMENT.search(text)
@@ -369,6 +387,10 @@ def sync_models(check):
             new = render_toml(text, None, None)
         else:
             new = render_toml(text, ec.get("model"), ec.get("reasoning_effort"))
+        errs = agent_errors(path, new)
+        if errs:
+            results.append(("conflict", rel(path), "invalid definition (define-agent): " + "; ".join(errs)))
+            continue
         if new != text:
             if check:
                 results.append(("stale", rel(path), f"tier {tier} ({how}) → {ec.get('model')}"))

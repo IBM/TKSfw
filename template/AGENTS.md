@@ -60,17 +60,7 @@
 - Before delegating any plan step, check `.codex/agents/` for a matching agent by role.
 	- If an existing agent's scope partially matches, update its definition rather than reuse or duplicate.
 	- Agent definitions should never carry task history. History lives only in the ledger.
-- If none exists, create `.codex/agents/<agent-name>.toml` with:
-	- Proper TOML key-value syntax:
-		- `name`: follow the Agent Naming convention below.
-		- `description`: must start with "Use PROACTIVELY when..." or "MUST BE USED for...".
-		- `developer_instructions`:
-			- must include: explicit scope, relevant file paths, and success criteria — never vague instructions like "implement the feature."
-			- Request structured, concise summaries back from subagents; avoid dumping raw output into main context.
-		- `sandbox_mode`:
-			- read-only: for "read-only" agent roles (example: researcher, reviewer, validator, etc.)
-			- workspace-write: for writing agent roles (example:  builder, writer, fetcher, etc.)
-		- `model`: NEVER write a model ID. Models are routed by **tier** from `.agents/models.toml` (`research` = search/read-only, `build` = implementation, `judge` = planning/architecture/judgement/validation). The agent's `-<role>` suffix selects the tier via `[roles]`; a `# tksfw-tier: <tier>` comment in the TOML overrides it. `sync_harness.py --models` renders the `model`/`model_reasoning_effort` lines, and the `route_model.py` PreToolUse hook applies the tier at every spawn (an agent whose role is unknown is refused).
+- If none exists, create `.codex/agents/<agent-name>.toml` — **load the `define-agent` skill first** (it owns the field rules, the naming convention and the validator; the PostToolUse hook blocks a non-conforming file). Never write `model`/`model_reasoning_effort`: models are routed by **tier** from `.agents/models.toml` (`research` = search/read-only, `build` = implementation, `judge` = planning/architecture/judgement/validation); the agent's `-<role>` suffix selects the tier via `[roles]`, `sync_harness.py --models` renders the lines, and the `route_model.py` PreToolUse hook applies the tier at every spawn (unknown role → spawn refused).
 - Persist agent files in the repo so they're reused across sessions, not recreated each time.
 - Never delegate to the `judge` tier unless the task involves planning or architectural thinking, or judgment/validation.
 - Changing models = editing `.agents/models.toml` (a METHOD-layer change), never an agent file or this document; do it only while no subagent is running, then run `sync_harness.py --models`. Record the model the hook reports in the Handoff/Event `Model` field.
@@ -88,27 +78,9 @@
 
 #### Agent Naming
 
-- Name agents by **function, not identity** — a name is a job title on the roster, not a person. Never use human names or opaque codenames; they carry no meaning for the reader or for auto-delegation and pollute the audit ledger.
-- Pattern: `<family>-<role>` — kebab-case, lowercase, hyphen-separated.
-	- `<role>` is the head noun and is mandatory; it states what the agent does.
-	- `<family>` is an optional domain/subsystem prefix. Include it ONLY when more than one family is in scope or names would otherwise collide; omit it when every agent would carry the same prefix.
-	- Use full, plain words — never truncations or acronyms (`pricing-reviewer`, not `prc-rvw`). "Short" means one clear word, not an abbreviation.
-- Draw `<role>` from a closed, reused vocabulary so the fleet reads as one taxonomy: `-planner`, `-builder`, `-reviewer`, `-validator`, `-researcher`, `-fetcher`, `-writer`.
-	- Extend this list deliberately; do not invent a one-off role word per agent.
-- Order `<family>` first so related agents sort and scan together (`pricing-fetcher`, `pricing-validator`).
-- The `name` is a stable identifier; the `description` drives selection.
-	- Put selection detail in `description` ("Use PROACTIVELY when..." / "MUST BE USED for..."), not in the name.
-	- Names are keyed by the Handoff and Event logs (`AgentName`); treat a rename as a logged change (`changes.yaml`), never a casual edit, to preserve audit continuity.
-- Constraints: lowercase letters and hyphens only; unique within `.codex/agents/`; descriptive but not long (2 tokens target, 3 ceiling).
-- Reserved name — `main`: the root session (the only non-subagent, and the sole entity that may spawn subagents) is named `main` in all logs (`AuthorAgent`/`TargetAgent`).
-	- This is a deliberate exception to "function, not identity": the main session is a structural singleton with no peers to disambiguate against, so an identity name is correct.
-	- `main` is a role, not an agent definition: never create `.codex/agents/main.md`, and no subagent may take the name.
-	- `main` names the *identity*; "Orchestrator/Manager" names a *role* that either `main` or a delegated coordinator agent may hold. When the main session acts as orchestrator, it still logs as `main`, not a separate role name — reserve a distinct agent name only for a coordinator you actually delegate to.
-- Examples:
-	- Good: `report-builder`, `index-builder`, `data-fetcher`, `output-validator`, `sources-researcher`.
-	- Good (bare role, single family): `planner`, `reviewer`.
-	- Reserved: `main` (the root session; not a subagent — see above).
-	- Avoid: `project-agent-1` (non-functional), `src-fch` (truncated), `atlas` (codename), `end-to-end-output-conformance-reviewer` (too long).
+- Pattern `<family>-<role>`: lowercase, hyphens, ≤ 3 tokens; `<role>` is mandatory and MUST be a key of `[roles]` in `.agents/models.toml` (`planner`, `builder`, `reviewer`, `validator`, `researcher`, `fetcher`, `writer`); `<family>` only to disambiguate. Function, not identity — never names or codenames. Full convention and examples: `define-agent` skill, `references/naming.md`.
+- Reserved name `main`: the root session — the only non-subagent and the sole spawner — is `main` in all logs (`AuthorAgent`/`TargetAgent`); no agent definition may use it. When `main` acts as orchestrator it still logs as `main`.
+- Names key the Handoff and Event logs (`AgentName`): a rename is a logged change (`changes.yaml`), never a casual edit.
 
 ### Task Management
 

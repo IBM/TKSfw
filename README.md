@@ -14,7 +14,7 @@ TKSfw/
 │   ├── AGENTS.md                    L1/L2 method text (L3/L4 stay per project)
 │   ├── CLAUDE.local.md              `@AGENTS.md`
 │   ├── .agents/hooks/               hook scripts + hooks.json (single source; in-project layout)
-│   ├── .agents/skills/              Group-A skills (single source for both harnesses)
+│   ├── .agents/skills/              Group-A skills incl. define-agent (single source for both harnesses)
 │   ├── .agents/models.toml          model routing: tiers → provider tables (docs/model-routing.md)
 │   ├── .agents/workarea/.keep       ledgers, tasks.md, STATE.md live here at runtime
 │   └── .codex/                      config.toml, prompts/, agents/

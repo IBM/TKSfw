@@ -1,0 +1,3 @@
+name = "bad-desc-prefix"
+description = "A reviewer that reviews."
+developer_instructions = "Review deliverables/*.md and return findings with acceptance criteria."

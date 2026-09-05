@@ -2,6 +2,20 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [0.8.0] — 2026-09-05
+
+Agent definitions become a skill-owned, validated procedure.
+
+### Added
+- `define-agent` skill: `SKILL.md` (procedure), `references/naming.md` (the former AGENTS.md § Subagents field rules + § Agent Naming, verbatim, with [E]/[W] markers), `assets/validate_agent.py` (name pattern, role ∈ `[roles]`, reserved `main`, harness built-ins refused, filename = name, description prefix, required fields, ≤ 3 tokens, sandbox-by-tier and content warnings, hand-written `model` error in strip mode), `tests/` (10 cases).
+- `track_edits.py`: changed `.codex/agents/*.toml` are validated on write; errors block (exit 2) with a pointer to the skill.
+- `sync_harness.py --models`: refuses to render an agent file whose rendered text fails validation (reported as conflict).
+- `models.toml` `[naming] builtin_agents` (harness built-in names, excluded from the role vocabulary).
+- `inject_state.py` preamble: "before creating or renaming any .codex/agents/*.toml, load the define-agent skill".
+
+### Changed
+- `AGENTS.md`: § Subagents field block and § Agent Naming reduced to a kernel (pattern, vocabulary = `[roles]` keys, reserved `main`, rename = logged change, load `define-agent`). 20,455 → 17,870 bytes.
+
 ## [0.7.0] — 2026-09-05
 
 ### Added

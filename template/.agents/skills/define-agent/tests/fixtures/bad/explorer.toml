@@ -1,0 +1,3 @@
+name = "explorer"
+description = "Use PROACTIVELY when exploring."
+developer_instructions = "Explore src/ and return a map with success criteria."

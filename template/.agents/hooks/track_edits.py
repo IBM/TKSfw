@@ -51,6 +51,26 @@ def validate(rel_paths):
     return "\n".join(reports)
 
 
+def validate_agents(rel_paths):
+    """Run the define-agent validator on each changed agent definition; '' when clean/missing."""
+    if not os.path.exists(H.AGENT_VALIDATOR):
+        return ""
+    reports = []
+    for rel in rel_paths:
+        path = os.path.join(H.PROJECT_ROOT, rel)
+        if not os.path.exists(path):
+            continue
+        try:
+            res = subprocess.run([sys.executable, H.AGENT_VALIDATOR, path, "--models", H.MODELS_TOML],
+                                 capture_output=True, text=True, timeout=30)
+        except Exception as e:
+            H.log(f"track_edits: agent validator error on {rel}: {e}")
+            continue
+        if res.returncode == 2:
+            reports.append(f"[{rel}]\n{(res.stdout or '') + (res.stderr or '')}".rstrip())
+    return "\n".join(reports)
+
+
 def main():
     phase = "tool"
     if "--phase" in sys.argv:
@@ -73,16 +93,26 @@ def main():
 
     ledgers = [c["path"] for c in changed
                if (c.get("class") or "").startswith("ledger:") and c["kind"] != "deleted"]
-    if not ledgers:
+    agents = [c["path"] for c in changed
+              if H.AGENT_FILE_RE.match(c["path"]) and c["kind"] != "deleted"]
+    if not ledgers and not agents:
         sys.exit(0)
-    report = validate(ledgers)
-    if not report:
+    messages = []
+    report = validate(ledgers) if ledgers else ""
+    if report:
+        messages.append(
+            "Workarea YAML validation FAILED — fix the entry before continuing "
+            "— load the yaml-log-entry skill: schemas in "
+            f"{H.SCHEMAS_MD}, ID minting in {os.path.join(H.VALIDATOR_DIR, 'new_entry_id.py')}:\n" + report)
+    areport = validate_agents(agents) if agents else ""
+    if areport:
+        messages.append(
+            "Agent definition validation FAILED — fix the file before continuing — load the "
+            f"define-agent skill (convention: {os.path.join(os.path.dirname(H.AGENT_VALIDATOR), '..', 'references', 'naming.md')}); "
+            "then run sync_harness.py --models and log the change in changes.yaml:\n" + areport)
+    if not messages:
         sys.exit(0)
-    sys.stderr.write(
-        "Workarea YAML validation FAILED — fix the entry before continuing "
-        "— load the yaml-log-entry skill: schemas in "
-        f"{H.SCHEMAS_MD}, ID minting in {os.path.join(H.VALIDATOR_DIR, 'new_entry_id.py')}:\n"
-        + report + "\n")
+    sys.stderr.write("\n".join(messages) + "\n")
     sys.exit(2)
 
 

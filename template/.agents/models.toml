@@ -42,13 +42,17 @@ writer     = "build"
 planner    = "judge"
 reviewer   = "judge"
 validator  = "judge"
-# Built-in agent types of the harnesses (Codex / Claude Code), so they are routed too:
+# Built-in agent types of the harnesses (Codex / Claude Code), so they are routed too. They are
+# NOT method roles: the define-agent validator refuses them as custom agent names or role suffixes.
 explorer        = "research"
 worker          = "build"
 default         = "build"
 general-purpose = "build"
 Explore         = "research"
 Plan            = "judge"
+
+[naming]                         # read by the define-agent validator
+builtin_agents = ["explorer", "worker", "default", "general-purpose", "Explore", "Plan"]
 
 # ---------------------------------------------------------------------------------------------
 # Routing tables. Selection order at spawn time (first match wins):

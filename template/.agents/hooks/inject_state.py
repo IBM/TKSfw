@@ -91,7 +91,8 @@ def main():
     routing = routing_summary(payload)
     body = (f"{head}\n{routing}Authoritative files: {H.WORKAREA_REL}/tasks.md and "
             f"{H.WORKAREA_REL}/*.yaml (STATE.md is a generated view). Before writing any of those "
-            "YAML files, load the yaml-log-entry skill (schemas + ID minting).\n\n" + content)
+            "YAML files, load the yaml-log-entry skill (schemas + ID minting); before creating or renaming "
+            "any .codex/agents/*.toml, load the define-agent skill.\n\n" + content)
     H.emit(H.additional_context("SessionStart", cap(body)))
     sys.exit(0)
 

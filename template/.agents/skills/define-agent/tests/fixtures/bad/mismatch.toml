@@ -1,0 +1,3 @@
+name = "report-builder"
+description = "MUST BE USED for assembling the report."
+developer_instructions = "Assemble deliverables/report.md from validated inputs; success: all sections present."

@@ -1,0 +1,3 @@
+name = "src-fch"
+description = "MUST BE USED for fetching."
+developer_instructions = "Fetch files into .agents/workarea/x/ and return a summary of results."
