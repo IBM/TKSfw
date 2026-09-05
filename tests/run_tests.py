@@ -14,6 +14,8 @@
      selection by CODEX_HOME model_provider, ANTHROPIC_BASE_URL, TKSFW_ROUTING), denies unknown
      roles and missing tables, ignores non-spawn tools, works from the plugin bundle;
      sync_harness.py --models renders Codex agent TOML (inline/strip) and Claude mirrors
+  8. tksfw-tools plugin: both manifests, mcp/*.json valid with the expected secret mechanism per
+     harness, marketplaces list both plugins, check_tools.py silent/advisory
 """
 import sys
 sys.dont_write_bytecode = True
@@ -231,9 +233,48 @@ def main():
         r = run([PY, sync, "--models"], cwd=full, env=base_env)
         check("sync --models removes orphan mirror", not os.path.exists(os.path.join(full, ".claude", "agents", "final-assembler.md")) and "removed" in r.stdout, r.stdout)
 
+        # 8 — tksfw-tools
+        tools = os.path.join(work, "plugins", "tksfw-tools")
+        for m in (".codex-plugin/plugin.json", ".claude-plugin/plugin.json"):
+            pth = os.path.join(tools, m)
+            ok = os.path.isfile(pth)
+            if ok:
+                d = json.load(open(pth, encoding="utf-8"))
+                ok = d["name"] == "tksfw-tools" and d["version"] == open(os.path.join(REPO, "VERSION")).read().strip() \
+                    and d["mcpServers"].startswith("./mcp/") and os.path.isfile(os.path.join(tools, d["mcpServers"])) \
+                    and d["hooks"] == "./hooks/hooks.json"
+            check(f"tools manifest {m}", ok)
+        cj = json.load(open(os.path.join(tools, "mcp", "codex.json"), encoding="utf-8"))
+        check("tools codex.json: perplexity via env_vars whitelist, no literal key",
+              cj["perplexity"]["env_vars"] == ["PERPLEXITY_API_KEY"] and "env" not in cj["perplexity"]
+              and "--isolated" in cj["playwright"]["args"] and cj["playwright"]["startup_timeout_sec"] >= 60)
+        aj = json.load(open(os.path.join(tools, "mcp", "claude.json"), encoding="utf-8"))["mcpServers"]
+        check("tools claude.json: key from user_config, output dir under CLAUDE_PROJECT_DIR",
+              aj["perplexity"]["env"]["PERPLEXITY_API_KEY"] == "${user_config.perplexity_api_key}"
+              and any("${CLAUDE_PROJECT_DIR}/.playwright" == a for a in aj["playwright"]["args"]))
+        uc = json.load(open(os.path.join(tools, ".claude-plugin", "plugin.json")))["userConfig"]["perplexity_api_key"]
+        check("tools userConfig marks the key sensitive", uc.get("sensitive") is True)
+        for mp in (".claude-plugin/marketplace.json", ".agents/plugins/marketplace.json"):
+            names = [p["name"] for p in json.load(open(os.path.join(REPO, mp)))["plugins"]]
+            check(f"marketplace {mp} lists both plugins", names == ["tksfw", "tksfw-tools"], str(names))
+        ct = os.path.join(tools, "hooks", "check_tools.py")
+        r = run([PY, ct], cwd=proj, env={"PATH": "/nonexistent", "PERPLEXITY_API_KEY": ""} | {"CLAUDE_PLUGIN_ROOT": tools},
+                inp=json.dumps({"session_id": "s", "turn_id": "t", "source": "startup", "cwd": proj}))
+        out = json.loads(r.stdout) if r.stdout.strip() else {}
+        ctx = out.get("hookSpecificOutput", {}).get("additionalContext", "")
+        check("check_tools.py reports missing npx and key (advisory, exit 0)",
+              r.returncode == 0 and "npx" in ctx and "PERPLEXITY_API_KEY" in ctx and os.path.isdir(os.path.join(proj, ".playwright")), r.stdout + r.stderr)
+        r = run([PY, ct], cwd=proj, env={"PERPLEXITY_API_KEY": "x", "PLAYWRIGHT_BROWSERS_PATH": os.path.join(tmp, "pw")},
+                inp=json.dumps({"session_id": "s", "prompt_id": "p", "source": "startup", "cwd": proj}))
+        os.makedirs(os.path.join(tmp, "pw", "chromium-1"), exist_ok=True)
+        r2 = run([PY, ct], cwd=proj, env={"PERPLEXITY_API_KEY": "x", "PLAYWRIGHT_BROWSERS_PATH": os.path.join(tmp, "pw")},
+                 inp=json.dumps({"session_id": "s", "prompt_id": "p", "source": "startup", "cwd": proj}))
+        check("check_tools.py: browsers missing → warning; all present → silent",
+              "Playwright browser" in r.stdout and r2.returncode == 0 and r2.stdout.strip() == "", r.stdout + "|" + r2.stdout)
+
     # 6 — committed plugin copy is current
     r = run([PY, os.path.join(REPO, "tools", "build_plugin.py"), "--check"])
-    check("plugins/tksfw committed copy is up to date", r.returncode == 0, r.stdout)
+    check("plugins/* committed copies are up to date", r.returncode == 0, r.stdout)
 
     print(f"\n{'ALL PASSED' if not FAILS else str(len(FAILS)) + ' FAILED: ' + ', '.join(FAILS)}")
     sys.exit(1 if FAILS else 0)

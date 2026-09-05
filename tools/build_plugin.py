@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Assemble the TKSfw plugin (one directory, two manifests) from the template and package it.
+"""Assemble the TKSfw plugins (one directory each, two manifests each) and package them.
 
-Source of truth                     ->  Build output
+tksfw (method tooling — assembled from the template)
   VERSION                               version injected into both manifests
   template/.agents/skills/<name>/       plugins/tksfw/skills/<name>/      (tests/ and caches dropped)
   template/.agents/hooks/*.py           plugins/tksfw/hooks/*.py          (sync_harness.py dropped:
@@ -9,16 +9,17 @@ Source of truth                     ->  Build output
   template/.agents/hooks/hooks.json     plugins/tksfw/hooks/hooks.json    commands rewritten from
                                         `python3 .agents/hooks/X.py` to
                                         `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/X.py"`
-  plugin/.codex-plugin/plugin.json      plugins/tksfw/.codex-plugin/plugin.json
-  plugin/.claude-plugin/plugin.json     plugins/tksfw/.claude-plugin/plugin.json
-  plugin/README.md                      plugins/tksfw/README.md
+  plugin/tksfw/**                       plugins/tksfw/**                  manifests + README, version injected
+
+tksfw-tools (MCP servers — copied verbatim from plugin/tksfw-tools, version injected)
+  plugin/tksfw-tools/**                 plugins/tksfw-tools/**            manifests, mcp/*.json, hooks/
 
 Why ${CLAUDE_PLUGIN_ROOT} in a shared hooks.json: Claude Code exports it to hook processes, and
 Codex sets both PLUGIN_ROOT and (for compatibility) CLAUDE_PLUGIN_ROOT, so one file serves both.
 
 Packages written to dist/ (all reproducible from the repo):
-  tksfw-plugin-<v>.zip        the plugin directory alone (top-level folder `tksfw/`)
-  tksfw-marketplace-<v>.zip   a self-contained marketplace root: both catalogs + plugins/tksfw/
+  <plugin>-plugin-<v>.zip     each plugin directory alone (top-level folder `<plugin>/`)
+  tksfw-marketplace-<v>.zip   a self-contained marketplace root: both catalogs + plugins/*
   tksfw-template-<v>.zip      the per-project method instance (template/) + tools/new_project.py
 A SHA256SUMS file accompanies the ZIPs (Claude Code `archive` sources can pin `sha256`).
 
@@ -39,10 +40,12 @@ import filecmp
 
 REPO = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 TEMPLATE = os.path.join(REPO, "template")
-PLUGIN_SRC = os.path.join(REPO, "plugin")
-PLUGIN_OUT = os.path.join(REPO, "plugins", "tksfw")
+PLUGIN_SRC = os.path.join(REPO, "plugin", "tksfw")
+PLUGINS_OUT = os.path.join(REPO, "plugins")
+PLUGIN_OUT = os.path.join(PLUGINS_OUT, "tksfw")
 DIST = os.path.join(REPO, "dist")
 NAME = "tksfw"
+STATIC_PLUGINS = ("tksfw-tools",)          # copied verbatim from plugin/<name>, version injected
 IGNORE = shutil.ignore_patterns("__pycache__", ".DS_Store", "._*", ".mirror.json", "*.pyc")
 SKILL_DROP_DIRS = {"tests"}
 HOOK_DROP_FILES = {"sync_harness.py"}
@@ -102,24 +105,51 @@ def copy_hooks(out):
     return rewritten
 
 
-def write_manifests(out, ver):
+def write_manifests(out, ver, src=PLUGIN_SRC, name=NAME):
     for sub in (".codex-plugin", ".claude-plugin"):
-        os.makedirs(os.path.join(out, sub))
-        with open(os.path.join(PLUGIN_SRC, sub, "plugin.json"), encoding="utf-8") as fh:
+        os.makedirs(os.path.join(out, sub), exist_ok=True)
+        with open(os.path.join(src, sub, "plugin.json"), encoding="utf-8") as fh:
             m = json.load(fh)
         m["version"] = ver
-        if m.get("name") != NAME:
-            sys.exit(f"{sub}/plugin.json: name must be {NAME!r}")
-        for key in ("skills", "hooks"):
+        if m.get("name") != name:
+            sys.exit(f"{name}/{sub}/plugin.json: name must be {name!r}")
+        for key in ("skills", "hooks", "mcpServers"):
             v = m.get(key)
             if isinstance(v, str) and not v.startswith("./"):
-                sys.exit(f"{sub}/plugin.json: {key} must be a ./-relative path")
+                sys.exit(f"{name}/{sub}/plugin.json: {key} must be a ./-relative path")
+            if isinstance(v, str) and not os.path.exists(os.path.join(out, v)) and not os.path.exists(os.path.join(src, v)):
+                sys.exit(f"{name}/{sub}/plugin.json: {key} → {v} does not exist in the bundle")
         with open(os.path.join(out, sub, "plugin.json"), "w", encoding="utf-8") as fh:
             json.dump(m, fh, indent=2, ensure_ascii=False)
             fh.write("\n")
-    readme = os.path.join(PLUGIN_SRC, "README.md")
+    readme = os.path.join(src, "README.md")
     if os.path.isfile(readme):
         shutil.copy2(readme, os.path.join(out, "README.md"))
+
+
+def build_static(name, out, ver):
+    """plugin/<name> → plugins/<name>: verbatim copy, version injected, manifests validated,
+    every hook script referenced by hooks/hooks.json present, mcp JSON parseable."""
+    src = os.path.join(REPO, "plugin", name)
+    if os.path.exists(out):
+        shutil.rmtree(out)
+    shutil.copytree(src, out, ignore=IGNORE)
+    write_manifests(out, ver, src=src, name=name)
+    hooks = os.path.join(out, "hooks", "hooks.json")
+    if os.path.isfile(hooks):
+        with open(hooks, encoding="utf-8") as fh:
+            cfg = json.load(fh)
+        for groups in cfg["hooks"].values():
+            for g in groups:
+                for h in g["hooks"]:
+                    m = re.search(r'/hooks/([A-Za-z0-9_]+\.py)"', h["command"])
+                    if not m or not os.path.isfile(os.path.join(out, "hooks", m.group(1))):
+                        sys.exit(f"{name}: hook command {h['command']!r} does not reference a bundled script")
+    for dirpath, _d, files in os.walk(os.path.join(out, "mcp")):
+        for f in files:
+            if f.endswith(".json"):
+                with open(os.path.join(dirpath, f), encoding="utf-8") as fh:
+                    json.load(fh)
 
 
 def build(out, ver):
@@ -170,14 +200,16 @@ def zip_dir(zpath, pairs):
 def package(ver):
     os.makedirs(DIST, exist_ok=True)
     made = []
-    p = os.path.join(DIST, f"{NAME}-plugin-{ver}.zip")
-    zip_dir(p, [(PLUGIN_OUT, NAME)])
-    made.append(p)
+    names = (NAME,) + STATIC_PLUGINS
+    for n in names:
+        p = os.path.join(DIST, f"{n}-plugin-{ver}.zip")
+        zip_dir(p, [(os.path.join(PLUGINS_OUT, n), n)])
+        made.append(p)
     p = os.path.join(DIST, f"{NAME}-marketplace-{ver}.zip")
     zip_dir(p, [(os.path.join(REPO, ".claude-plugin"), f"{NAME}-marketplace/.claude-plugin"),
-                (os.path.join(REPO, ".agents", "plugins"), f"{NAME}-marketplace/.agents/plugins"),
-                (PLUGIN_OUT, f"{NAME}-marketplace/plugins/{NAME}"),
-                (os.path.join(REPO, "docs", "distribution.md"), f"{NAME}-marketplace")])
+                (os.path.join(REPO, ".agents", "plugins"), f"{NAME}-marketplace/.agents/plugins")]
+            + [(os.path.join(PLUGINS_OUT, n), f"{NAME}-marketplace/plugins/{n}") for n in names]
+            + [(os.path.join(REPO, "docs", "distribution.md"), f"{NAME}-marketplace")])
     made.append(p)
     p = os.path.join(DIST, f"{NAME}-template-{ver}.zip")
     zip_dir(p, [(TEMPLATE, f"{NAME}-template/template"),
@@ -204,14 +236,24 @@ def main():
     a = ap.parse_args()
     ver = version()
     if a.check:
+        stale = []
         with tempfile.TemporaryDirectory() as tmp:
             out = os.path.join(tmp, NAME)
             build(out, ver)
-            ok = os.path.isdir(PLUGIN_OUT) and tree_equal(out, PLUGIN_OUT)
-        print("plugins/tksfw is up to date" if ok else "plugins/tksfw is STALE — run tools/build_plugin.py")
-        sys.exit(0 if ok else 1)
+            if not (os.path.isdir(PLUGIN_OUT) and tree_equal(out, PLUGIN_OUT)):
+                stale.append(NAME)
+            for n in STATIC_PLUGINS:
+                o = os.path.join(tmp, n)
+                build_static(n, o, ver)
+                if not (os.path.isdir(os.path.join(PLUGINS_OUT, n)) and tree_equal(o, os.path.join(PLUGINS_OUT, n))):
+                    stale.append(n)
+        print("plugins/ up to date" if not stale else f"STALE: {', '.join('plugins/' + x for x in stale)} — run tools/build_plugin.py")
+        sys.exit(1 if stale else 0)
     skills, n = build(PLUGIN_OUT, ver)
     print(f"built {os.path.relpath(PLUGIN_OUT, REPO)}  v{ver}  skills={skills}  hook commands rewritten={n}")
+    for sn in STATIC_PLUGINS:
+        build_static(sn, os.path.join(PLUGINS_OUT, sn), ver)
+        print(f"built plugins/{sn}  v{ver}")
     if not a.no_zip:
         for m in package(ver):
             print(f"  {os.path.relpath(m, REPO)}  {sha256(m)[:12]}…")

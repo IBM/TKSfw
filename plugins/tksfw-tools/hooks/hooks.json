@@ -1,0 +1,17 @@
+{
+  "description": "tksfw-tools: prerequisite check for the bundled MCP servers (Node/npx, Playwright browsers, Perplexity API key). Advisory only — never blocks.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/check_tools.py\"",
+            "timeout": 20
+          }
+        ]
+      }
+    ]
+  }
+}

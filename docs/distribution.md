@@ -23,9 +23,10 @@ from `python3 .agents/hooks/X.py` to `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/X.py"
 
 | Output | Contents | Use |
 |---|---|---|
-| `plugins/tksfw/` | `.codex-plugin/plugin.json`, `.claude-plugin/plugin.json`, `skills/`, `hooks/` | the plugin; committed so the repo root is itself a marketplace for both harnesses |
-| `dist/tksfw-plugin-<v>.zip` | `tksfw/` (plugin only) | Claude Code `archive` source; manual unzip into a personal marketplace |
-| `dist/tksfw-marketplace-<v>.zip` | `tksfw-marketplace/` = `.claude-plugin/marketplace.json` + `.agents/plugins/marketplace.json` + `plugins/tksfw/` | static hand-off for users without git access: unzip, add as local marketplace in either harness |
+| `plugins/tksfw/` | `.codex-plugin/plugin.json`, `.claude-plugin/plugin.json`, `skills/`, `hooks/` | the method plugin; committed so the repo root is itself a marketplace for both harnesses |
+| `plugins/tksfw-tools/` | both manifests, `mcp/codex.json`, `mcp/claude.json`, `hooks/check_tools.py` | optional MCP companion (Perplexity + Playwright) — see `mcp-tools.md` |
+| `dist/<plugin>-plugin-<v>.zip` | one plugin directory each | Claude Code `archive` source; manual unzip into a personal marketplace |
+| `dist/tksfw-marketplace-<v>.zip` | `tksfw-marketplace/` = both catalogs + `plugins/tksfw/` + `plugins/tksfw-tools/` | static hand-off for users without git access: unzip, add as local marketplace in either harness |
 | `dist/tksfw-template-<v>.zip` | `template/` + `tools/new_project.py` | instantiating projects on machines without the repo |
 
 Why one shared `hooks/hooks.json` works for both harnesses: Claude Code exports

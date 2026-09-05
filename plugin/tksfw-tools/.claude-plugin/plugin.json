@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "tksfw-tools",
+  "displayName": "TKS Framework Tools",
+  "version": "__VERSION__",
+  "description": "MCP servers the TKS framework method relies on: Perplexity (search, ask, research, reason) and Playwright (browser automation, artifacts confined to <project>/.playwright). Optional companion of the tksfw plugin — skip it if you already run these servers user-level.",
+  "author": { "name": "Carlos Veira (IBM)" },
+  "keywords": ["mcp", "perplexity", "playwright", "tools"],
+  "mcpServers": "./mcp/claude.json",
+  "hooks": "./hooks/hooks.json",
+  "userConfig": {
+    "perplexity_api_key": {
+      "type": "string",
+      "title": "Perplexity API key",
+      "description": "Used by the bundled Perplexity MCP server (PERPLEXITY_API_KEY). Stored in the OS keychain, never in settings.json or the plugin.",
+      "sensitive": true,
+      "required": false
+    }
+  }
+}

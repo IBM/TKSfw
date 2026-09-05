@@ -2,6 +2,15 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [0.7.0] — 2026-09-05
+
+### Added
+- `tksfw-tools` plugin (`plugin/tksfw-tools/` → `plugins/tksfw-tools/`): Perplexity (`@perplexity-ai/mcp-server`) and Playwright (`@playwright/mcp --isolated --output-dir <project>/.playwright`) MCP servers; per-harness definitions (`mcp/codex.json` with `env_vars`, `mcp/claude.json` with `userConfig` keychain option); `check_tools.py` SessionStart prerequisite check.
+- Both marketplace catalogs list `tksfw` and `tksfw-tools`; `build_plugin.py` builds/checks/zips every plugin; `docs/mcp-tools.md`.
+
+### Changed
+- `plugin/` restructured per plugin (`plugin/tksfw/`, `plugin/tksfw-tools/`).
+
 ## [0.6.0] — 2026-09-05
 
 Model selection becomes configuration: tiers in the method, provider tables in `.agents/models.toml`.

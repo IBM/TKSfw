@@ -1,0 +1,17 @@
+{
+  "name": "tksfw-tools",
+  "version": "__VERSION__",
+  "description": "MCP servers the TKS framework method relies on: Perplexity (search, ask, research, reason) and Playwright (browser automation, artifacts confined to <project>/.playwright). Optional companion of the tksfw plugin — skip it if you already run these servers user-level.",
+  "author": { "name": "Carlos Veira (IBM)" },
+  "keywords": ["mcp", "perplexity", "playwright", "tools"],
+  "mcpServers": "./mcp/codex.json",
+  "hooks": "./hooks/hooks.json",
+  "interface": {
+    "displayName": "TKS Framework Tools",
+    "shortDescription": "Perplexity + Playwright MCP servers for TKSfw projects",
+    "longDescription": "Bundles the two MCP servers prescribed by the TKS method (AGENTS.md § Tools): the official Perplexity MCP server (API key read from the PERPLEXITY_API_KEY shell variable, never stored in the plugin) and Playwright MCP in isolated mode writing all artifacts to the project's .playwright folder. A SessionStart hook reports missing prerequisites (Node/npx, Playwright browsers, API key).",
+    "developerName": "Carlos Veira",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"]
+  }
+}
