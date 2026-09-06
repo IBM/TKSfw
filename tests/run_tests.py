@@ -36,6 +36,8 @@
      removal in decisions, own removal allowed, TaskID removal vs archive move, A-B-A rewrite);
      per-session attribution (external ledger entry, ambiguous unnamed edit); per-session live cap;
      work areas keyed <session>.<task>.<n>
+ 15. Operator configuration item: ~/.config/tksfw/user.toml via --set-operator / --show-operator;
+     resolution order env > file > git, reported source; SessionStart names the source
 """
 import sys
 sys.dont_write_bytecode = True
@@ -598,6 +600,25 @@ def main():
         agents_md = open(os.path.join(REPO, "template", "AGENTS.md"), encoding="utf-8").read()
         check("AGENTS.md carries the ownership rule and the session-keyed work-area line",
               "OwnerSessionId" in agents_md and "<session-token>.<task-id>.<instance>" in agents_md)
+
+        # 15 — operator configuration item
+        cfgdir = os.path.join(tmp, "cfg")
+        oenv = {k: v for k, v in penv.items() if k != "TKSFW_USER"} | {"TKSFW_CONFIG_DIR": cfgdir, "GIT_CONFIG_GLOBAL": os.path.join(tmp, "nogitconfig"), "GIT_CONFIG_NOSYSTEM": "1"}
+        np_ = os.path.join(work, "tools", "new_project.py")
+        r = run([PY, np_, "--show-operator"], cwd=tmp, env=oenv)
+        check("--show-operator exits 1 when nothing resolves", r.returncode == 1 and "UNKNOWN" in r.stderr, r.stdout + r.stderr)
+        r = run([PY, np_, "--set-operator", "Carlos Veira"], cwd=tmp, env=oenv)
+        cfg = os.path.join(cfgdir, "user.toml")
+        check("--set-operator writes user.toml", r.returncode == 0 and os.path.isfile(cfg) and 'name = "Carlos Veira"' in open(cfg).read() and "schema = 1" in open(cfg).read(), r.stdout + r.stderr)
+        r = run([PY, np_, "--show-operator"], cwd=tmp, env=oenv)
+        check("file source resolved", r.returncode == 0 and "Carlos Veira" in r.stdout and "source: file" in r.stdout, r.stdout)
+        r = run([PY, np_, "--show-operator"], cwd=tmp, env=oenv | {"TKSFW_USER": "ci-bot"})
+        check("TKSFW_USER overrides the file", "ci-bot" in r.stdout and "source: env" in r.stdout, r.stdout)
+        r = run([PY, os.path.join(plug, "hooks", "inject_state.py")], cwd=sproj, env=oenv,
+                inp=json.dumps({"session_id": "SC", "turn_id": "c1", "source": "startup", "cwd": sproj}))
+        check("SessionStart shows the configured operator", "Operator: Carlos Veira" in json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"], r.stdout[:300])
+        stamp = run([PY, os.path.join(plug, "skills", "yaml-log-entry", "assets", "new_entry_id.py"), ch, "--stamp", "--session", tA], cwd=sproj, env=oenv)
+        check("new_entry_id --stamp reads the same config item", "OwnerSessionUserName: Carlos Veira" in stamp.stdout, stamp.stdout)
 
         agents_md = open(os.path.join(full, "AGENTS.md"), encoding="utf-8").read()
         check("AGENTS.md keeps the naming kernel and points to define-agent",

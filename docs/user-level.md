@@ -20,7 +20,19 @@ nothing; use `tksfw-init` when asked to set up a project.
 
 ## Operator name (required for ledger entries)
 
-Every ledger entry records `OwnerSessionUserName`. Set it once per machine: `export TKSFW_USER="Carlos Veira"` in your shell profile, or `~/.config/tksfw/user.toml` with `name = "Carlos Veira"`; otherwise `git config user.name` is used. The SessionStart hook shows the resolved value (and complains when none is found).
+Every ledger entry records `OwnerSessionUserName`. The configuration item is per user, not per project
+(a shared repository cannot hold personal identity):
+
+| Item | Value |
+|---|---|
+| File | `~/.config/tksfw/user.toml` (override the directory with `TKSFW_CONFIG_DIR`) |
+| Schema | `schema = 1` · `name = "Carlos Veira"` |
+| Set it | `python3 tools/new_project.py --set-operator "Carlos Veira"` (repo) or the `tksfw-init` skill (`… assets/new_project.py --set-operator "…"`) |
+| Check it | `python3 tools/new_project.py --show-operator` → name and source; exit 1 when unset |
+| Override | `TKSFW_USER` environment variable (CI, one-off shells) — wins over the file |
+| Fallback | `git config user.name` — used when neither is set, and reported as "(from git config — set it)" at session start so the gap is visible |
+
+The SessionStart hook shows the resolved value on every start; ledger entries without the field are rejected by the PostToolUse hook.
 
 ## What happens in a folder
 

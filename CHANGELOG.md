@@ -2,6 +2,17 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [1.4.1] — 2026-09-06
+
+The operator name becomes a defined configuration item.
+
+### Added
+- `~/.config/tksfw/user.toml` (`schema = 1`, `name = "…"`; directory overridable with `TKSFW_CONFIG_DIR`) as the canonical per-user item; `tools/new_project.py --set-operator "<name>"` writes it, `--show-operator` prints the resolved value and its source (exit 1 when unset); both available from `tksfw-init`.
+- `hooklib.operator_source()`; SessionStart reports "(from git config — set it)" when only the fallback resolved. 6 new tests (128 total).
+
+### Changed
+- `TKSFW_USER` is documented as an override (CI, one-off shells), `git config user.name` as a reported fallback. Docs: user-level.md, schemas.md, hooks README, README, tksfw-init.
+
 ## [1.4.0] — 2026-09-06
 
 Parallel sessions: session token, entry ownership, lost-update guard, session-keyed work areas.

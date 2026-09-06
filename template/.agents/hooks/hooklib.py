@@ -289,27 +289,49 @@ def prune_sessions(expire=SESSION_EXPIRE_SEC):
                     pass
 
 
-def operator():
-    """Operator (user) name: TKSFW_USER → ~/.config/tksfw/user.toml (name = "…") → git config user.name → ""."""
+USER_CONFIG = os.path.join(os.environ.get("TKSFW_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".config", "tksfw"), "user.toml")
+
+
+def operator_source():
+    """(name, source) — source ∈ env | file | git | "". The canonical configuration item is
+    ~/.config/tksfw/user.toml (`schema = 1`, `name = "…"`), written by `new_project.py --set-operator`;
+    TKSFW_USER overrides it (CI, one-off shells); git config user.name is a fallback and is reported
+    as such so the operator knows the item is not set."""
     v = os.environ.get("TKSFW_USER", "").strip()
     if v:
-        return v
-    cfg = os.path.join(os.path.expanduser("~"), ".config", "tksfw", "user.toml")
+        return v, "env"
     try:
-        for line in open(cfg, encoding="utf-8"):
-            m = re.match(r'^\s*name\s*=\s*"(.*)"\s*$', line)
+        for line in open(USER_CONFIG, encoding="utf-8"):
+            m = re.match(r'^\s*name\s*=\s*"([^"]*)"\s*(#.*)?$', line)
             if m and m.group(1).strip():
-                return m.group(1).strip()
+                return m.group(1).strip(), "file"
     except OSError:
         pass
     try:
         import subprocess
         r = subprocess.run(["git", "config", "user.name"], capture_output=True, text=True, timeout=5, cwd=PROJECT_ROOT)
         if r.returncode == 0 and r.stdout.strip():
-            return r.stdout.strip()
+            return r.stdout.strip(), "git"
     except Exception:
         pass
-    return ""
+    return "", ""
+
+
+def operator():
+    return operator_source()[0]
+
+
+def write_operator(name):
+    """Create/replace ~/.config/tksfw/user.toml with the given operator name."""
+    name = name.strip().replace('"', "'")
+    if not name:
+        raise ValueError("empty operator name")
+    os.makedirs(os.path.dirname(USER_CONFIG), exist_ok=True)
+    with open(USER_CONFIG, "w", encoding="utf-8") as fh:
+        fh.write("# TKSfw per-user configuration (read by the hooks and by new_entry_id.py)\n"
+                 "schema = 1\n"
+                 f'name = "{name}"          # OwnerSessionUserName on every ledger entry you write\n')
+    return USER_CONFIG
 
 
 def hashes_path(token):

@@ -82,14 +82,17 @@ def main():
     except Exception as e:
         H.log(f"inject_state: baseline: {type(e).__name__}: {e}")
         others = []
-    op = H.operator()
+    op, src = H.operator_source()
     if token:
-        session_line = (f"Session token: {token} · Operator: {op or 'UNKNOWN'} — every new ledger entry carries "
+        shown = op or "UNKNOWN"
+        if src == "git":
+            shown += " (from git config — set it: new_project.py --set-operator / tksfw-init)"
+        session_line = (f"Session token: {token} · Operator: {shown} — every new ledger entry carries "
                         f"`OwnerSessionId: {token}` and `OwnerSessionUserName: {op or '<set TKSFW_USER>'}`; "
                         f"work areas: `workarea.py create <agent> <task-id> --session {token}`.")
         if not op:
-            session_line += (" OPERATOR UNKNOWN: set TKSFW_USER, or name = \"…\" in ~/.config/tksfw/user.toml, "
-                             "or git config user.name — ledger entries need it.")
+            session_line += (" OPERATOR UNKNOWN: run `python3 tools/new_project.py --set-operator \"<name>\"` "
+                             f"(writes {H.USER_CONFIG}) or export TKSFW_USER — ledger entries need it.")
         if others:
             session_line += ("\n" + f"WARNING: {len(others)} other session(s) active on this project in the last "
                              f"{H.SESSION_ACTIVE_SEC // 60} min (" + ", ".join(f"{d['token']}/{d.get('operator') or '?'}" for d in others[:3])

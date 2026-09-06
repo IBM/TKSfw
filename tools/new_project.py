@@ -8,6 +8,8 @@
                                                                   # report locally edited ones, never overwrite them
     python3 tools/new_project.py /path/to/project --disable       # disarm: hooks/routing become inert here
     python3 tools/new_project.py /path/to/project --enable        # re-arm
+    python3 tools/new_project.py --set-operator "Carlos Veira"    # write ~/.config/tksfw/user.toml (per user, once)
+    python3 tools/new_project.py --show-operator                  # resolved operator name and its source
 
 Full mode copies:   AGENTS.md, CLAUDE.local.md, .agents/{hooks,skills,workarea}, .codex/
                     then runs .agents/hooks/sync_harness.py (generates .codex/hooks.json,
@@ -75,13 +77,29 @@ def load_manifest(target):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("target")
+    ap.add_argument("target", nargs="?")
     ap.add_argument("--plugin-mode", action="store_true")
     ap.add_argument("--update", action="store_true")
     ap.add_argument("--no-sync", action="store_true", help="skip sync_harness.py after copying")
     ap.add_argument("--disable", action="store_true", help="set enabled=false in .agents/.tksfw.json (disarm)")
     ap.add_argument("--enable", action="store_true", help="set enabled=true in .agents/.tksfw.json (re-arm)")
+    ap.add_argument("--set-operator", metavar="NAME", help="write the per-user config ~/.config/tksfw/user.toml (OwnerSessionUserName)")
+    ap.add_argument("--show-operator", action="store_true", help="print the resolved operator name and its source; exit 1 when unset")
     a = ap.parse_args()
+    if a.set_operator is not None or a.show_operator:
+        sys.path.insert(0, os.path.join(TEMPLATE, ".agents", "hooks"))
+        os.environ.setdefault("TKSFW_PROJECT_ROOT", os.getcwd())
+        import hooklib as H
+        if a.set_operator is not None:
+            path = H.write_operator(a.set_operator)
+            print(f"operator set: {a.set_operator.strip()!r} → {path}")
+        name, src = H.operator_source()
+        if not name:
+            sys.exit(f"operator UNKNOWN — run --set-operator \"<name>\" (writes {H.USER_CONFIG}) or export TKSFW_USER")
+        print(f"operator: {name}  (source: {src}{'' if src != 'git' else ' — fallback; set it with --set-operator'})")
+        return
+    if not a.target:
+        ap.error("target is required")
     target = os.path.abspath(a.target)
     os.makedirs(target, exist_ok=True)
     prev = load_manifest(target)

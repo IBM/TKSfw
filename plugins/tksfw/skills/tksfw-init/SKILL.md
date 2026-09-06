@@ -29,6 +29,7 @@ Everything it writes is plain files inside the project; the plugin directory its
    | New self-contained project (hooks + skills copied in-tree; no plugin dependency) | `python3 <PLUGIN>/skills/tksfw-init/assets/new_project.py <project>` |
    | Update to the installed version (keeps locally edited files, lists them) | `… <project> --update` |
    | Disarm / re-arm the framework here | `… <project> --disable` / `--enable` |
+   | Set / show the operator name (per user, once; `~/.config/tksfw/user.toml`) | `… --set-operator "<name>"` / `… --show-operator` |
 3. Report what was installed / refreshed / kept. Locally edited files (typically `AGENTS.md` with L3/L4
    additions) must be merged by hand — show the user the list.
 4. Ask the user to re-trust hooks in Codex `/hooks` if the project is self-contained (in-project hooks);
@@ -42,8 +43,8 @@ Everything it writes is plain files inside the project; the plugin directory its
   yields automatically to projects that carry their own `.agents/hooks/`.
 - A disarmed project (`"enabled": false`) keeps all its files; the hooks and model routing simply
   stop acting there until `--enable`.
-- Operator name: ledger entries record `OwnerSessionUserName`; make sure `TKSFW_USER` (or
-  `~/.config/tksfw/user.toml`, or `git config user.name`) resolves on this machine — the SessionStart
-  hook shows the value it found.
+- Operator name: ledger entries record `OwnerSessionUserName`. If the SessionStart line shows
+  "UNKNOWN" or "(from git config — set it)", run `… --set-operator "<name>"` once on this machine
+  (writes `~/.config/tksfw/user.toml`); `TKSFW_USER` overrides it.
 - Provider routing: review `.agents/models.toml` after the first install (`[routing.<provider>]` must
   match the provider this machine uses; `route_model.py --print` shows the resolution).

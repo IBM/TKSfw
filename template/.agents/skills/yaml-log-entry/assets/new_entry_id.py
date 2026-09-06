@@ -79,10 +79,10 @@ def _operator():
     v = os.environ.get("TKSFW_USER", "").strip()
     if v:
         return v
-    cfg = os.path.join(os.path.expanduser("~"), ".config", "tksfw", "user.toml")
+    cfg = os.path.join(os.environ.get("TKSFW_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".config", "tksfw"), "user.toml")
     try:
         for line in open(cfg, encoding="utf-8"):
-            m = re.match(r'^\s*name\s*=\s*"(.*)"\s*$', line)
+            m = re.match(r'^\s*name\s*=\s*"([^"]*)"\s*(#.*)?$', line)
             if m and m.group(1).strip():
                 return m.group(1).strip()
     except OSError:
