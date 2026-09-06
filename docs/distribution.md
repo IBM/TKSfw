@@ -90,7 +90,9 @@ folder (ours is `tksfw/`); limit 256 MiB. Codex has no archive source — use 3a
 | Codex | unzip `tksfw-plugin-<v>.zip` to `~/.codex/plugins/tksfw`, add an entry to `~/.agents/plugins/marketplace.json` with `"source": {"source": "local", "path": "./.codex/plugins/tksfw"}` — the path is relative to `~` (the marketplace root) — restart, install, trust hooks |
 | Claude Code | session-only: `claude --plugin-dir /path/to/tksfw`; persistent without a marketplace: `claude plugin init` places plugins under `~/.claude/skills/<name>/` and loads them as `<name>@skills-dir` — unzipping the plugin to `~/.claude/skills/tksfw/` follows the same convention (verify on the target Claude Code version) |
 
-### 3e. Project instantiation (always needed — the plugin does not create AGENTS.md)
+### 3e. Project instantiation (always needed — hooks are inert until a project is armed)
+
+From the installed plugin (no checkout): the `tksfw-init` skill — see `user-level.md`. From the repo:
 
 ```bash
 python3 tools/new_project.py /path/to/project --plugin-mode   # users with the plugin installed

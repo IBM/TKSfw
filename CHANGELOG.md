@@ -2,6 +2,18 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [1.1.0] — 2026-09-06
+
+Install once per user, arm any project from the plugin.
+
+### Added
+- `tksfw-init` skill (plugin-only, `plugin/tksfw/skills/tksfw-init/`): the build bundles `template/`, `tools/new_project.py` and `VERSION` as skill assets, so a project can be created (`--plugin-mode` or self-contained), updated, disarmed or re-armed from the installed plugin without a repository checkout.
+- Bootstrap stanzas `plugins/tksfw/bootstrap/AGENTS.global.md` (append to `~/.codex/AGENTS.md`) and `CLAUDE.global.md` (append to `~/.claude/CLAUDE.md`): method applies only where `.agents/.tksfw.json` is enabled; elsewhere inert; use `tksfw-init` when asked.
+- `docs/user-level.md`; README and distribution updates; 6 new tests.
+
+### Changed
+- `tools/new_project.py` detects the skill-assets layout (`template/` next to the script).
+
 ## [1.0.0] — 2026-09-06
 
 Safe for user-level deployment: the framework is inert unless a project is armed.

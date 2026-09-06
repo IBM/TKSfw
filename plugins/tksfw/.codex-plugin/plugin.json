@@ -1,6 +1,6 @@
 {
   "name": "tksfw",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "TKS framework tooling: ledger-aware hooks (state injection, edit hashing, YAML ledger validation) and the Group-A skills (yaml-log-entry, register-deliverables, verify-integrity, verify-sources).",
   "author": {
     "name": "Carlos Veira (IBM)"

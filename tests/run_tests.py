@@ -23,6 +23,8 @@
  10. Arming: plugin hooks are inert in a folder without .agents/.tksfw.json (nothing created), in a
      project disabled via the manifest, and yield in a full-mode project; legacy in-project layout
      without manifest stays armed; new_project --disable/--enable; version-skew warning
+ 11. tksfw-init: the plugin bundles SKILL.md + assets/{template,new_project.py,VERSION} and the
+     bootstrap stanzas; a project can be created, disarmed and updated from the bundle alone
 """
 import sys
 sys.dont_write_bytecode = True
@@ -78,7 +80,7 @@ def main():
               cmds and all('"${CLAUDE_PLUGIN_ROOT}/hooks/' in c and ".agents/hooks" not in c for c in cmds), str(cmds))
         check("sync_harness.py excluded from plugin", not os.path.exists(os.path.join(plug, "hooks", "sync_harness.py")))
         skills = sorted(os.listdir(os.path.join(plug, "skills")))
-        check("skills bundled", skills == ["define-agent", "register-deliverables", "verify-integrity", "verify-sources", "yaml-log-entry"], str(skills))
+        check("skills bundled", skills == ["define-agent", "register-deliverables", "tksfw-init", "verify-integrity", "verify-sources", "yaml-log-entry"], str(skills))
         check("skill tests dropped from bundle", not os.path.exists(os.path.join(plug, "skills", "yaml-log-entry", "tests")))
         check("validator present in bundle", os.path.isfile(os.path.join(plug, "skills", "yaml-log-entry", "assets", "validate_yaml_log.py")))
 
@@ -354,6 +356,37 @@ def main():
         r = run([PY, os.path.join(plug, "hooks", "inject_state.py")], cwd=proj, env=penv,
                 inp=json.dumps({"session_id": "v", "turn_id": "t", "source": "startup", "cwd": proj}))
         check("version skew is reported at SessionStart", "version skew" in r.stdout and "0.1.0" in r.stdout, r.stdout[:300])
+
+        # 11 — tksfw-init from the plugin bundle
+        init = os.path.join(plug, "skills", "tksfw-init")
+        check("tksfw-init skill bundled with template, installer and VERSION",
+              os.path.isfile(os.path.join(init, "SKILL.md")) and os.path.isfile(os.path.join(init, "assets", "new_project.py"))
+              and os.path.isfile(os.path.join(init, "assets", "template", "AGENTS.md"))
+              and os.path.isfile(os.path.join(init, "assets", "template", ".agents", "models.toml"))
+              and open(os.path.join(init, "assets", "VERSION")).read().strip() == open(os.path.join(REPO, "VERSION")).read().strip()
+              and not os.path.exists(os.path.join(init, "assets", "template", ".agents", "skills", "yaml-log-entry", "tests")))
+        check("bootstrap stanzas bundled",
+              all(os.path.isfile(os.path.join(plug, "bootstrap", f)) for f in ("AGENTS.global.md", "CLAUDE.global.md"))
+              and ".agents/.tksfw.json" in open(os.path.join(plug, "bootstrap", "AGENTS.global.md")).read())
+        np2 = os.path.join(tmp, "from-plugin")
+        r = run([PY, os.path.join(init, "assets", "new_project.py"), np2, "--plugin-mode"])
+        mf = os.path.join(np2, ".agents", ".tksfw.json")
+        check("project created from the plugin bundle (plugin mode, armed)",
+              r.returncode == 0 and os.path.isfile(os.path.join(np2, "AGENTS.md")) and os.path.isfile(mf)
+              and json.load(open(mf))["enabled"] is True and json.load(open(mf))["version"] == open(os.path.join(REPO, "VERSION")).read().strip()
+              and not os.path.exists(os.path.join(np2, ".agents", "hooks")), r.stdout + r.stderr)
+        r = run([PY, os.path.join(plug, "hooks", "route_model.py")], cwd=np2, env=penv,
+                inp=json.dumps({"session_id": "n", "turn_id": "t", "hook_event_name": "PreToolUse", "tool_name": "spawn_agent", "tool_input": {"agent_type": "sources-researcher"}, "cwd": np2}))
+        check("plugin hooks serve the bundle-created project", '"model": "gpt-5.6-luna"' in r.stdout, r.stdout + r.stderr)
+        r = run([PY, os.path.join(init, "assets", "new_project.py"), np2, "--disable"])
+        r2 = run([PY, os.path.join(init, "assets", "new_project.py"), np2, "--update"])
+        check("bundle installer: --disable then --update keeps enabled=false",
+              r.returncode == 0 and r2.returncode == 0 and json.load(open(mf))["enabled"] is False, r.stdout + r2.stdout + r2.stderr)
+        np3 = os.path.join(tmp, "from-plugin-full")
+        r = run([PY, os.path.join(init, "assets", "new_project.py"), np3, "--no-sync"])
+        check("bundle installer: self-contained project carries hooks and skills",
+              r.returncode == 0 and os.path.isfile(os.path.join(np3, ".agents", "hooks", "hooks.json"))
+              and os.path.isfile(os.path.join(np3, ".agents", "skills", "define-agent", "SKILL.md")), r.stdout + r.stderr)
 
         agents_md = open(os.path.join(full, "AGENTS.md"), encoding="utf-8").read()
         check("AGENTS.md keeps the naming kernel and points to define-agent",

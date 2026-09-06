@@ -9,7 +9,11 @@ tksfw (method tooling — assembled from the template)
   template/.agents/hooks/hooks.json     plugins/tksfw/hooks/hooks.json    commands rewritten from
                                         `python3 .agents/hooks/X.py` to
                                         `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/X.py"`
-  plugin/tksfw/**                       plugins/tksfw/**                  manifests + README, version injected
+  plugin/tksfw/**                       plugins/tksfw/**                  manifests, README, bootstrap/ stanzas,
+                                                                           plugin-only skills (tksfw-init), version injected
+  template/** + tools/new_project.py    plugins/tksfw/skills/tksfw-init/assets/{template,new_project.py,VERSION}
+                                                                           so a project can be instantiated from the
+                                                                           installed plugin (skill tests dropped)
 
 tksfw-tools (MCP servers — copied verbatim from plugin/tksfw-tools, version injected)
   plugin/tksfw-tools/**                 plugins/tksfw-tools/**            manifests, mcp/*.json, hooks/
@@ -152,12 +156,30 @@ def build_static(name, out, ver):
                     json.load(fh)
 
 
+def copy_plugin_extras(out, ver):
+    """Plugin-only content from plugin/tksfw: skills/ (e.g. tksfw-init), bootstrap/ stanzas.
+    tksfw-init gets the template + installer as assets so projects can be created from the plugin."""
+    for sub in ("skills", "bootstrap"):
+        src = os.path.join(PLUGIN_SRC, sub)
+        if os.path.isdir(src):
+            shutil.copytree(src, os.path.join(out, sub), ignore=IGNORE, dirs_exist_ok=True)
+    init_assets = os.path.join(out, "skills", "tksfw-init", "assets")
+    if os.path.isdir(os.path.join(out, "skills", "tksfw-init")):
+        os.makedirs(init_assets, exist_ok=True)
+        shutil.copytree(TEMPLATE, os.path.join(init_assets, "template"),
+                        ignore=shutil.ignore_patterns("__pycache__", ".DS_Store", "._*", ".hook-state", "STATE.md", "tests", ".mirror.json"))
+        shutil.copy2(os.path.join(REPO, "tools", "new_project.py"), os.path.join(init_assets, "new_project.py"))
+        with open(os.path.join(init_assets, "VERSION"), "w", encoding="utf-8") as fh:
+            fh.write(ver + "\n")
+
+
 def build(out, ver):
     if os.path.exists(out):
         shutil.rmtree(out)
     os.makedirs(out)
     skills = copy_skills(out)
     n = copy_hooks(out)
+    copy_plugin_extras(out, ver)
     write_manifests(out, ver)
     # sanity: every hook script referenced exists in the bundle
     with open(os.path.join(out, "hooks", "hooks.json"), encoding="utf-8") as fh:

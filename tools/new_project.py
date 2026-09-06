@@ -29,7 +29,10 @@ import hashlib
 import argparse
 import subprocess
 
-REPO = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+HERE = os.path.dirname(os.path.abspath(__file__))
+# Two layouts: repository (tools/new_project.py + ../template + ../VERSION) and plugin skill assets
+# (skills/tksfw-init/assets/{new_project.py,template/,VERSION}).
+REPO = HERE if os.path.isdir(os.path.join(HERE, "template")) else os.path.normpath(os.path.join(HERE, ".."))
 TEMPLATE = os.path.join(REPO, "template")
 MANIFEST_REL = os.path.join(".agents", ".tksfw.json")
 SKIP_NAMES = {"__pycache__", ".DS_Store", ".hook-state", "STATE.md", ".mirror.json"}
