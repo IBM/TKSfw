@@ -30,6 +30,10 @@ on_unknown_role = "deny"
 #                        files must stay model-free, e.g. shared across providers).
 codex_agent_files = "inline"
 
+[delegation]                     # enforced by route_model.py (PreToolUse on spawn) — AGENTS.md § Subagents
+max_parallel_agents = 4          # the (N+1)th live subagent of a turn is refused; SubagentStart/Stop hooks track liveness
+deny_nested_spawn = true         # a spawn issued from inside a subagent is refused (decomposition happens in main only)
+
 [tiers]
 research = "search / read-only work"
 build    = "implementation and writing"

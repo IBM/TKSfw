@@ -39,3 +39,7 @@ Owner of the agent-definition procedure and the naming convention (moved here fr
 |---|---|
 | `assets/validate_agent.py <file>… [--models <path>] [--json]` | Errors (exit 2) and warnings (exit 0); also `--all` for every file in `.agents/agents/` |
 | `references/naming.md` | The complete convention with the [E]/[W] markers of what the validator enforces |
+
+## Persistence
+
+Agent definitions live in the repo (`.agents/agents/<name>.toml`) and are reused across sessions — never recreate one per task; extend the existing definition when the scope partially matches.

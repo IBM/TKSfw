@@ -207,6 +207,32 @@ def resolve(table, name, harness):
 
 
 # ----------------------------------------------------------------------------- output
+def nested_spawn(payload):
+    """True when the spawn request comes from inside a subagent. Claude Code adds top-level `agent_id` /
+    `agent_type` to hook input delivered to a subagent; Codex exposes the thread path/depth. Unknown → False."""
+    if isinstance(payload.get("agent_id"), str) and payload.get("agent_id"):
+        return True
+    if isinstance(payload.get("agent_type"), str) and payload.get("agent_type"):
+        return True
+    for k in ("parent_thread_id", "parent_agent_id"):
+        if payload.get(k):
+            return True
+    ap = payload.get("agent_path") or payload.get("thread_path")
+    if isinstance(ap, str) and ap.strip("/").count("/") >= 1:          # /root/explorer → depth 1
+        return True
+    d = payload.get("depth") or payload.get("agent_depth")
+    return isinstance(d, int) and d > 0
+
+
+def live_subagents():
+    try:
+        import subagent_track
+        return subagent_track.live_count()
+    except Exception as e:
+        H.log(f"route_model: live count unavailable: {e}")
+        return 0
+
+
 def deny(reason):
     H.emit({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                    "permissionDecisionReason": reason}})
@@ -287,6 +313,23 @@ def main():
     if table is None:
         sys.exit(0)                                              # no routing configured
     harness = detect_harness(payload, tool_name)
+    deleg = table.get("delegation") if isinstance(table.get("delegation"), dict) else {}
+    if deleg.get("deny_nested_spawn", True) and nested_spawn(payload):
+        journal({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "turn": H.turn_key(payload), "harness": harness,
+                 "tool": tool_name, "allowed": False, "reason": "nested spawn"})
+        deny("TKSfw delegation: subagents cannot spawn further subagents — all decomposition happens "
+             "from the main session (AGENTS.md § Subagents). Return your result; let `main` delegate.")
+        sys.exit(0)
+    cap = deleg.get("max_parallel_agents", 4)
+    if isinstance(cap, int) and cap > 0:
+        live = live_subagents()
+        if live >= cap:
+            journal({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "turn": H.turn_key(payload), "harness": harness,
+                     "tool": tool_name, "allowed": False, "reason": f"parallel cap {live}/{cap}"})
+            deny(f"TKSfw delegation: {live} subagents are already running — the limit is {cap} parallel agents "
+                 f"per phase ([delegation] max_parallel_agents in {H.MODELS_TOML_REL}). Wait for one to return, "
+                 "then spawn (load the `delegate-work` skill for the isolation/handoff procedure).")
+            sys.exit(0)
     name = agent_name(tool_input)
     if not name:
         H.log(f"route_model: spawn without agent name; input keys={sorted(tool_input)}")

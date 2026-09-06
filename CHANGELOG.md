@@ -2,6 +2,22 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [1.2.0] — 2026-09-06
+
+Delegation: decision rules stay in AGENTS.md; mechanics move to a skill; the two limits become hook-enforced.
+
+### Added
+- `delegate-work` skill (Group A): `SKILL.md`, `references/isolation.md` (moved method text: worktree vs work area, handoff protocol, cleanup, changing models, persisting agent files), `assets/workarea.py` (`create <agent> <task> [--worktree]`, `list`, `prune <agent> <task> [--force]`, `prune --stale`, `status --json`), 11 skill tests.
+- `subagent_track.py` on `SubagentStart`/`SubagentStop` (live-subagent set, cleared at main Stop, 4 h TTL).
+- `route_model.py`: denies nested spawns and the (N+1)th live subagent; `[delegation] max_parallel_agents = 4`, `deny_nested_spawn = true` in `models.toml`.
+- `check_ledgers_on_stop.py`: "Cleanup reminder" listing stale worktrees/work areas (task COMPLETED / branch merged).
+- ADR 0006; 11 new repo tests (92 total).
+
+### Changed
+- AGENTS.md § Subagents: procedure lines replaced by pointers to `delegate-work`; § Agent Work Areas reduced to one line (17,998 → 17,715 B).
+- `.agents/worktrees/` is never watched by the edit-hash hook.
+- `define-agent` gains a Persistence note (moved from AGENTS.md).
+
 ## [1.1.0] — 2026-09-06
 
 Install once per user, arm any project from the plugin.

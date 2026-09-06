@@ -66,6 +66,13 @@ Switching **provider** is not a mid-session operation in either harness (Codex: 
 user-level and inherited by children; Claude Code: one `ANTHROPIC_BASE_URL` per process). Relaunch
 with the other provider; the matching `[routing.<key>]` table is selected automatically.
 
+## Delegation limits (same file, `[delegation]`)
+
+| Key | Default | Enforced by |
+|---|---|---|
+| `max_parallel_agents` | 4 | `route_model.py` denies the (N+1)th spawn while N subagents are live (`subagent_track.py` on SubagentStart/Stop) |
+| `deny_nested_spawn` | true | `route_model.py` denies a spawn whose hook payload shows a subagent context (Claude Code top-level `agent_id`/`agent_type`; Codex thread path depth ≥ 1). Set to false if a harness ever reports these fields for the main session |
+
 ## Constraints on model IDs
 
 | Harness | Rule |

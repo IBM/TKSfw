@@ -24,12 +24,32 @@ the journal so the fallback (same session, after last stop) also works. Fail-ope
 import sys
 sys.dont_write_bytecode = True
 import os
+import json
 import time
+import subprocess
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hooklib as H  # noqa: E402
 
 MODE = os.environ.get("LEDGER_STOP_MODE", "advisory").strip().lower()
+
+
+def stale_workareas():
+    """Names of worktrees/work areas that workarea.py reports as stale (empty when the skill is absent)."""
+    candidates = [os.path.join(H.PROJECT_ROOT, ".agents", "skills", "delegate-work", "assets", "workarea.py"),
+                  os.path.join(H.PLUGIN_ROOT or "", "skills", "delegate-work", "assets", "workarea.py")]
+    tool = next((c for c in candidates if os.path.isfile(c)), None)
+    if not tool or not (os.path.isdir(os.path.join(H.PROJECT_ROOT, ".agents", "worktrees"))
+                        or os.path.isdir(H.WORKAREA)):
+        return []
+    try:
+        r = subprocess.run([sys.executable, tool, "status", "--json"], cwd=H.PROJECT_ROOT, capture_output=True,
+                           text=True, timeout=30, env={**os.environ, "TKSFW_PROJECT_ROOT": H.PROJECT_ROOT})
+        data = json.loads(r.stdout or "{}")
+        return [f"{i['agent']}/{i['task']} ({i['kind']})" for i in data.get("stale", [])]
+    except Exception as e:
+        H.log(f"check_ledgers_on_stop: stale scan: {e}")
+        return []
 
 
 def main():
@@ -48,11 +68,22 @@ def main():
     except Exception as e:
         H.log(f"check_ledgers_on_stop: {type(e).__name__}: {e}")
         sys.exit(0)
+    try:                                               # main stopped → every subagent has returned
+        import subagent_track
+        subagent_track.clear()
+    except Exception:
+        pass
+    stale = stale_workareas()
 
-    if not any(flags.values()):
+    if not any(flags.values()) and not stale:
         sys.exit(0)                                    # silent on clean turns
 
     items = []
+    if stale:
+        items.append("• Stale subagent isolation left behind (task COMPLETED / branch merged): "
+                     + ", ".join(stale[:6]) + (" …" if len(stale) > 6 else "")
+                     + " — `python3 .agents/skills/delegate-work/assets/workarea.py prune --stale` "
+                       "(load the `delegate-work` skill).")
     if flags["deliverable"]:
         items.append("• Deliverable edits without a later `changes.yaml` entry (Layer: PROJECT): "
                      + ", ".join(paths["deliverable"][:6])
@@ -65,6 +96,9 @@ def main():
     if flags["handoff"]:
         items.append("• A subagent delegation without a matching `handoffs.yaml` (BEGIN/END) + "
                      "`events.yaml` entry.")
+    if not any(flags.values()):
+        H.emit({"systemMessage": "Cleanup reminder:\n" + "\n".join(items)})
+        sys.exit(0)
     msg = ("Ledger reminder — this turn ended with un-logged actions:\n" + "\n".join(items)
            + "\nAlso review whether a lesson belongs in `lessons.yaml`. Load the `yaml-log-entry` "
              f"skill before writing (schemas: `{H.SCHEMAS_MD}`). "

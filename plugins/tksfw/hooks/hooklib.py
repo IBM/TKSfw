@@ -104,11 +104,13 @@ MANIFEST = os.path.join(PROJECT_ROOT, ".agents", ".tksfw.json")        # written
 PROJECT_HOOKS = os.path.join(PROJECT_ROOT, ".agents", "hooks", "hooks.json")
 REGISTRY = os.path.join(WORKAREA, "deliverables.yaml")
 MODELS_TOML = os.path.join(PROJECT_ROOT, ".agents", "models.toml")   # model routing table (route_model.py)
+MODELS_TOML_REL = ".agents/models.toml"
 AGENT_VALIDATOR = os.path.join(os.path.dirname(VALIDATOR_DIR), "..", "define-agent", "assets", "validate_agent.py")
 AGENT_VALIDATOR = os.path.normpath(AGENT_VALIDATOR)                  # sibling skill: plugin or in-project layout
 AGENTS_SRC = os.path.join(PROJECT_ROOT, ".agents", "agents")           # neutral agent definitions
 AGENT_FILE_RE = re.compile(r"^\.agents/agents/[^/]+\.toml$")
-MIRROR_PREFIXES = (".claude/skills/", ".codex/agents/", ".claude/agents/")   # generated, never watched
+MIRROR_PREFIXES = (".claude/skills/", ".codex/agents/", ".claude/agents/",   # generated, never watched
+                   ".agents/worktrees/")                                       # subagent worktrees (delegate-work)
 STATE_MD = os.path.join(WORKAREA, "STATE.md")
 
 LEDGER_FILES = ("changes.yaml", "lessons.yaml", "handoffs.yaml", "events.yaml",

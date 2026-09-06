@@ -61,17 +61,13 @@
 	- If an existing agent's scope partially matches, update its definition rather than reuse or duplicate.
 	- Agent definitions should never carry task history. History lives only in the ledger.
 - If none exists, create `.agents/agents/<agent-name>.toml` — **load the `define-agent` skill first** (it owns the field rules, the naming convention and the validator; the PostToolUse hook blocks a non-conforming file). Never write `model`/`model_reasoning_effort`: models are routed by **tier** from `.agents/models.toml` (`research` = search/read-only, `build` = implementation, `judge` = planning/architecture/judgement/validation); the agent's `-<role>` suffix selects the tier via `[roles]`, the hooks render the model into the harness copies, and the `route_model.py` PreToolUse hook applies the tier at every spawn (unknown role → spawn refused).
-- Persist agent files in the repo so they're reused across sessions, not recreated each time.
 - Never delegate to the `judge` tier unless the task involves planning or architectural thinking, or judgment/validation.
-- Changing models = editing `.agents/models.toml` (a METHOD-layer change), never an agent file or this document; do it only while no subagent is running, then run `sync_harness.py --models` to re-render the harness copies. Record the model the hook reports in the Handoff/Event `Model` field.
+- Never write a model ID in an agent file or in this document: models come from `.agents/models.toml` (change procedure in the `delegate-work` skill). Record the model the hook reports in the Handoff/Event `Model` field.
 - Try to constrain each subagent to just one task for focused execution, improved traceability, and optimized handoffs.
-- Subagents cannot spawn further subagents — all decomposition happens from the main session only.
+- Subagents cannot spawn further subagents — all decomposition happens from the main session only (the routing hook refuses nested spawns).
 - Only parallelize subagents when their tasks touch independent files/directories/domains; chain sequentially otherwise.
-	- Each subagent must own distinct files/directories.
-	- Use git worktrees for stricter isolation when available, and parallel writes are possible.
-	- If git worktrees are unavailable, fall back to strict directory-based file ownership. In this case, use the agent work area folder (see below) to keep the main project folder clean.
-	- You must NEVER run more than 4 parallel agents per phase.
-	- Clean up completed worktrees or agent-workspace-folders after merge/validation; periodically prune stale ones.
+	- Each subagent must own distinct files/directories; you must NEVER run more than 4 parallel agents per phase (the routing hook refuses the 5th).
+	- **Load the `delegate-work` skill** for the mechanics once you decide to parallelise or isolate: git worktree vs agent work area, handoff BEGIN/END, cleanup/prune (the Stop hook reports stale ones).
 - For trivial single-file or single-step changes, stay in the main session — delegation overhead isn't worth it.
 	- Reserve subagents for tasks that genuinely benefit from isolation, parallelism, or specialization.
 - Validation/review subagents must run in a fresh context or worktree, never the implementer's own session.
@@ -175,9 +171,7 @@
 
 #### Agent Work Areas
 
-- Location: `.agents/workarea/<agent-name>/<task-id>`
-	- Clarification: this specification only applies when git worktrees are not available.
-- A subagent operating in a worktree writes its ledger entries and `tasks.md` status to the canonical `.agents/workarea/`, never to its worktree-local copy.
+- `.agents/workarea/<agent-name>/<task-id>` (fallback when git worktrees are unavailable) or `.agents/worktrees/<agent>--<task-id>`; created and pruned with the `delegate-work` skill. Ledger entries and `tasks.md` status always go to the canonical `.agents/workarea/`, never to a worktree-local copy.
 
 ## Execution Guidelines
 

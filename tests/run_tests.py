@@ -25,6 +25,9 @@
      without manifest stays armed; new_project --disable/--enable; version-skew warning
  11. tksfw-init: the plugin bundles SKILL.md + assets/{template,new_project.py,VERSION} and the
      bootstrap stanzas; a project can be created, disarmed and updated from the bundle alone
+ 12. delegate-work: skill tests; routing hook refuses nested spawns and the (N+1)th live subagent;
+     SubagentStart/Stop tracking; main Stop clears the live set and reports stale work areas;
+     AGENTS.md points to the skill; .agents/worktrees/ is never watched
 """
 import sys
 sys.dont_write_bytecode = True
@@ -80,7 +83,7 @@ def main():
               cmds and all('"${CLAUDE_PLUGIN_ROOT}/hooks/' in c and ".agents/hooks" not in c for c in cmds), str(cmds))
         check("sync_harness.py excluded from plugin", not os.path.exists(os.path.join(plug, "hooks", "sync_harness.py")))
         skills = sorted(os.listdir(os.path.join(plug, "skills")))
-        check("skills bundled", skills == ["define-agent", "register-deliverables", "tksfw-init", "verify-integrity", "verify-sources", "yaml-log-entry"], str(skills))
+        check("skills bundled", skills == ["define-agent", "delegate-work", "register-deliverables", "tksfw-init", "verify-integrity", "verify-sources", "yaml-log-entry"], str(skills))
         check("skill tests dropped from bundle", not os.path.exists(os.path.join(plug, "skills", "yaml-log-entry", "tests")))
         check("validator present in bundle", os.path.isfile(os.path.join(plug, "skills", "yaml-log-entry", "assets", "validate_yaml_log.py")))
 
@@ -387,6 +390,51 @@ def main():
         check("bundle installer: self-contained project carries hooks and skills",
               r.returncode == 0 and os.path.isfile(os.path.join(np3, ".agents", "hooks", "hooks.json"))
               and os.path.isfile(os.path.join(np3, ".agents", "skills", "define-agent", "SKILL.md")), r.stdout + r.stderr)
+
+        # 12 — delegate-work + delegation enforcement
+        r = run([PY, os.path.join(REPO, "template", ".agents", "skills", "delegate-work", "tests", "run_tests.py")])
+        check("delegate-work skill tests pass", r.returncode == 0 and "ALL PASSED" in r.stdout, r.stdout[-400:] + r.stderr[-400:])
+        agents_md = open(os.path.join(REPO, "template", "AGENTS.md"), encoding="utf-8").read()
+        check("AGENTS.md keeps the decision rules and points to delegate-work",
+              "delegate-work" in agents_md and "NEVER run more than 4 parallel agents" in agents_md
+              and "cannot spawn further subagents" in agents_md and "Use git worktrees for stricter isolation" not in agents_md
+              and "sync_harness.py --models" not in agents_md)
+        hooks_json = json.load(open(os.path.join(plug, "hooks", "hooks.json")))
+        check("SubagentStart/SubagentStop hooks bundled and rewritten",
+              all(ev in hooks_json["hooks"] for ev in ("SubagentStart", "SubagentStop"))
+              and "${CLAUDE_PLUGIN_ROOT}/hooks/subagent_track.py" in hooks_json["hooks"]["SubagentStart"][0]["hooks"][0]["command"])
+        # nested spawn denied
+        dproj = os.path.join(tmp, "deleg")
+        run([PY, os.path.join(work, "tools", "new_project.py"), dproj, "--plugin-mode"])
+        spawn = lambda extra={}: json.dumps({"session_id": "d", "turn_id": "t9", "hook_event_name": "PreToolUse", "tool_name": "spawn_agent",
+                                              "tool_input": {"agent_type": "sources-researcher"}, "cwd": dproj, **extra})
+        rm = lambda inp: run([PY, os.path.join(plug, "hooks", "route_model.py")], cwd=dproj, env=penv, inp=inp)
+        check("spawn from a subagent context is denied (agent_id)", '"deny"' in rm(spawn({"agent_id": "sub1", "agent_type": "x-builder"})).stdout and "nested" in rm(spawn({"agent_id": "sub1"})).stdout.lower() or "cannot spawn" in rm(spawn({"agent_id": "sub1"})).stdout)
+        check("spawn from a subagent context is denied (agent_path depth)", "cannot spawn" in rm(spawn({"agent_path": "/root/explorer"})).stdout)
+        check("main-session spawn still allowed", '"allow"' in rm(spawn()).stdout)
+        # parallel cap
+        for i in range(4):
+            run([PY, os.path.join(plug, "hooks", "subagent_track.py"), "--start"], cwd=dproj, env=penv,
+                inp=json.dumps({"session_id": "d", "turn_id": "t9", "hook_event_name": "SubagentStart", "agent_id": f"a{i}", "agent_type": "x-builder", "cwd": dproj}))
+        live = json.load(open(os.path.join(dproj, ".agents", "workarea", ".hook-state", "subagents.json")))["live"]
+        check("SubagentStart tracked", len(live) == 4)
+        r = rm(spawn())
+        check("5th concurrent spawn denied", '"deny"' in r.stdout and "4 subagents are already running" in r.stdout, r.stdout[:300])
+        run([PY, os.path.join(plug, "hooks", "subagent_track.py"), "--stop"], cwd=dproj, env=penv,
+            inp=json.dumps({"session_id": "d", "turn_id": "t9", "hook_event_name": "SubagentStop", "agent_id": "a1", "cwd": dproj}))
+        check("after one SubagentStop the spawn is allowed again", '"allow"' in rm(spawn()).stdout)
+        # main Stop clears + stale advisory
+        os.makedirs(os.path.join(dproj, ".agents", "workarea", "x-builder", "T001"))
+        open(os.path.join(dproj, ".agents", "workarea", "tasks.md"), "w").write("# plan\n- [x] T001 done - main : COMPLETED 2026-09-06 10:00:00 [ev:abc12345]\n")
+        r = run([PY, os.path.join(plug, "hooks", "check_ledgers_on_stop.py")], cwd=dproj, env=penv,
+                inp=json.dumps({"session_id": "d", "turn_id": "t9", "hook_event_name": "Stop", "cwd": dproj}))
+        live = json.load(open(os.path.join(dproj, ".agents", "workarea", ".hook-state", "subagents.json")))["live"]
+        check("main Stop clears the live set and reports the stale work area",
+              live == {} and "x-builder/T001" in r.stdout and "prune --stale" in r.stdout, r.stdout[:300])
+        # worktrees never watched
+        probe = "import sys; sys.path.insert(0, %r); import hooklib as H; print(H.classify('.agents/worktrees/x-builder--T1/AGENTS.md'))"
+        r = run([PY, "-c", probe % os.path.join(plug, "hooks")], cwd=dproj, env=penv)
+        check(".agents/worktrees/ is not a watched path", r.stdout.strip() == "None", r.stdout)
 
         agents_md = open(os.path.join(full, "AGENTS.md"), encoding="utf-8").read()
         check("AGENTS.md keeps the naming kernel and points to define-agent",
