@@ -17,6 +17,16 @@ own location, so `cwd` never matters.
 | `check_ledgers_on_stop.py` | `Stop` | Reads the journal for the turn; advisory `systemMessage` for un-logged deliverable/framework edits or delegations. `LEDGER_STOP_MODE=block` turns it into a continuation prompt. |
 | `refresh_state.py` | `Stop` | Regenerates `.agents/workarea/STATE.md`; prunes the journal. |
 
+## Arming (when the hooks act at all)
+
+Every hook calls `hooklib.guard()` first and exits 0 silently — touching nothing — unless the project is
+**armed**: `.agents/.tksfw.json` exists and its `enabled` is not `false`. `"enabled": false` disarms the
+project on both harnesses (`tools/new_project.py <dir> --disable | --enable`), which is the per-project off
+switch Codex does not offer for user-level hooks. Compatibility: an in-project layout (`.agents/hooks`)
+without a manifest stays armed. A plugin instance running in a project that carries its own
+`.agents/hooks/hooks.json` **yields** (the project pins its framework version; two layers would journal
+twice). `inject_state.py` warns when the project manifest and the installed plugin differ in major.minor.
+
 ## Watched set (what hashing covers)
 
 | Class | Paths | Rule |

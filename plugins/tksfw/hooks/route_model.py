@@ -273,6 +273,7 @@ def main():
         sys.exit(0)
 
     # ---- hook mode
+    H.guard()
     payload = H.read_payload()
     tool_name = str(payload.get("tool_name") or "")
     tool_input = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}

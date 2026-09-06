@@ -69,6 +69,7 @@ def routing_summary(payload):
 
 
 def main():
+    H.guard()
     payload = H.read_payload()
     source = str(payload.get("source") or "startup")
     try:
@@ -89,6 +90,8 @@ def main():
 
     head = PREAMBLE.get(source, PREAMBLE["startup"])
     routing = routing_summary(payload)
+    skew = H.version_skew()
+    routing = (skew + "\n" if skew else "") + routing
     body = (f"{head}\n{routing}Authoritative files: {H.WORKAREA_REL}/tasks.md and "
             f"{H.WORKAREA_REL}/*.yaml (STATE.md is a generated view). Before writing any of those "
             "YAML files, load the yaml-log-entry skill (schemas + ID minting); before creating or renaming "

@@ -6,6 +6,8 @@
                                                                   # the installed tksfw plugin
     python3 tools/new_project.py /path/to/project --update        # refresh unmodified framework files,
                                                                   # report locally edited ones, never overwrite them
+    python3 tools/new_project.py /path/to/project --disable       # disarm: hooks/routing become inert here
+    python3 tools/new_project.py /path/to/project --enable        # re-arm
 
 Full mode copies:   AGENTS.md, CLAUDE.local.md, .agents/{hooks,skills,workarea}, .codex/
                     then runs .agents/hooks/sync_harness.py (generates .codex/hooks.json,
@@ -13,9 +15,10 @@ Full mode copies:   AGENTS.md, CLAUDE.local.md, .agents/{hooks,skills,workarea},
 Plugin mode copies: AGENTS.md, CLAUDE.local.md, .agents/workarea/, .codex/config.toml, .codex/prompts/
                     (no hooks, no skills, no harness mirrors — the plugin provides them).
 
-A manifest `.agents/.tksfw.json` records the framework version and the SHA-256 of every file
-installed, so --update can tell "unchanged since install" (safe to refresh) from "edited locally"
-(kept, listed for manual merge). Standard library only; no git required in the target.
+A manifest `.agents/.tksfw.json` records the framework version, `enabled` (the ARMING switch every
+hook checks first — false makes the framework inert in this project on both harnesses) and the
+SHA-256 of every file installed, so --update can tell "unchanged since install" (safe to refresh)
+from "edited locally" (kept, listed for manual merge). Standard library only; no git required.
 """
 import sys
 sys.dont_write_bytecode = True
@@ -73,10 +76,21 @@ def main():
     ap.add_argument("--plugin-mode", action="store_true")
     ap.add_argument("--update", action="store_true")
     ap.add_argument("--no-sync", action="store_true", help="skip sync_harness.py after copying")
+    ap.add_argument("--disable", action="store_true", help="set enabled=false in .agents/.tksfw.json (disarm)")
+    ap.add_argument("--enable", action="store_true", help="set enabled=true in .agents/.tksfw.json (re-arm)")
     a = ap.parse_args()
     target = os.path.abspath(a.target)
     os.makedirs(target, exist_ok=True)
     prev = load_manifest(target)
+    if a.disable or a.enable:
+        if prev is None:
+            sys.exit(f"{target} has no .agents/.tksfw.json — initialise it first (or --update an existing project)")
+        prev["enabled"] = bool(a.enable) and not a.disable
+        with open(os.path.join(target, MANIFEST_REL), "w", encoding="utf-8") as fh:
+            json.dump(prev, fh, indent=2, sort_keys=True)
+            fh.write("\n")
+        print(f"TKSfw {'ARMED' if prev['enabled'] else 'DISARMED'} in {target} (.agents/.tksfw.json enabled={str(prev['enabled']).lower()})")
+        return
     if prev and not a.update:
         sys.exit(f"{target} already carries TKSfw v{prev.get('version')} — use --update to refresh it")
     if a.update and prev:
@@ -106,7 +120,8 @@ def main():
         else:
             kept.append(rel)                           # locally edited (or pre-existing): never overwrite
 
-    manifest = {"framework": "TKSfw", "version": version(), "plugin_mode": plugin_mode, "files": new_hashes}
+    manifest = {"framework": "TKSfw", "version": version(), "plugin_mode": plugin_mode,
+                "enabled": (prev or {}).get("enabled", True) is not False, "files": new_hashes}
     mp = os.path.join(target, MANIFEST_REL)
     os.makedirs(os.path.dirname(mp), exist_ok=True)
     with open(mp, "w", encoding="utf-8") as fh:

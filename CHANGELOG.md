@@ -2,6 +2,17 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [1.0.0] — 2026-09-06
+
+Safe for user-level deployment: the framework is inert unless a project is armed.
+
+### Added
+- `hooklib.armed()` / `guard()`: every hook (`inject_state`, `track_edits`, `check_ledgers_on_stop`, `refresh_state`, `route_model`) exits 0 before touching anything unless `.agents/.tksfw.json` exists with `enabled` ≠ false; legacy in-project layout without manifest stays armed; a plugin instance yields to a project with its own `.agents/hooks/hooks.json`.
+- `resolve_project_root()` now reports how the root was found (`env | marker | legacy | cwd`); `cwd` means "no project" and is never armed.
+- `inject_state.py`: version-skew warning (project manifest vs installed plugin, major.minor).
+- `tools/new_project.py --disable | --enable`; manifest carries `enabled`.
+- ADR 0005; hooks README § Arming; 12 new tests (unarmed folder, disabled project, yield, legacy, skew).
+
 ## [0.9.0] — 2026-09-05
 
 AGENTS.md is harness-neutral; agent definitions get a neutral source and generated mirrors.

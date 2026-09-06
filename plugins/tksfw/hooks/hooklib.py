@@ -54,23 +54,24 @@ def _looks_like_project(path):
 
 
 def resolve_project_root():
-    """See the module docstring. Always returns an absolute, normalized path."""
+    """See the module docstring. Returns (absolute normalized path, how) where how is one of
+    env | marker | legacy | cwd — `cwd` means NO project was found (the guard treats it as unarmed)."""
     for var in ("TKSFW_PROJECT_ROOT", "CLAUDE_PROJECT_DIR"):
         p = os.environ.get(var)
         if p and os.path.isdir(p):
-            return os.path.normpath(os.path.abspath(p))
+            return os.path.normpath(os.path.abspath(p)), "env"
     cur = os.path.abspath(os.getcwd())
     while True:
         if _looks_like_project(cur):
-            return cur
+            return cur, "marker"
         parent = os.path.dirname(cur)
         if parent == cur:
             break
         cur = parent
     legacy = os.path.normpath(os.path.join(HERE, "..", ".."))          # .agents/hooks -> root
     if os.path.basename(os.path.dirname(HERE)) == ".agents":
-        return legacy
-    return os.path.abspath(os.getcwd())                                  # last resort: cwd
+        return legacy, "legacy"
+    return os.path.abspath(os.getcwd()), "cwd"                           # last resort: cwd
 
 
 def resolve_validator_dir(project_root):
@@ -86,7 +87,7 @@ def resolve_validator_dir(project_root):
     return candidates[-1]
 
 
-PROJECT_ROOT = resolve_project_root()
+PROJECT_ROOT, ROOT_HOW = resolve_project_root()
 WORKAREA_REL = ".agents/workarea"
 WORKAREA = os.path.join(PROJECT_ROOT, ".agents", "workarea")
 STATE_DIR = os.path.join(WORKAREA, ".hook-state")
@@ -98,6 +99,9 @@ VALIDATOR_DIR = resolve_validator_dir(PROJECT_ROOT)
 VALIDATOR = os.path.join(VALIDATOR_DIR, "validate_yaml_log.py")
 SCHEMAS_MD = os.path.normpath(os.path.join(VALIDATOR_DIR, "..", "references", "schemas.md"))
 PLUGIN_MODE = os.path.basename(os.path.dirname(HERE)) != ".agents"    # scripts run from a plugin
+PLUGIN_ROOT = os.path.dirname(HERE) if PLUGIN_MODE else None
+MANIFEST = os.path.join(PROJECT_ROOT, ".agents", ".tksfw.json")        # written by new_project.py / tksfw-init
+PROJECT_HOOKS = os.path.join(PROJECT_ROOT, ".agents", "hooks", "hooks.json")
 REGISTRY = os.path.join(WORKAREA, "deliverables.yaml")
 MODELS_TOML = os.path.join(PROJECT_ROOT, ".agents", "models.toml")   # model routing table (route_model.py)
 AGENT_VALIDATOR = os.path.join(os.path.dirname(VALIDATOR_DIR), "..", "define-agent", "assets", "validate_agent.py")
@@ -118,6 +122,75 @@ FRAMEWORK_DIRS = (".agents", ".codex", ".claude")           # minus the workarea
 # Codex: spawn_agent, which its matcher also exposes as Agent).
 DELEGATION_TOOLS = {"Agent", "Task", "spawn_agent"}
 IGNORED_PARTS = {"__pycache__", ".DS_Store", ".hook-state", ".git", "node_modules"}
+
+
+# ----------------------------------------------------------------------------- arming
+def read_manifest():
+    """`.agents/.tksfw.json` as a dict, or None when absent/unreadable."""
+    try:
+        with open(MANIFEST, encoding="utf-8") as fh:
+            m = json.load(fh)
+        return m if isinstance(m, dict) else None
+    except Exception:
+        return None
+
+
+def armed():
+    """(bool, reason). The framework acts in a project only when it is ARMED:
+         1. `.agents/.tksfw.json` exists and its `enabled` is not false          → armed
+            (`"enabled": false` disarms the project for both harnesses — the per-project off switch
+             Codex lacks natively; Claude Code users may additionally use enabledPlugins)
+         2. no manifest, scripts run IN-PROJECT (.agents/hooks) and the root was found by marker →
+            armed for compatibility with projects created before the manifest existed
+         3. anything else (user-level plugin in a folder without a manifest, cwd fallback)   → not armed
+       Plugin instance in a project that carries its own .agents/hooks/hooks.json → YIELDS (the project
+       pins its framework version; running both layers would journal everything twice)."""
+    if ROOT_HOW == "cwd":
+        return False, "no project found (no AGENTS.md / .agents/workarea above cwd)"
+    if PLUGIN_MODE and os.path.isfile(PROJECT_HOOKS):
+        return False, "yield: project carries its own .agents/hooks (in-project layout wins)"
+    m = read_manifest()
+    if m is not None:
+        if m.get("enabled") is False:
+            return False, "disabled in .agents/.tksfw.json"
+        return True, "manifest"
+    if not PLUGIN_MODE and ROOT_HOW in ("marker", "legacy", "env"):
+        return True, "in-project layout without manifest (legacy)"
+    return False, "no .agents/.tksfw.json (project not initialised for TKSfw)"
+
+
+def guard():
+    """Call FIRST in every hook, before any file is touched: exit 0 silently when not armed.
+    Nothing is logged (a log would create .hook-state in a folder that is not a project)."""
+    ok, _reason = armed()
+    if not ok:
+        sys.exit(0)
+
+
+def plugin_version():
+    if not PLUGIN_ROOT:
+        return None
+    for sub in (".codex-plugin", ".claude-plugin"):
+        try:
+            with open(os.path.join(PLUGIN_ROOT, sub, "plugin.json"), encoding="utf-8") as fh:
+                v = json.load(fh).get("version")
+            if isinstance(v, str):
+                return v
+        except Exception:
+            continue
+    return None
+
+
+def version_skew():
+    """One-line warning when the project manifest and the plugin differ in major.minor, else ''."""
+    m = read_manifest() or {}
+    pv, mv = plugin_version(), m.get("version")
+    if not pv or not isinstance(mv, str):
+        return ""
+    if pv.split(".")[:2] != mv.split(".")[:2]:
+        return (f"TKSfw version skew: project instance {mv}, installed plugin {pv} — run the tksfw-init "
+                f"skill with --update (or tools/new_project.py --update) to refresh the method files.")
+    return ""
 
 
 # ----------------------------------------------------------------------------- payload

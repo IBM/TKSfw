@@ -20,6 +20,9 @@
      and accepts a conforming one — then renders .codex/agents + .claude/agents mirrors (also from
      the plugin bundle); mirrors are unwatched; deleting the source prunes them; AGENTS.md kernel is
      harness-neutral
+ 10. Arming: plugin hooks are inert in a folder without .agents/.tksfw.json (nothing created), in a
+     project disabled via the manifest, and yield in a full-mode project; legacy in-project layout
+     without manifest stays armed; new_project --disable/--enable; version-skew warning
 """
 import sys
 sys.dont_write_bytecode = True
@@ -306,6 +309,52 @@ def main():
               f"log={open(os.path.join(proj, '.agents', 'workarea', '.hook-state', 'hooks.log')).read()[-500:] if os.path.isfile(os.path.join(proj, '.agents', 'workarea', '.hook-state', 'hooks.log')) else ''}")
         check("AGENTS.md names no harness directory",
               ".codex/agents" not in agents_md and "Codex sessions" not in agents_md and ".agents/agents/" in agents_md)
+        # 10 — arming guard
+        junk = os.path.join(tmp, "junk", "deeper")
+        os.makedirs(junk)
+        penv = base_env | {"CLAUDE_PLUGIN_ROOT": plug}
+        for script, inp in (("inject_state.py", {"session_id": "j", "turn_id": "t", "source": "startup", "cwd": junk}),
+                            ("track_edits.py", {"session_id": "j", "turn_id": "t", "hook_event_name": "PostToolUse", "tool_name": "Write", "tool_use_id": "u", "cwd": junk, "tool_input": {}}),
+                            ("check_ledgers_on_stop.py", {"session_id": "j", "turn_id": "t", "hook_event_name": "Stop", "cwd": junk}),
+                            ("refresh_state.py", {"session_id": "j", "turn_id": "t", "cwd": junk}),
+                            ("route_model.py", {"session_id": "j", "turn_id": "t", "hook_event_name": "PreToolUse", "tool_name": "spawn_agent", "tool_input": {"agent_type": "x-planner"}, "cwd": junk})):
+            r = run([PY, os.path.join(plug, "hooks", script)], cwd=junk, env=penv, inp=json.dumps(inp))
+            check(f"unarmed folder: {script} exits 0 silently", r.returncode == 0 and r.stdout.strip() == "" and r.stderr.strip() == "", r.stdout + r.stderr)
+        check("unarmed folder: nothing was created", sorted(os.listdir(junk)) == [] and sorted(os.listdir(os.path.dirname(junk))) == ["deeper"])
+        # disarm the plugin-mode project
+        r = run([PY, os.path.join(work, "tools", "new_project.py"), proj, "--disable"])
+        check("new_project.py --disable writes enabled=false", r.returncode == 0 and json.load(open(os.path.join(proj, ".agents", ".tksfw.json")))["enabled"] is False, r.stdout + r.stderr)
+        shutil.rmtree(os.path.join(proj, ".agents", "workarea", ".hook-state"), ignore_errors=True)
+        r = run([PY, os.path.join(plug, "hooks", "inject_state.py")], cwd=proj, env=penv,
+                inp=json.dumps({"session_id": "d", "turn_id": "t", "source": "startup", "cwd": proj}))
+        r2 = run([PY, os.path.join(plug, "hooks", "route_model.py")], cwd=proj, env=penv,
+                 inp=json.dumps({"session_id": "d", "turn_id": "t", "hook_event_name": "PreToolUse", "tool_name": "spawn_agent", "tool_input": {"agent_type": "x-planner"}, "cwd": proj}))
+        check("disabled project: hooks inert, no state written, no routing",
+              r.returncode == 0 and r.stdout.strip() == "" and r2.stdout.strip() == ""
+              and not os.path.exists(os.path.join(proj, ".agents", "workarea", ".hook-state")), r.stdout + r2.stdout)
+        r = run([PY, os.path.join(work, "tools", "new_project.py"), proj, "--enable"])
+        r2 = run([PY, os.path.join(plug, "hooks", "route_model.py")], cwd=proj, env=penv,
+                 inp=json.dumps({"session_id": "d", "turn_id": "t", "hook_event_name": "PreToolUse", "tool_name": "spawn_agent", "tool_input": {"agent_type": "x-planner"}, "cwd": proj}))
+        check("re-enabled project: routing active again", r.returncode == 0 and '"model": "gpt-5.6-sol"' in r2.stdout, r.stdout + r2.stdout)
+        # yield: plugin instance in a full-mode project
+        probe = ("import sys; sys.path.insert(0, %r); import hooklib as H; print(H.armed())")
+        r = run([PY, "-c", probe % os.path.join(plug, "hooks")], cwd=full, env=penv)
+        r2 = run([PY, "-c", probe % os.path.join(full, ".agents", "hooks")], cwd=full, env=base_env)
+        check("full-mode project: plugin instance yields, in-project instance armed",
+              "yield" in r.stdout and r2.stdout.startswith("(True"), r.stdout + r2.stdout)
+        mpath = os.path.join(full, ".agents", ".tksfw.json")
+        os.rename(mpath, mpath + ".bak")
+        r = run([PY, "-c", probe % os.path.join(full, ".agents", "hooks")], cwd=full, env=base_env)
+        check("legacy in-project layout without manifest stays armed", r.stdout.startswith("(True") and "legacy" in r.stdout, r.stdout)
+        os.rename(mpath + ".bak", mpath)
+        # version skew warning
+        m = json.load(open(os.path.join(proj, ".agents", ".tksfw.json")))
+        m["version"] = "0.1.0"
+        json.dump(m, open(os.path.join(proj, ".agents", ".tksfw.json"), "w"))
+        r = run([PY, os.path.join(plug, "hooks", "inject_state.py")], cwd=proj, env=penv,
+                inp=json.dumps({"session_id": "v", "turn_id": "t", "source": "startup", "cwd": proj}))
+        check("version skew is reported at SessionStart", "version skew" in r.stdout and "0.1.0" in r.stdout, r.stdout[:300])
+
         agents_md = open(os.path.join(full, "AGENTS.md"), encoding="utf-8").read()
         check("AGENTS.md keeps the naming kernel and points to define-agent",
               "define-agent" in agents_md and "Reserved name `main`" in agents_md and "project-agent-1" not in agents_md

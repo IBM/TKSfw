@@ -264,6 +264,8 @@ def prune_journal(max_entries=4000, keep=1500):
 
 
 def main():
+    if "--print" not in sys.argv and "--force" not in sys.argv:
+        H.guard()                                    # hook mode: inert unless the project is armed
     out = OUT_DEFAULT
     if "--out" in sys.argv:
         i = sys.argv.index("--out")

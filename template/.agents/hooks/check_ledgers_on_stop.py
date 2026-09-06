@@ -33,6 +33,7 @@ MODE = os.environ.get("LEDGER_STOP_MODE", "advisory").strip().lower()
 
 
 def main():
+    H.guard()
     payload = H.read_payload()
     if payload.get("stop_hook_active"):
         sys.exit(0)                                    # never re-fire inside a continuation

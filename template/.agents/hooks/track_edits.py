@@ -102,6 +102,7 @@ def main():
         i = sys.argv.index("--phase")
         if i + 1 < len(sys.argv):
             phase = sys.argv[i + 1]
+    H.guard()
     payload = H.read_payload()
     tool_name = payload.get("tool_name") if phase == "tool" else None
     tool_use_id = payload.get("tool_use_id") if phase == "tool" else None
