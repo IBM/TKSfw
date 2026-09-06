@@ -2,6 +2,20 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [1.3.0] — 2026-09-06
+
+Activity plan: rules stay in AGENTS.md; grammar and procedure move to `yaml-log-entry`; syntax is hook-enforced.
+
+### Added
+- `yaml-log-entry/references/tasks.md`: line grammar, evidence-of-closing rules with the terminal-positive pairs table, archive procedure, harness task-tool note. SKILL.md gains an "Activity plan" section; description covers `tasks.md`.
+- `tasks_lint.py`: ERROR (malformed line, unknown status, duplicate TaskID, checkbox/status mismatch) vs WARN (evidence); exit 0/1/2; `--json`.
+- `track_edits.py`: lints writes to the live `tasks.md` — errors block (exit 2) with the expected grammar, warnings are advisory; `tasks-archive.md` is never linted.
+- `refresh_state.py`: "Archivable plan blocks" hint in STATE.md.
+- ADR 0007; 9 new repo tests (101 total) + 1 skill fixture (`warn_tasks.md`).
+
+### Changed
+- AGENTS.md § Activity Plan reduced to five rules + pointer (17,715 → 16,514 B).
+
 ## [1.2.0] — 2026-09-06
 
 Delegation: decision rules stay in AGENTS.md; mechanics move to a skill; the two limits become hook-enforced.

@@ -40,7 +40,8 @@ CASES = [
     ("validator: bad REVIEW status",     [VALIDATE, f("bad_review_status.yaml"), "events"], 1),
     ("validator: bad TEST status",       [VALIDATE, f("bad_test_status.yaml"), "events"], 1),
     ("tasks_lint: clean plan",           [LINT, f("good_tasks.md")], 0),
-    ("tasks_lint: plan with issues",     [LINT, f("bad_tasks.md")], 1),
+    ("tasks_lint: plan with errors → 2", [LINT, f("bad_tasks.md")], 2),
+    ("tasks_lint: warnings only → 1",    [LINT, f("warn_tasks.md")], 1),
     ("cross_check: consistent graph",    [CROSS, "--workarea", os.path.join(FIX, "cross_good")], 0),
     ("cross_check: dangling FKs",        [CROSS, "--workarea", os.path.join(FIX, "cross_bad")], 1),
 ]

@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
-"""Advisory linter for the Activity Plan `tasks.md` (PWF gap R2).
+"""Linter for the Activity Plan `tasks.md` (grammar reference: ../references/tasks.md).
 
 Single-FILE checks only — grammar, status/checkbox agreement, duplicate IDs, and evidence-of-closing
 PRESENCE at LEAF granularity. It does NOT resolve the `[ev:<EventID>]` foreign key to `events.yaml`;
-that cross-file resolution is `cross_check.py`'s job (R1). This split keeps the linter a fast,
-single-file check.
+that cross-file resolution is `cross_check.py`'s job. Two severities (since 1.3.0):
 
-ADVISORY by design: `tasks.md` is edited in flux during planning, so this is meant to run in the
-`verify-integrity` sweep / surface a count in STATE.md — NOT as a blocking PostToolUse gate. Exit
-code is 0 (clean) / 1 (issues) so a caller MAY gate on it, but the intended use is reporting.
+  ERROR  malformed line (grammar / unknown status / bad timestamp), duplicate TaskID, checkbox that
+         disagrees with the status  → deterministic, syntactic; the PostToolUse hook BLOCKS on these
+         (exit 2) so a plan write is either well-formed or rejected with the expected grammar.
+  WARN   completed leaf without [ev:…], [ev:…] on a non-completed task → the SHOULD-rules; the hook
+         only reports them (systemMessage); STATE.md and verify-integrity keep counting them.
 
-Usage: python3 tasks_lint.py [<tasks.md>]   (defaults to .claude/workarea/tasks.md)
+Exit codes: 0 clean · 1 warnings only · 2 errors.   `--json` prints {"errors": [...], "warnings": [...]}.
+Usage: python3 tasks_lint.py [<tasks.md>] [--json]   (defaults to .agents/workarea/tasks.md)
 Std lib only.
 """
+import json
 import sys, os
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -22,10 +25,11 @@ from tasks_parse import parse_tasks   # shared single parser
 DEFAULT_TASKS = os.path.normpath(os.path.join(HERE, "..", "..", "..", "workarea", "tasks.md"))
 
 
-def lint(text):
-    """Return a list of advisory issue strings (empty = clean)."""
+def lint_split(text):
+    """Return (errors, warnings) — lists of issue strings."""
     tasks, _ = parse_tasks(text)
-    issues, seen = [], {}
+    errors, warnings, seen = [], [], {}
+    issues = errors                                        # default sink; swapped per rule below
     for t in tasks:
         ln = t["lineno"]
         if not t["well_formed"]:
@@ -41,12 +45,18 @@ def lint(text):
             box = "x" if t["done_box"] else " "
             issues.append(f"line {ln}: checkbox [{box}] disagrees with status {t['status']} ({t['id']})")
         if completed and t["is_leaf"] and not t["ev"]:
-            issues.append(f"line {ln}: completed leaf task {t['id']} has no closing [ev:<EventID>] "
-                          "(evidence-of-closing)")
+            warnings.append(f"line {ln}: completed leaf task {t['id']} has no closing [ev:<EventID>] "
+                            "(evidence-of-closing)")
         if t["ev"] and not completed:
-            issues.append(f"line {ln}: [ev:{t['ev']}] on non-completed task {t['id']} "
-                          "(closing evidence belongs only on COMPLETED tasks)")
-    return issues
+            warnings.append(f"line {ln}: [ev:{t['ev']}] on non-completed task {t['id']} "
+                            "(closing evidence belongs only on COMPLETED tasks)")
+    return errors, warnings
+
+
+def lint(text):
+    """All issues as one list (errors first) — kept for STATE.md's count and older callers."""
+    e, w = lint_split(text)
+    return e + w
 
 
 def main():
@@ -57,14 +67,22 @@ def main():
     except OSError as e:
         print(f"tasks_lint: cannot read {path}: {e}")
         sys.exit(1)
-    issues = lint(text)
-    if not issues:
+    errors, warnings = lint_split(text)
+    if "--json" in sys.argv:
+        print(json.dumps({"errors": errors, "warnings": warnings}))
+        sys.exit(2 if errors else 1 if warnings else 0)
+    if not errors and not warnings:
         print(f"tasks_lint: OK — {os.path.basename(path)} clean")
         sys.exit(0)
-    print(f"tasks_lint: {len(issues)} advisory issue(s) in {os.path.basename(path)}:")
-    for x in issues:
-        print("  -", x)
-    sys.exit(1)
+    if errors:
+        print(f"tasks_lint: {len(errors)} ERROR(s) in {os.path.basename(path)} (grammar: ../references/tasks.md):")
+        for x in errors:
+            print("  -", x)
+    if warnings:
+        print(f"tasks_lint: {len(warnings)} warning(s) in {os.path.basename(path)}:")
+        for x in warnings:
+            print("  -", x)
+    sys.exit(2 if errors else 1)
 
 
 if __name__ == "__main__":

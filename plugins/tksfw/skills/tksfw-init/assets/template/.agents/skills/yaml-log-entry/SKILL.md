@@ -3,11 +3,12 @@ name: yaml-log-entry
 description: >
   Authoring reference and tooling for the project's YAML ledgers under .agents/workarea/ —
   changes.yaml, lessons.yaml, handoffs.yaml, events.yaml, the mutable decisions.yaml log and the
-  deliverables.yaml registry. LOAD THIS SKILL BEFORE writing or editing any of those files: it holds
-  the field schemas, enums, formatting rules and canonical examples (references/schemas.md), mints
-  unique IDs + timestamps (never invent them), and validates the file. Also use it to check ledger
-  integrity after an edit. It does not decide WHEN to log (AGENTS.md § YAML-based Logs does) and it
-  does not rewrite legacy files.
+  deliverables.yaml registry — and for the activity plan tasks.md / tasks-archive.md. LOAD THIS SKILL
+  BEFORE writing or editing any of those files: it holds the field schemas, enums, formatting rules and
+  canonical examples (references/schemas.md), the tasks.md line grammar, evidence-of-closing rules and
+  archive procedure (references/tasks.md), mints unique IDs + timestamps (never invent them), and
+  validates the files. Also use it to check ledger integrity after an edit. It does not decide WHEN to
+  log (AGENTS.md § YAML-based Logs does) and it does not rewrite legacy files.
 ---
 
 # YAML ledger authoring + validation
@@ -104,3 +105,17 @@ When you extend a schema/enum in `references/schemas.md`, update the validator *
   ever encountered, normalize it deliberately on the spot; do not run a blind converter that could
   downgrade a conformant ledger.
 - **Scope.** These are internal `.agents/workarea/` ledgers, not `D*` deliverables.
+
+## Activity plan (`tasks.md`)
+
+Grammar, evidence rules and archive procedure: **`references/tasks.md`**. The PostToolUse hook runs
+`assets/tasks_lint.py` on every write to the live `tasks.md`: syntactic findings (malformed line,
+unknown status, bad timestamp, duplicate TaskID, `[x]` disagreeing with `COMPLETED`) **block** the write
+with the expected grammar; evidence findings (COMPLETED leaf without `[ev:…]`) are advisory.
+`assets/cross_check.py` resolves `[ev:…]` to a terminal-positive `events.yaml` entry.
+
+| Command | Purpose |
+|---|---|
+| `python3 assets/new_entry_id.py` | mint a TaskID (same base62 minting as ledger IDs) |
+| `python3 assets/tasks_lint.py [tasks.md] [--json]` | exit 0 clean · 1 warnings · 2 errors |
+| `python3 assets/cross_check.py` | FK resolution across ledgers and plan (live + archive) |

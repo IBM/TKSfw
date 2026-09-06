@@ -184,6 +184,24 @@ def build():
             n = len(lint_tasks(txt))
             lines.append(f"- tasks.md lint: {n} advisory issue(s)"
                          + ("" if not n else " — run tasks_lint.py / verify-integrity"))
+        # archive hint: plan blocks (headings) that are fully COMPLETED and followed by a newer block
+        try:
+            tasks_all, _ = parse_tasks(txt if lint_tasks is not None else
+                                       (open(os.path.join(WORKAREA, "tasks.md"), encoding="utf-8").read()
+                                        if os.path.exists(os.path.join(WORKAREA, "tasks.md")) else ""))
+            blocks = []
+            for t in tasks_all:
+                h = t.get("heading")
+                if not blocks or blocks[-1][0] != h:
+                    blocks.append([h, []])
+                blocks[-1][1].append(t)
+            superseded = [b for i, b in enumerate(blocks) if i < len(blocks) - 1 and all(not is_open(t) for t in b[1])]
+            if superseded:
+                lines.append(f"- Archivable plan blocks: {len(superseded)} fully COMPLETED and superseded "
+                             f"({', '.join(str(b[0] or 'untitled') for b in superseded[:3])}) — move to "
+                             "tasks-archive.md (yaml-log-entry: references/tasks.md)")
+        except Exception:
+            pass
     except Exception:
         lines.append("- (open-items scan unavailable)")
     lines.append("")

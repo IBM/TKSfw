@@ -111,35 +111,11 @@
 
 #### Activity Plan
 
-- File Format: Markdown
-- Location: `.agents/workarea/tasks.md`
-- File Structure:
-
-```markdown
-- [ ] <TaskID> <Title> - <AgentName> : <OPEN|IN-PROGRESS|WAITING-FOR|COMPLETED> <LastUpdateDate: YYYY-MM-DD hh:mm:ss>
-	- [ ] <TaskID> <Title> - <AgentName> : <OPEN|IN-PROGRESS|WAITING-FOR|COMPLETED> <LastUpdateDate: YYYY-MM-DD hh:mm:ss> [ev:<EventID>]
-	- ...
-- ...
-```
-
-- Clarifications:
-	- This file is meant to provide:
-		- actual feedback on the progress of the defined objectives
-		- facilitate the activity resume process between sessions, whichever harness runs them.
-		- evidence for future auditing processes.
-	- **Ordering:** TaskIDs are random base62 and carry NO order. Sequence and dependency come from **document order** — top-to-bottom, with sub-tasks nested under their parent. Never infer order from the ID or from timestamps; the "next" task is the first non-`COMPLETED` item read top-down.
-	- **Source of Truth.** `tasks.md` is the SoT for task tracking, resume, and audit evidence. The harness's native task tools (Codex `update_plan`, Claude Code `TaskCreate`) are a subordinate, **ephemeral in-session aid only** — they live outside `.agents/workarea/` and the audit trail, so they are NEVER the record. Do not treat the native list as authoritative; keep `tasks.md` current instead.
-- Instructions:
-	- **Evidence of closing (`[ev:<EventID>]`).** A COMPLETED **leaf** task SHOULD carry a trailing `[ev:<EventID>]` citing the `events.yaml` entry that proves it.
-		- A Leaf Task is one with no nested sub-tasks — a parent's completion is implied by its leaves.
-		- An Event that proves task completion is the one whose `TaskID` matches and whose EventType/Status is terminal-positive.
-		- Terminal-positive EventType/Status pairs are: `TASK`/COMPLETED, `REVIEW`/PASS, `AUDIT`/CONFORMANT, `APPROVAL`/GO, `HANDOFF`/END, or `CHANGE`/COMPLETED.
-		- The DoD "never mark complete without proof" is a checkable link to an EventID.
-		- The `tasks_lint` skill asset flags missing evidence (advisory).
-		- `cross_check` resolves the `[ev:…]` FK.
-		- Non-leaf/uncompleted tasks carry no `[ev:…]`.
-	- **Keep it lean (archive):** when a plan block is fully `COMPLETED` and superseded by a newer block, move it to `.agents/workarea/tasks-archive.md` (append, preserving order), leaving `tasks.md` holding the current/most-recent block(s). This keeps the live plan — and every read of it — small.
-		- Integrity checks lint the LIVE `tasks.md`; the archive is frozen history.
+- `.agents/workarea/tasks.md` (Markdown) is the plan: live progress feedback, the resume point between sessions on any harness, and audit evidence. **Load the `yaml-log-entry` skill before writing it** (`references/tasks.md`: line grammar, evidence rules, archive procedure); the PostToolUse hook rejects malformed lines.
+- **Ordering:** TaskIDs are random base62 and carry NO order. Sequence and dependency come from document order — top-to-bottom, sub-tasks nested under their parent; the "next" task is the first non-`COMPLETED` item read top-down. Never infer order from IDs or timestamps.
+- **Source of truth:** `tasks.md` is the SoT for tracking, resume and audit. Harness task tools (Codex `update_plan`, Claude Code `TaskCreate`) are an ephemeral in-session aid only — outside `.agents/workarea/` and the audit trail, never a substitute.
+- **Evidence of closing:** a COMPLETED leaf task carries `[ev:<EventID>]` citing the `events.yaml` entry that proves it (terminal-positive pairs in the skill) — "never mark complete without proof" is a checkable link; the hook and STATE.md report missing evidence.
+- **Keep it lean:** a fully COMPLETED, superseded plan block moves to `.agents/workarea/tasks-archive.md` (procedure in the skill); only the live file is linted.
 
 #### State Snapshot (Resume Entrypoint)
 

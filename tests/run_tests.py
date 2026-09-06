@@ -28,6 +28,9 @@
  12. delegate-work: skill tests; routing hook refuses nested spawns and the (N+1)th live subagent;
      SubagentStart/Stop tracking; main Stop clears the live set and reports stale work areas;
      AGENTS.md points to the skill; .agents/worktrees/ is never watched
+ 13. Activity plan: tasks_lint severity split; the PostToolUse hook blocks malformed tasks.md writes
+     (exit 2) and only advises on missing evidence; tasks-archive.md is not linted; AGENTS.md keeps
+     the five rules and points to yaml-log-entry/references/tasks.md; STATE.md archive hint
 """
 import sys
 sys.dont_write_bytecode = True
@@ -435,6 +438,49 @@ def main():
         probe = "import sys; sys.path.insert(0, %r); import hooklib as H; print(H.classify('.agents/worktrees/x-builder--T1/AGENTS.md'))"
         r = run([PY, "-c", probe % os.path.join(plug, "hooks")], cwd=dproj, env=penv)
         check(".agents/worktrees/ is not a watched path", r.stdout.strip() == "None", r.stdout)
+
+        # 13 — activity plan enforcement
+        agents_md = open(os.path.join(REPO, "template", "AGENTS.md"), encoding="utf-8").read()
+        check("AGENTS.md § Activity Plan reduced to rules + pointer",
+              "references/tasks.md" in agents_md and "TaskIDs are random base62" in agents_md
+              and "`update_plan`" in agents_md and "[ev:<EventID>]" in agents_md
+              and "Terminal-positive EventType/Status pairs are" not in agents_md
+              and "```markdown\n- [ ] <TaskID>" not in agents_md)
+        ref = os.path.join(plug, "skills", "yaml-log-entry", "references", "tasks.md")
+        check("tasks.md reference bundled with grammar and pairs table",
+              os.path.isfile(ref) and "`REVIEW` | `PASS`" in open(ref).read() and "WAITING-FOR" in open(ref).read())
+        pproj = os.path.join(tmp, "plan")
+        run([PY, os.path.join(work, "tools", "new_project.py"), pproj, "--plugin-mode"])
+        tmd = os.path.join(pproj, ".agents", "workarea", "tasks.md")
+        post = lambda: run([PY, os.path.join(plug, "hooks", "track_edits.py")], cwd=pproj, env=penv,
+                           inp=json.dumps({"session_id": "p", "turn_id": "t", "hook_event_name": "PostToolUse", "tool_name": "Write",
+                                           "tool_use_id": "u" + str(len(os.listdir(pproj))), "cwd": pproj, "tool_input": {"file_path": tmd}}))
+        run([PY, os.path.join(plug, "hooks", "track_edits.py"), "--phase", "prompt"], cwd=pproj, env=penv,
+            inp=json.dumps({"session_id": "p", "turn_id": "t", "cwd": pproj}))
+        open(tmd, "w").write("# plan\n- [ ] AAAA1111 first - main : OPEN 2026-09-06 10:00:00\n")
+        r = post()
+        check("well-formed tasks.md write passes silently", r.returncode == 0 and r.stdout.strip() == "" and r.stderr.strip() == "", r.stdout + r.stderr)
+        open(tmd, "w").write("# plan\n- [ ] AAAA1111 first - main : DONE 2026-09-06\n")
+        r = post()
+        check("malformed tasks.md write is blocked with the grammar", r.returncode == 2 and "validation FAILED" in r.stderr
+              and "<OPEN|IN-PROGRESS|WAITING-FOR|COMPLETED>" in r.stderr and "line 2" in r.stderr, r.stdout + r.stderr)
+        open(tmd, "w").write("# plan\n- [ ] AAAA1111 first - main : OPEN 2026-09-06 10:00:00\n- [x] AAAA1111 dup - main : COMPLETED 2026-09-06 10:00:00 [ev:Tstevt01]\n")
+        r = post()
+        check("duplicate TaskID is blocked", r.returncode == 2 and "duplicate TaskID" in r.stderr, r.stderr[:200])
+        open(tmd, "w").write("# plan\n- [x] AAAA1111 first - main : COMPLETED 2026-09-06 10:00:00\n")
+        r = post()
+        check("completed leaf without evidence is advisory only",
+              r.returncode == 0 and "evidence-of-closing" in r.stdout and '"systemMessage"' in r.stdout, r.stdout + r.stderr)
+        open(os.path.join(pproj, ".agents", "workarea", "tasks-archive.md"), "w").write("- garbage line\n")
+        r = run([PY, os.path.join(plug, "hooks", "track_edits.py")], cwd=pproj, env=penv,
+                inp=json.dumps({"session_id": "p", "turn_id": "t", "hook_event_name": "PostToolUse", "tool_name": "Write", "tool_use_id": "uarch", "cwd": pproj, "tool_input": {}}))
+        check("tasks-archive.md is never linted", r.returncode == 0 and r.stderr.strip() == "", r.stderr)
+        lint = os.path.join(plug, "skills", "yaml-log-entry", "assets", "tasks_lint.py")
+        r = run([PY, lint, tmd, "--json"])
+        check("tasks_lint --json exit 1 on warnings only", r.returncode == 1 and json.loads(r.stdout)["errors"] == [] and json.loads(r.stdout)["warnings"], r.stdout)
+        open(tmd, "w").write("# Block A\n- [x] AAAA1111 a - main : COMPLETED 2026-09-06 10:00:00 [ev:Tstevt01]\n# Block B\n- [ ] BBBB2222 b - main : OPEN 2026-09-06 10:00:00\n")
+        r = run([PY, os.path.join(plug, "hooks", "refresh_state.py"), "--print"], cwd=pproj, env=penv)
+        check("STATE.md reports archivable plan blocks", "Archivable plan blocks: 1" in r.stdout and "Block A" in r.stdout, r.stdout[-400:])
 
         agents_md = open(os.path.join(full, "AGENTS.md"), encoding="utf-8").read()
         check("AGENTS.md keeps the naming kernel and points to define-agent",

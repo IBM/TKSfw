@@ -25,6 +25,7 @@ import sys
 sys.dont_write_bytecode = True
 import os
 import subprocess
+import json
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hooklib as H  # noqa: E402
@@ -49,6 +50,32 @@ def validate(rel_paths):
         if res.returncode != 0:
             reports.append(f"[{rel}]\n{(res.stdout or '') + (res.stderr or '')}".rstrip())
     return "\n".join(reports)
+
+
+def lint_plan(rel_paths):
+    """tasks_lint on changed plan files: (errors_report, warnings_report). Only the LIVE tasks.md is
+    linted; tasks-archive.md is frozen history."""
+    tool = os.path.join(H.VALIDATOR_DIR, "tasks_lint.py")
+    if not os.path.exists(tool):
+        return "", ""
+    errs, warns = [], []
+    for rel in rel_paths:
+        if os.path.basename(rel) != "tasks.md":
+            continue
+        path = os.path.join(H.PROJECT_ROOT, rel)
+        if not os.path.exists(path):
+            continue
+        try:
+            res = subprocess.run([sys.executable, tool, path, "--json"], capture_output=True, text=True, timeout=30)
+            data = json.loads(res.stdout or "{}")
+        except Exception as e:
+            H.log(f"track_edits: tasks_lint error on {rel}: {e}")
+            continue
+        if data.get("errors"):
+            errs.append(f"[{rel}]\n  - " + "\n  - ".join(data["errors"]))
+        if data.get("warnings"):
+            warns.append(f"[{rel}] " + "; ".join(data["warnings"][:4]) + (" …" if len(data["warnings"]) > 4 else ""))
+    return "\n".join(errs), "\n".join(warns)
 
 
 def validate_agents(rel_paths):
@@ -125,9 +152,17 @@ def main():
                       if H.AGENT_FILE_RE.match(c["path"]) and c["kind"] == "deleted"]
     if deleted_agents:
         prune_mirrors(deleted_agents)
-    if not ledgers and not agents:
+    plans = [c["path"] for c in changed if c.get("class") == "plan" and c["kind"] != "deleted"]
+    if not ledgers and not agents and not plans:
         sys.exit(0)
     messages = []
+    plan_errors, plan_warnings = lint_plan(plans) if plans else ("", "")
+    if plan_errors:
+        messages.append(
+            "Activity plan (tasks.md) validation FAILED — fix the line(s) before continuing — load the "
+            f"yaml-log-entry skill (grammar: {os.path.join(os.path.dirname(H.SCHEMAS_MD), 'tasks.md')}). Expected: "
+            "'- [ ] <TaskID> <Title> - <AgentName> : <OPEN|IN-PROGRESS|WAITING-FOR|COMPLETED> <YYYY-MM-DD hh:mm:ss>' "
+            "([x] iff COMPLETED; completed leaf tasks add [ev:<EventID>]):\n" + plan_errors)
     report = validate(ledgers) if ledgers else ""
     if report:
         messages.append(
@@ -142,6 +177,10 @@ def main():
             "the harness mirrors are rendered automatically once the file is valid; log the change in changes.yaml:\n" + areport)
     if not messages:
         advisory = render_mirrors(agents) if agents else ""
+        if plan_warnings:
+            advisory = (advisory + "\n" if advisory else "") + \
+                "Activity plan: evidence-of-closing — " + plan_warnings + \
+                " (a COMPLETED leaf cites the events.yaml entry that proves it: [ev:<EventID>])."
         if advisory:
             H.emit({"systemMessage": advisory})
         sys.exit(0)
