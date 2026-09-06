@@ -50,6 +50,11 @@ import os
 BASE62 = r"[0-9A-Za-z]{8}"
 TS = re.compile(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
 
+# 1.4.0 — every ledger entry is attributable to the session and operator that wrote it. Optional for
+# entries that predate 1.4.0 (files are never rewritten); REQUIRED for new entries — the PostToolUse
+# hook passes `--require-owner <ids>` for the IDs added by a write; `--require-owner all` for audits.
+OWNER_FIELDS = {"OwnerSessionId", "OwnerSessionUserName"}
+
 SCHEMAS = {
     "changes": {
         "id": re.compile(rf"^{BASE62}$"),
@@ -318,7 +323,7 @@ def load_entries(path):
 
 
 # --------------------------------------------------------------------- validation
-def validate(path, kind):
+def validate(path, kind, require_owner=()):
     problems = []
     try:
         entries, engine = load_entries(path)
@@ -339,7 +344,9 @@ def validate(path, kind):
             continue
 
         req = set(schema["required"])
-        optional = set(schema.get("optional", ()))
+        optional = set(schema.get("optional", ())) | OWNER_FIELDS
+        if require_owner == "all" or eid in require_owner:
+            req = req | OWNER_FIELDS                   # new entries (1.4.0+) must carry the owner fields
         present = set(fields)
         missing = req - present
         extra = present - req - optional
@@ -348,6 +355,10 @@ def validate(path, kind):
         if extra:
             problems.append(f"{tag}: unexpected {sorted(extra)}")
 
+        if "OwnerSessionId" in fields and not re.fullmatch(BASE62, str(fields["OwnerSessionId"])):
+            problems.append(f"{tag}: bad OwnerSessionId {fields['OwnerSessionId']!r} (base62, 8 chars — the session token)")
+        if "OwnerSessionUserName" in fields and not str(fields["OwnerSessionUserName"]).strip():
+            problems.append(f"{tag}: empty OwnerSessionUserName")
         if "Timestamp" in fields and not TS.fullmatch(str(fields["Timestamp"])):
             problems.append(f"{tag}: bad Timestamp {fields['Timestamp']!r}")
         if "Title" in fields and len(str(fields["Title"])) > 80:
@@ -486,11 +497,18 @@ def infer_kind(path):
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("usage: validate_yaml_log.py <file> [changes|lessons|handoffs|events|deliverables|decisions]")
+    argv = sys.argv[1:]
+    require_owner = ()
+    if "--require-owner" in argv:
+        i = argv.index("--require-owner")
+        val = argv[i + 1] if i + 1 < len(argv) else "all"
+        require_owner = "all" if val == "all" else set(x for x in val.split(",") if x)
+        del argv[i:i + 2]
+    if not argv:
+        print("usage: validate_yaml_log.py <file> [changes|lessons|handoffs|events|deliverables|decisions] [--require-owner all|ID,ID]")
         sys.exit(2)
-    path = sys.argv[1]
-    kind = sys.argv[2] if len(sys.argv) > 2 else infer_kind(path)
+    path = argv[0]
+    kind = argv[1] if len(argv) > 1 else infer_kind(path)
     if kind not in SCHEMAS:
         print(f"FAIL: cannot determine ledger kind for {path!r} "
               f"(pass one of {sorted(SCHEMAS)})")
@@ -499,7 +517,7 @@ def main():
         print(f"FAIL: {path} not found")
         sys.exit(1)
 
-    problems, engine = validate(path, kind)
+    problems, engine = validate(path, kind, require_owner)
     if problems:
         print(f"FAIL ({path}, kind='{kind}', parser={engine}):")
         for p in problems:
@@ -508,6 +526,10 @@ def main():
     # count entries for the OK line
     entries, _ = load_entries(path)
     print(f"OK: {path} valid — {len(entries)} entries, kind '{kind}' conforms (parser={engine})")
+    legacy = [eid for eid, f in entries if isinstance(f, dict) and not OWNER_FIELDS <= set(f)]
+    if legacy:
+        print(f"WARN: {len(legacy)} entr{'y' if len(legacy) == 1 else 'ies'} without OwnerSessionId/OwnerSessionUserName "
+              f"(pre-1.4.0; accepted, never rewritten)")
     sys.exit(0)
 
 

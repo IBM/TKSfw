@@ -10,12 +10,18 @@ a spawn from inside a subagent is refused, and the 5th concurrent spawn of a tur
 ## Isolation
 
 - Each subagent must own distinct files/directories (state the ownership matrix in the handoff).
+- Isolation key (1.4.0): `<session-token>.<task-id>.<instance>`. The session token is minted by the
+  SessionStart hook and shown in context (two sessions on one project never collide); the instance
+  number (allocated by the helper, `0 … max_parallel_agents-1`, never chosen by hand) separates parallel
+  copies of the same agent on the same task. `<task-id>` alone was an ownership key, not a concurrency key.
 - Use git worktrees for stricter isolation when available and parallel writes are possible:
-  `python3 .agents/skills/delegate-work/assets/workarea.py create <agent> <task-id> --worktree`
-  → `.agents/worktrees/<agent>--<task-id>` on branch `agent/<agent>/<task-id>`.
+  `python3 .agents/skills/delegate-work/assets/workarea.py create <agent> <task-id> --session <token> --worktree`
+  → `.agents/worktrees/<agent>--<key>` on branch `agent/<agent>/<key>`.
 - If git worktrees are unavailable (no git, Box-synced folder, nested repo), fall back to strict
   directory-based file ownership and give the agent a work area to keep the main project folder clean:
-  `… create <agent> <task-id>` → `.agents/workarea/<agent>/<task-id>/`.
+  `… create <agent> <task-id> --session <token>` → `.agents/workarea/<agent>/<key>/`.
+- `--instance N` reuses an existing instance (retry after a failed spawn); `--session` may be omitted
+  only when exactly one session is active on the project.
 - A subagent operating in a worktree or work area writes its ledger entries and `tasks.md` status to
   the canonical `.agents/workarea/` (project root), never to a worktree-local copy. Agent work areas
   (`.agents/workarea/<agent>/…`) are NOT watched by the edit-hash hook and never count as deliverables.
@@ -26,9 +32,12 @@ a spawn from inside a subagent is refused, and the 5th concurrent spawn of a tur
    reports), scope, owned paths, success criteria, `TaskID`.
 2. Spawn (the hook injects the model; record what it reports).
 3. On return: `handoffs.yaml` END entry + `events.yaml` entry; merge/validate; mark the task in `tasks.md`.
-4. Clean up: `… prune <agent> <task-id>` (removes the worktree — refusing if the branch is not merged
-   unless `--force` — or the work area). Periodically `… prune --stale` removes work areas whose task
-   is COMPLETED in `tasks.md` and worktrees whose branch is merged. The Stop hook lists stale ones.
+4. Clean up: `… prune <agent> <task-id> [--session T] [--instance N]` (removes the worktree — refusing
+   if the branch is not merged unless `--force` — or the work area); `… prune --session <token>` at
+   session end. Periodically `… prune --stale` removes work areas whose task is COMPLETED in `tasks.md`
+   and worktrees whose branch is merged. The Stop hook lists stale ones.
+5. Record the work area path in the handoff BEGIN entry (`Scope` or `Inputs`), so the instance is
+   traceable from the ledger, not only from disk.
 
 ## Agent definitions
 

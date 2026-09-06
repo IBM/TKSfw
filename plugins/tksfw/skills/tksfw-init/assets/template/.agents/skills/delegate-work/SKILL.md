@@ -18,9 +18,10 @@ owns what happens after the decision. Full text: `references/isolation.md`.
 
 1. Ownership matrix: list each agent with the paths it owns; overlapping paths → chain sequentially.
 2. Isolation per agent:
-   `python3 .agents/skills/delegate-work/assets/workarea.py create <agent> <task-id> [--worktree]`
+   `python3 .agents/skills/delegate-work/assets/workarea.py create <agent> <task-id> --session <token> [--worktree]`
    (worktree when git is available and parallel writes are needed; otherwise a work area under
-   `.agents/workarea/<agent>/<task-id>/`). The command prints the path to hand to the agent.
+   `.agents/workarea/<agent>/<session>.<task-id>.<n>/`). The token is shown at session start; the
+   instance `n` is allocated for you. The command prints the path to hand to the agent.
 3. Log the handoff BEGIN (`yaml-log-entry`), spawn, log END + event on return.
 4. Clean up: `… prune <agent> <task-id>` after merge/validation; `… list` and `… prune --stale`
    (COMPLETED tasks / merged branches) at phase end. Never leave a worktree with unmerged work
@@ -30,7 +31,7 @@ owns what happens after the decision. Full text: `references/isolation.md`.
 
 | Asset | Use |
 |---|---|
-| `assets/workarea.py create <agent> <task-id> [--worktree]` | create the isolated place; idempotent |
+| `assets/workarea.py create <agent> <task-id> --session <token> [--worktree] [--instance N]` | create the isolated place (new instance each call; `--instance` reuses) |
 | `assets/workarea.py list [--json]` | worktrees and work areas with staleness (task COMPLETED / branch merged) |
-| `assets/workarea.py prune <agent> <task-id> [--force]` · `prune --stale [--dry-run]` | remove |
+| `assets/workarea.py prune <agent> <task-id> [--session T] [--instance N] [--force]` · `prune --stale` · `prune --session T` | remove |
 | `references/isolation.md` | the moved method text |

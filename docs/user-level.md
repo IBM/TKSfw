@@ -18,6 +18,10 @@ and `~/.claude/CLAUDE.md` is concatenated before every project file ([Claude Cod
 It says three things: the method applies only where `.agents/.tksfw.json` is enabled; elsewhere do
 nothing; use `tksfw-init` when asked to set up a project.
 
+## Operator name (required for ledger entries)
+
+Every ledger entry records `OwnerSessionUserName`. Set it once per machine: `export TKSFW_USER="Carlos Veira"` in your shell profile, or `~/.config/tksfw/user.toml` with `name = "Carlos Veira"`; otherwise `git config user.name` is used. The SessionStart hook shows the resolved value (and complains when none is found).
+
 ## What happens in a folder
 
 | Folder state | Hooks | Skills | Model routing |
@@ -53,6 +57,10 @@ in major.minor; `--update` clears it.
 
 The manifest is the source of truth: it is the only switch that behaves identically on both harnesses
 and survives a plugin update.
+
+## Two sessions on one project
+
+Tolerated and guarded, not a design target. Each session gets a token at start; the hooks attribute changes per session, keep the live-subagent cap per session, key work areas by `<session>.<task>.<instance>`, and block lost updates on ledgers and `tasks.md` (entries that disappear are named and must be restored). A second active session is announced at SessionStart. Coordinate before editing the same files; a rewrite cannot be rolled back, only rejected.
 
 ## Constraints to remember
 

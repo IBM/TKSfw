@@ -42,5 +42,8 @@ Everything it writes is plain files inside the project; the plugin directory its
   yields automatically to projects that carry their own `.agents/hooks/`.
 - A disarmed project (`"enabled": false`) keeps all its files; the hooks and model routing simply
   stop acting there until `--enable`.
+- Operator name: ledger entries record `OwnerSessionUserName`; make sure `TKSFW_USER` (or
+  `~/.config/tksfw/user.toml`, or `git config user.name`) resolves on this machine — the SessionStart
+  hook shows the value it found.
 - Provider routing: review `.agents/models.toml` after the first install (`[routing.<provider>]` must
   match the provider this machine uses; `route_model.py --print` shows the resolution).

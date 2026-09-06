@@ -43,7 +43,9 @@ def ident(payload):
     return f"anon-{int(time.time() * 1000)}"
 
 
-def live_count(data=None, turn=None):
+def live_count(data=None, turn=None, session=None):
+    """Live subagents; with `session` (framework token) only that session's — the cap is per session
+    (AGENTS.md: per phase), so two sessions on one project do not share it."""
     data = data if data is not None else load()
     now = time.time()
     n = 0
@@ -52,14 +54,23 @@ def live_count(data=None, turn=None):
             continue
         if turn and e.get("turn") and e["turn"] != turn:
             continue
+        if session and e.get("session") and e["session"] != session:
+            continue
         n += 1
     return n
 
 
-def clear():
+def clear(session=None):
+    """Main-session Stop: drop this session's live entries (all entries when session unknown)."""
     try:
-        if os.path.isfile(STATE):
+        if not os.path.isfile(STATE):
+            return
+        if not session:
             save({"live": {}})
+            return
+        data = load()
+        data["live"] = {i: e for i, e in (data.get("live") or {}).items() if e.get("session") and e["session"] != session}
+        save(data)
     except Exception:
         pass
 
@@ -75,11 +86,9 @@ def main():
             i = ident(payload)
             if start:
                 live[i] = {"turn": H.turn_key(payload), "agent": payload.get("agent_type") or payload.get("subagent_type") or "",
-                           "ts": time.time()}
+                           "session": H.session_token(payload, create=True), "ts": time.time()}
             else:
                 live.pop(i, None)
-                if i not in live and not payload.get("agent_id"):     # id not matched: drop the oldest
-                    pass
             save(data)
     except Exception as e:
         H.log(f"subagent_track: {type(e).__name__}: {e}")

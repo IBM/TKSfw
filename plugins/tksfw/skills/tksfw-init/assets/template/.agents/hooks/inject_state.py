@@ -72,11 +72,29 @@ def main():
     H.guard()
     payload = H.read_payload()
     source = str(payload.get("source") or "startup")
+    token, session_line = "", ""
     try:
         with H.locked():
+            H.prune_sessions()
+            token = H.seed_snapshot(payload)             # per-session baseline + ID index
             H.record_changes(payload, "session")
+            others = H.other_active_sessions(payload)
     except Exception as e:
         H.log(f"inject_state: baseline: {type(e).__name__}: {e}")
+        others = []
+    op = H.operator()
+    if token:
+        session_line = (f"Session token: {token} · Operator: {op or 'UNKNOWN'} — every new ledger entry carries "
+                        f"`OwnerSessionId: {token}` and `OwnerSessionUserName: {op or '<set TKSFW_USER>'}`; "
+                        f"work areas: `workarea.py create <agent> <task-id> --session {token}`.")
+        if not op:
+            session_line += (" OPERATOR UNKNOWN: set TKSFW_USER, or name = \"…\" in ~/.config/tksfw/user.toml, "
+                             "or git config user.name — ledger entries need it.")
+        if others:
+            session_line += ("\n" + f"WARNING: {len(others)} other session(s) active on this project in the last "
+                             f"{H.SESSION_ACTIVE_SEC // 60} min (" + ", ".join(f"{d['token']}/{d.get('operator') or '?'}" for d in others[:3])
+                             + "). Parallel sessions are tolerated, not a design target: the hooks block lost updates on "
+                             "ledgers/tasks.md and attribute changes, but coordinate before editing the same files.")
 
     content = refresh_state.write_state()
     if not content:
@@ -91,7 +109,7 @@ def main():
     head = PREAMBLE.get(source, PREAMBLE["startup"])
     routing = routing_summary(payload)
     skew = H.version_skew()
-    routing = (skew + "\n" if skew else "") + routing
+    routing = (skew + "\n" if skew else "") + (session_line + "\n" if session_line else "") + routing
     body = (f"{head}\n{routing}Authoritative files: {H.WORKAREA_REL}/tasks.md and "
             f"{H.WORKAREA_REL}/*.yaml (STATE.md is a generated view). Before writing any of those "
             "YAML files, load the yaml-log-entry skill (schemas + ID minting); before creating or renaming "

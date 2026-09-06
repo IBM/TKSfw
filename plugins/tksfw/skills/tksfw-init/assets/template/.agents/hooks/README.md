@@ -28,6 +28,13 @@ without a manifest stays armed. A plugin instance running in a project that carr
 `.agents/hooks/hooks.json` **yields** (the project pins its framework version; two layers would journal
 twice). `inject_state.py` warns when the project manifest and the installed plugin differ in major.minor.
 
+## Sessions, ownership and the lost-update guard (1.4.0)
+
+- `inject_state.py` mints a **session token** (base62-8) per harness session (`.hook-state/sessions/<token>.json`: harness id, operator, heartbeat) and injects it with the operator name (`TKSFW_USER` → `~/.config/tksfw/user.toml` → `git config user.name`). Every hook run refreshes the heartbeat; a second active session produces a warning at SessionStart.
+- **Per-session snapshots** (`hashes.<token>.json`, `ids.<token>.json`): each session diffs against what *it* last saw, so nothing is swallowed by another session's hook run. Each change is attributed `own` (path named in the tool input, or a ledger entry with this session's `OwnerSessionId`), `external` (ledger entries owned by another session — never counted as unlogged, never a covering log entry) or `ambiguous` (unnamed edit while another session is active — treated as own, since reminders are advisory).
+- **ID index** (`ids.json`): project-wide `{file: {hash, ids→owner}}` for ledgers and plans, refreshed whenever a file's hash differs from the last indexed one — independent of any session's diff, so an A-B-A rewrite that restores a byte-identical older file is still caught. `track_edits.py` blocks (exit 2, "LOST UPDATE") when an EntryID disappears from an append-only ledger, an entry owned by another session disappears from `decisions.yaml`/`deliverables.yaml`, or a TaskID leaves `tasks.md` without appearing in `tasks-archive.md`. New entries must carry `OwnerSessionId`/`OwnerSessionUserName` (validator `--require-owner`).
+- Limits: the write has happened when PostToolUse runs — the block names what to restore, it cannot roll back. Shell edits under concurrency stay `ambiguous`. Sessions without the plugin are unattributed.
+
 ## Watched set (what hashing covers)
 
 | Class | Paths | Rule |

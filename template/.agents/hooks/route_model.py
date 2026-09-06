@@ -224,10 +224,10 @@ def nested_spawn(payload):
     return isinstance(d, int) and d > 0
 
 
-def live_subagents():
+def live_subagents(payload):
     try:
         import subagent_track
-        return subagent_track.live_count()
+        return subagent_track.live_count(session=H.session_token(payload, create=True))
     except Exception as e:
         H.log(f"route_model: live count unavailable: {e}")
         return 0
@@ -322,7 +322,7 @@ def main():
         sys.exit(0)
     cap = deleg.get("max_parallel_agents", 4)
     if isinstance(cap, int) and cap > 0:
-        live = live_subagents()
+        live = live_subagents(payload)
         if live >= cap:
             journal({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "turn": H.turn_key(payload), "harness": harness,
                      "tool": tool_name, "allowed": False, "reason": f"parallel cap {live}/{cap}"})

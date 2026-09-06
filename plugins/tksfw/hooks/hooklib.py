@@ -91,7 +91,9 @@ PROJECT_ROOT, ROOT_HOW = resolve_project_root()
 WORKAREA_REL = ".agents/workarea"
 WORKAREA = os.path.join(PROJECT_ROOT, ".agents", "workarea")
 STATE_DIR = os.path.join(WORKAREA, ".hook-state")
-HASHES = os.path.join(STATE_DIR, "hashes.json")
+HASHES = os.path.join(STATE_DIR, "hashes.json")          # legacy single snapshot (pre-1.4.0); unused
+SESSIONS_DIR = os.path.join(STATE_DIR, "sessions")        # <token>.json per harness session (1.4.0)
+ID_INDEX = os.path.join(STATE_DIR, "ids.json")            # {rel: {id: owner_token|""}} as last seen by any hook
 JOURNAL = os.path.join(STATE_DIR, "journal.jsonl")
 LOG = os.path.join(STATE_DIR, "hooks.log")
 LOCK = os.path.join(STATE_DIR, ".lock")
@@ -116,6 +118,10 @@ STATE_MD = os.path.join(WORKAREA, "STATE.md")
 LEDGER_FILES = ("changes.yaml", "lessons.yaml", "handoffs.yaml", "events.yaml",
                 "decisions.yaml", "deliverables.yaml")
 PLAN_FILES = ("tasks.md", "tasks-archive.md")
+APPEND_ONLY_LEDGERS = ("changes", "lessons", "handoffs", "events")   # removing an entry is always a lost update
+MUTABLE_LEDGERS = ("decisions", "deliverables")                       # own entries may be removed/rewritten
+SESSION_ACTIVE_SEC = 30 * 60                                          # heartbeat window for "another session is active"
+SESSION_EXPIRE_SEC = 24 * 3600                                        # snapshot/session files older than this are pruned
 # Files whose edit is a loggable METHOD/ARCHETYPE change (Layer table in AGENTS.md).
 ROOT_INSTRUCTION_FILES = ("AGENTS.md", "CLAUDE.md", "CLAUDE.local.md", "MISSION.md",
                           "Job Role Definitions.md")
@@ -193,6 +199,127 @@ def version_skew():
         return (f"TKSfw version skew: project instance {mv}, installed plugin {pv} — run the tksfw-init "
                 f"skill with --update (or tools/new_project.py --update) to refresh the method files.")
     return ""
+
+
+# ----------------------------------------------------------------------------- sessions (1.4.0)
+_B62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+
+
+def mint_token(n=8):
+    import secrets
+    return "".join(secrets.choice(_B62) for _ in range(n))
+
+
+def _session_files():
+    try:
+        return [os.path.join(SESSIONS_DIR, f) for f in os.listdir(SESSIONS_DIR) if f.endswith(".json")]
+    except FileNotFoundError:
+        return []
+
+
+def list_sessions():
+    out = []
+    for f in _session_files():
+        d = load_json(f, None)
+        if isinstance(d, dict) and d.get("token"):
+            out.append(d)
+    return out
+
+
+def session_record(payload):
+    """The session record for this harness session_id, or None."""
+    sid = payload.get("session_id")
+    if not sid:
+        return None
+    for d in list_sessions():
+        if d.get("harness_session_id") == sid:
+            return d
+    return None
+
+
+def session_token(payload, create=False):
+    """Framework session token (base62-8) for the harness session in `payload`. With create=True a
+    missing record is minted (SessionStart does this; any hook may as a fallback). Returns "" when
+    unknown and not created (e.g. payload without session_id)."""
+    rec = session_record(payload)
+    if rec:
+        return rec["token"]
+    if not create or not payload.get("session_id"):
+        return ""
+    existing = {d["token"] for d in list_sessions()}
+    tok = mint_token()
+    while tok in existing:
+        tok = mint_token()
+    ensure_state_dir()
+    os.makedirs(SESSIONS_DIR, exist_ok=True)
+    rec = {"token": tok, "harness_session_id": payload["session_id"], "harness": harness(payload),
+           "operator": operator() or "", "started": time.time(), "last_seen": time.time()}
+    atomic_write(os.path.join(SESSIONS_DIR, tok + ".json"), json.dumps(rec, indent=1))
+    return tok
+
+
+def touch_session(payload):
+    """Heartbeat: update last_seen of this session's record (no-op when unknown)."""
+    rec = session_record(payload)
+    if not rec:
+        return
+    rec["last_seen"] = time.time()
+    try:
+        atomic_write(os.path.join(SESSIONS_DIR, rec["token"] + ".json"), json.dumps(rec, indent=1))
+    except Exception:
+        pass
+
+
+def other_active_sessions(payload, within=SESSION_ACTIVE_SEC):
+    """Other sessions whose heartbeat is within `within` seconds."""
+    me = session_token(payload)
+    now = time.time()
+    return [d for d in list_sessions() if d["token"] != me and now - float(d.get("last_seen", 0)) <= within]
+
+
+def prune_sessions(expire=SESSION_EXPIRE_SEC):
+    """Remove session records and per-session snapshots not seen for `expire` seconds."""
+    now = time.time()
+    for d in list_sessions():
+        if now - float(d.get("last_seen", 0)) > expire:
+            for f in (os.path.join(SESSIONS_DIR, d["token"] + ".json"), hashes_path(d["token"]), session_ids_path(d["token"])):
+                try:
+                    os.remove(f)
+                except OSError:
+                    pass
+
+
+def operator():
+    """Operator (user) name: TKSFW_USER → ~/.config/tksfw/user.toml (name = "…") → git config user.name → ""."""
+    v = os.environ.get("TKSFW_USER", "").strip()
+    if v:
+        return v
+    cfg = os.path.join(os.path.expanduser("~"), ".config", "tksfw", "user.toml")
+    try:
+        for line in open(cfg, encoding="utf-8"):
+            m = re.match(r'^\s*name\s*=\s*"(.*)"\s*$', line)
+            if m and m.group(1).strip():
+                return m.group(1).strip()
+    except OSError:
+        pass
+    try:
+        import subprocess
+        r = subprocess.run(["git", "config", "user.name"], capture_output=True, text=True, timeout=5, cwd=PROJECT_ROOT)
+        if r.returncode == 0 and r.stdout.strip():
+            return r.stdout.strip()
+    except Exception:
+        pass
+    return ""
+
+
+def hashes_path(token):
+    return os.path.join(STATE_DIR, f"hashes.{token}.json") if token else HASHES
+
+
+def session_ids_path(token):
+    """Per-session view of ledger/plan IDs last seen: attribution of a ledger write is 'what is new
+    relative to what THIS session saw', independent of which session's hook indexed it first."""
+    return os.path.join(STATE_DIR, f"ids.{token}.json")
 
 
 # ----------------------------------------------------------------------------- payload
@@ -471,19 +598,181 @@ def diff(before, after, globs):
     return changed
 
 
+# ----------------------------------------------------------------------------- ID index (1.4.0)
+_TASK_LINE = re.compile(r"^\s*-\s*\[[ xX]\]\s+([A-Za-z0-9._-]+)\s")
+
+
+def ledger_ids(rel):
+    """{id: owner_token} for a ledger (entries) or a plan file (TaskIDs, owner ""). {} when absent."""
+    path = os.path.join(PROJECT_ROOT, rel)
+    if not os.path.isfile(path):
+        return {}
+    name = os.path.basename(rel)
+    if name in PLAN_FILES:
+        out = {}
+        try:
+            for line in open(path, encoding="utf-8", errors="replace"):
+                m = _TASK_LINE.match(line)
+                if m:
+                    out.setdefault(m.group(1), "")
+        except OSError:
+            pass
+        return out
+    out = {}
+    for eid, fields in load_entries(path):
+        owner = fields.get("OwnerSessionId") if isinstance(fields, dict) else None
+        out[str(eid)] = str(owner) if owner else ""
+    return out
+
+
+def paths_from_tool_input(payload):
+    """Project-relative paths the triggering tool call names (Claude Code Write/Edit/MultiEdit/
+    NotebookEdit `file_path`; Codex apply_patch '*** Update/Add/Delete File:' lines). Set of rel paths."""
+    ti = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    out = set()
+    for k in ("file_path", "path", "notebook_path"):
+        v = ti.get(k)
+        if isinstance(v, str) and v:
+            out.add(_rel(v if os.path.isabs(v) else os.path.join(PROJECT_ROOT, v)))
+    for k in ("patch", "input", "command"):
+        v = ti.get(k)
+        if isinstance(v, list):
+            v = " ".join(str(x) for x in v)
+        if isinstance(v, str) and "*** " in v:
+            for m in re.finditer(r"\*\*\* (?:Update|Add|Delete) File: (.+)", v):
+                p = m.group(1).strip()
+                out.add(_rel(p if os.path.isabs(p) else os.path.join(PROJECT_ROOT, p)))
+    return out
+
+
+def _is_indexed(rel):
+    cls = classify(rel) or ""
+    return cls.startswith("ledger:") or cls == "plan"
+
+
+def _index_entry(index, rel):
+    e = index.get(rel)
+    if isinstance(e, dict) and "ids" in e:
+        return e
+    if isinstance(e, dict):                                # pre-1.4.0 shape {id: owner}
+        return {"hash": None, "ids": e}
+    return None
+
+
+def track_ids(changed, after, payload, token):
+    """Project-wide ID tracking (independent of this session's hash diff, so an A-B-A rewrite that
+    restores an older byte-identical file is still caught): for every ledger/plan file whose content
+    hash differs from the one last indexed by ANY hook run, recompute its IDs, attach added_ids /
+    removed_ids to the matching change (synthesising one when this session's diff did not see it),
+    and store the new hash+ids. Then attribute every change (own | external | ambiguous).
+    Must run under `locked()`."""
+    index = load_json(ID_INDEX, {}) or {}
+    by_path = {c["path"]: c for c in changed}
+    for rel in list(index) + [r for r in after if _is_indexed(r) and r not in index]:
+        if not _is_indexed(rel):
+            continue
+        h = after.get(rel)                                  # None = file gone
+        prev = _index_entry(index, rel)
+        if prev is not None and prev.get("hash") == h:
+            continue                                        # unchanged since last indexed
+        now = ledger_ids(rel) if h is not None else {}
+        before = prev["ids"] if prev is not None else None
+        added = {i: o for i, o in now.items() if before is None or i not in before}
+        removed = {i: o for i, o in (before or {}).items() if i not in now}
+        c = by_path.get(rel)
+        if c is None and prev is not None and (added or removed):
+            c = {"path": rel, "kind": "deleted" if h is None else "modified", "class": classify(rel), "synthetic": True}
+            changed.append(c)
+            by_path[rel] = c
+        if c is not None:
+            c["added_ids"], c["removed_ids"] = added, removed
+        index[rel] = {"hash": h, "ids": now}
+    # per-session view → attribution of ledger writes by content
+    view = load_json(session_ids_path(token), {}) if token else {}
+    for c in changed:
+        rel = c["path"]
+        if (c.get("class") or "").startswith("ledger:"):
+            cur = _index_entry(index, rel)
+            now = cur["ids"] if cur else {}
+            seen = view.get(rel)
+            c["new_for_session"] = {i: o for i, o in now.items() if seen is None or i not in seen}
+    if token:
+        for rel in after:
+            if _is_indexed(rel):
+                cur = _index_entry(index, rel)
+                view[rel] = cur["ids"] if cur else {}
+        for rel in [r for r in view if r not in after]:
+            view.pop(rel, None)
+        atomic_write(session_ids_path(token), json.dumps(view, indent=0, sort_keys=True))
+    named = paths_from_tool_input(payload)
+    others = bool(other_active_sessions(payload))
+    for c in changed:
+        cls = c.get("class") or ""
+        added = c.get("new_for_session") or c.get("added_ids") or {}
+        if cls.startswith("ledger:") and added:
+            owners = set(added.values())
+            if token and all(o and o != token for o in owners):
+                c["attrib"] = "external"
+                continue
+            if token and any(o == token for o in owners):
+                c["attrib"] = "own"
+                continue
+        if c["path"] in named:
+            c["attrib"] = "own"
+        elif others:
+            c["attrib"] = "ambiguous"
+        else:
+            c["attrib"] = "own"
+    atomic_write(ID_INDEX, json.dumps(index, indent=0, sort_keys=True))
+    return changed
+
+
+def seed_snapshot(payload):
+    """SessionStart: create the session record (token) and this session's baseline snapshot; index
+    ledger/plan IDs not yet indexed. Under `locked()`."""
+    token = session_token(payload, create=True)
+    after, _globs = snapshot()
+    hp = hashes_path(token)
+    if load_json(hp, None) is None:
+        atomic_write(hp, json.dumps(after, indent=0, sort_keys=True))
+    index = load_json(ID_INDEX, {}) or {}
+    for rel, h in after.items():
+        if _is_indexed(rel) and rel not in index:
+            index[rel] = {"hash": h, "ids": ledger_ids(rel)}
+    atomic_write(ID_INDEX, json.dumps(index, indent=0, sort_keys=True))
+    vp = session_ids_path(token)
+    if load_json(vp, None) is None:
+        atomic_write(vp, json.dumps({rel: ledger_ids(rel) for rel in after if _is_indexed(rel)}, indent=0, sort_keys=True))
+    return token
+
+
 def record_changes(payload, phase, tool_name=None, tool_use_id=None):
-    """Hash the watched set, compare to the stored baseline, journal the delta, store the new
-    baseline. Returns (changed, first_run). Must be called under `locked()`."""
-    before = load_json(HASHES, None)
+    """Hash the watched set, compare to THIS SESSION's baseline, attribute and journal the delta,
+    store the new baseline. Returns (changed, first_run). Must be called under `locked()`."""
+    token = session_token(payload, create=True)
+    touch_session(payload)
+    hp = hashes_path(token)
+    before = load_json(hp, None)
     after, globs = snapshot()
     first_run = before is None
     changed = [] if first_run else diff(before, after, globs)
+    if first_run:
+        index = load_json(ID_INDEX, {}) or {}
+        for rel, h in after.items():
+            if rel not in index and _is_indexed(rel):
+                index[rel] = {"hash": h, "ids": ledger_ids(rel)}
+        atomic_write(ID_INDEX, json.dumps(index, indent=0, sort_keys=True))
+    elif phase == "tool":
+        track_ids(changed, after, payload, token)             # may append synthetic changes
+    elif changed:
+        track_ids(changed, after, payload, token)
     delegation = bool(tool_name and tool_name in DELEGATION_TOOLS)
     if changed or delegation:
         append_journal({
             "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
             "harness": harness(payload),
             "session_id": payload.get("session_id"),
+            "session": token,
             "turn": turn_key(payload),
             "phase": phase,                       # tool | prompt | session
             "tool_name": tool_name,
@@ -492,7 +781,7 @@ def record_changes(payload, phase, tool_name=None, tool_use_id=None):
             "changed": changed,
         })
     if first_run or changed:
-        atomic_write(HASHES, json.dumps(after, indent=0, sort_keys=True))
+        atomic_write(hp, json.dumps(after, indent=0, sort_keys=True))
     return changed, first_run
 
 
@@ -516,6 +805,17 @@ def entries_for_turn(entries, payload):
     return out
 
 
+def external_changes(entries):
+    """Changes attributed to other sessions within the given journal entries: [(path, session)]."""
+    out = []
+    for e in entries:
+        for c in e.get("changed", []):
+            if c.get("attrib") == "external":
+                owners = {o for o in (c.get("new_for_session") or c.get("added_ids") or {}).values() if o}
+                out.append((c["path"], ",".join(sorted(owners)) or "?"))
+    return out
+
+
 def unlogged(entries):
     """Order-based, deterministic completeness check over journal entries (agent phases only):
       deliverable  edit to a registry-matched deliverable AFTER the last changes.yaml write
@@ -535,6 +835,8 @@ def unlogged(entries):
             last["delegation"] = i
         for c in e.get("changed", []):
             cls = c.get("class") or ""
+            if c.get("attrib") == "external":
+                continue                          # another session's write: neither ours to log nor a cover
             if cls == "ledger:changes":
                 last["changes"] = i
                 paths["deliverable"].clear(); paths["framework"].clear()

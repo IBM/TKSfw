@@ -31,9 +31,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hooklib as H  # noqa: E402
 
 
-def validate(rel_paths):
+def validate(rel_paths, added=None):
     """Run the skill validator on each changed ledger; return the concatenated failure report
-    ('' when all valid or the validator is missing)."""
+    ('' when all valid or the validator is missing). `added` maps rel → IDs new in this write: those
+    entries must carry OwnerSessionId/OwnerSessionUserName (1.4.0)."""
     if not os.path.exists(H.VALIDATOR):
         return ""
     reports = []
@@ -41,15 +42,49 @@ def validate(rel_paths):
         path = os.path.join(H.PROJECT_ROOT, rel)
         if not os.path.exists(path):
             continue                                   # deleted ledger: nothing to validate
+        cmd = [sys.executable, H.VALIDATOR, path]
+        ids = sorted((added or {}).get(rel) or [])
+        if ids:
+            cmd += ["--require-owner", ",".join(ids)]
         try:
-            res = subprocess.run([sys.executable, H.VALIDATOR, path],
-                                 capture_output=True, text=True, timeout=30)
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         except Exception as e:                         # never wedge on a tooling error
             H.log(f"track_edits: validator error on {rel}: {e}")
             continue
         if res.returncode != 0:
             reports.append(f"[{rel}]\n{(res.stdout or '') + (res.stderr or '')}".rstrip())
     return "\n".join(reports)
+
+
+def lost_updates(changed, token):
+    """Entries/tasks that disappeared in this write and must not have (1.4.0 lost-update guard):
+      append-only ledgers  any removed EntryID
+      mutable ledgers      removed entries owned by ANOTHER session (own ones may be rewritten)
+      tasks.md             removed TaskIDs not present in tasks-archive.md (the archive move is the exemption)
+    Returns a report string ('' when clean)."""
+    out = []
+    archive_ids = None
+    for c in changed:
+        removed = c.get("removed_ids") or {}
+        if not removed:
+            continue
+        cls = c.get("class") or ""
+        rel = c["path"]
+        if cls.startswith("ledger:"):
+            kind = cls.split(":", 1)[1]
+            if kind in H.APPEND_ONLY_LEDGERS:
+                bad = removed
+            else:
+                bad = {i: o for i, o in removed.items() if o and o != token}
+            if bad:
+                out.append(f"[{rel}] removed: " + ", ".join(f"{i} (session {o or 'legacy'})" for i, o in sorted(bad.items())))
+        elif cls == "plan" and os.path.basename(rel) == "tasks.md":
+            if archive_ids is None:
+                archive_ids = H.ledger_ids(os.path.join(H.WORKAREA_REL, "tasks-archive.md"))
+            bad = [i for i in removed if i not in archive_ids]
+            if bad:
+                out.append(f"[{rel}] TaskIDs removed without archiving: " + ", ".join(sorted(bad)))
+    return "\n".join(out)
 
 
 def lint_plan(rel_paths):
@@ -153,9 +188,17 @@ def main():
     if deleted_agents:
         prune_mirrors(deleted_agents)
     plans = [c["path"] for c in changed if c.get("class") == "plan" and c["kind"] != "deleted"]
-    if not ledgers and not agents and not plans:
+    token = H.session_token(payload)
+    lost = lost_updates(changed, token)
+    if not ledgers and not agents and not plans and not lost:
         sys.exit(0)
     messages = []
+    if lost:
+        messages.append(
+            "LOST UPDATE — this write removed entries that another session (or an earlier turn) recorded. "
+            "Re-read the file and restore them; append-only ledgers never lose entries, tasks.md items move "
+            "only to tasks-archive.md:\n" + lost)
+    added = {c["path"]: list((c.get("added_ids") or {}).keys()) for c in changed if (c.get("class") or "").startswith("ledger:")}
     plan_errors, plan_warnings = lint_plan(plans) if plans else ("", "")
     if plan_errors:
         messages.append(
@@ -163,11 +206,12 @@ def main():
             f"yaml-log-entry skill (grammar: {os.path.join(os.path.dirname(H.SCHEMAS_MD), 'tasks.md')}). Expected: "
             "'- [ ] <TaskID> <Title> - <AgentName> : <OPEN|IN-PROGRESS|WAITING-FOR|COMPLETED> <YYYY-MM-DD hh:mm:ss>' "
             "([x] iff COMPLETED; completed leaf tasks add [ev:<EventID>]):\n" + plan_errors)
-    report = validate(ledgers) if ledgers else ""
+    report = validate(ledgers, added) if ledgers else ""
     if report:
         messages.append(
             "Workarea YAML validation FAILED — fix the entry before continuing "
-            "— load the yaml-log-entry skill: schemas in "
+            f"— load the yaml-log-entry skill (new entries carry OwnerSessionId: {token or '<session token>'} and "
+            "OwnerSessionUserName): schemas in "
             f"{H.SCHEMAS_MD}, ID minting in {os.path.join(H.VALIDATOR_DIR, 'new_entry_id.py')}:\n" + report)
     areport = validate_agents(agents) if agents else ""
     if areport:

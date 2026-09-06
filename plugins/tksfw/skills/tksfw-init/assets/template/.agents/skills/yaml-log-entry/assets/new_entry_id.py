@@ -21,7 +21,12 @@ Usage:
     python3 new_entry_id.py [logfile]                       # changes/lessons/events
     python3 new_entry_id.py handoffs.yaml --handoff BEGIN    # -> <stem>-BEGIN
     python3 new_entry_id.py handoffs.yaml --handoff END --stem <stem>   # -> <stem>-END
-Output: "<ID>\\t<YYYY-MM-DD hh:mm:ss>"  (tab-separated, one line)
+    python3 new_entry_id.py changes.yaml --stamp [--session <token>]     # ID + Timestamp + owner fields
+Output: "<ID>\\t<YYYY-MM-DD hh:mm:ss>"  (tab-separated, one line); with --stamp a ready YAML head:
+    - <ID>:
+        Timestamp: "<ts>"
+        OwnerSessionId: <token>           (--session, else the single active session, else <session-token>)
+        OwnerSessionUserName: <operator>  (TKSFW_USER → ~/.config/tksfw/user.toml → git config user.name)
 Needs:  stdlib only. Uses pyyaml to read existing IDs if importable, else a line scan.
 """
 import sys
@@ -69,12 +74,67 @@ def gen_stem(used_stems):
             return s
 
 
+def _operator():
+    import os, subprocess
+    v = os.environ.get("TKSFW_USER", "").strip()
+    if v:
+        return v
+    cfg = os.path.join(os.path.expanduser("~"), ".config", "tksfw", "user.toml")
+    try:
+        for line in open(cfg, encoding="utf-8"):
+            m = re.match(r'^\s*name\s*=\s*"(.*)"\s*$', line)
+            if m and m.group(1).strip():
+                return m.group(1).strip()
+    except OSError:
+        pass
+    try:
+        r = subprocess.run(["git", "config", "user.name"], capture_output=True, text=True, timeout=5)
+        if r.returncode == 0 and r.stdout.strip():
+            return r.stdout.strip()
+    except Exception:
+        pass
+    return "<operator: set TKSFW_USER>"
+
+
+def _session(args):
+    import os, json, time
+    if args.session:
+        return args.session
+    # single active session on this project (hook-state sessions/ next to the ledger, or under cwd)
+    for base in ([os.path.dirname(os.path.abspath(args.logfile))] if args.logfile else []) + [os.path.join(os.getcwd(), ".agents", "workarea")]:
+        d = os.path.join(base, ".hook-state", "sessions")
+        try:
+            act = []
+            for f in os.listdir(d):
+                if f.endswith(".json"):
+                    rec = json.load(open(os.path.join(d, f)))
+                    if time.time() - float(rec.get("last_seen", 0)) <= 1800:
+                        act.append(rec["token"])
+            if len(act) == 1:
+                return act[0]
+        except Exception:
+            continue
+    return "<session-token>"
+
+
+def emit(eid, ts, args):
+    if not getattr(args, "stamp", False):
+        print(f"{eid}\t{ts}")
+        return
+    print(f"- {eid}:")
+    print(f'    Timestamp: "{ts}"')
+    print(f"    OwnerSessionId: {_session(args)}")
+    print(f"    OwnerSessionUserName: {_operator()}")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Mint a ledger entry ID + timestamp.")
     ap.add_argument("logfile", nargs="?", help="target ledger; enforces ID uniqueness")
     ap.add_argument("--handoff", choices=["BEGIN", "END"],
                     help="mint a composite HandoffID <stem>-STATE")
     ap.add_argument("--stem", help="reuse this base62 stem (for the END half of a handoff)")
+    ap.add_argument("--stamp", action="store_true", help="print a YAML entry head with the owner fields")
+    ap.add_argument("--session", help="session token for OwnerSessionId (shown at session start)")
     args = ap.parse_args()
 
     ids = existing_ids(args.logfile) if args.logfile else set()
@@ -87,9 +147,9 @@ def main():
             stem = args.stem
         else:
             stem = gen_stem(stems(ids))
-        print(f"{stem}-{args.handoff}\t{ts}")
+        emit(f"{stem}-{args.handoff}", ts, args)
     else:
-        print(f"{gen_stem(stems(ids))}\t{ts}")
+        emit(gen_stem(stems(ids)), ts, args)
 
 
 if __name__ == "__main__":

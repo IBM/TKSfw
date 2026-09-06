@@ -139,6 +139,7 @@
 
 - `Layer` (Change Log) reuses the L1–L4 / Group A–B taxonomy, so classification is mechanical: `METHOD` = `AGENTS.md`, Group-A skills, `.agents/hooks/**`, harness config (`.codex/config.toml`, `.claude/settings.json`) — reusable across all projects · `ARCHETYPE` = the archetype spec, Group-B skills, reusable scaffolding — reusable across instances of this archetype · `PROJECT` = the project spec, the deliverables, instance-specific data — this instance only.
 - Enforcement is harness-level, not memory: a `PostToolUse` hook detects writes to the ledgers by content hashing (any tool, shell or script) and blocks a malformed entry, feeding back the validator's report; a `Stop` hook advises when a deliverable/framework edit or a delegation looks un-logged (from the hash journal, never the transcript).
+- **Ownership:** every new entry carries `OwnerSessionId` (the session token shown at session start) and `OwnerSessionUserName` (the operator) — `new_entry_id.py --stamp` prints both; the hook rejects new entries without them and blocks lost updates (entries or TaskIDs that disappear). Parallel sessions on one project are tolerated and guarded, not a design target — coordinate before touching the same files.
 
 #### Deliverables Registry
 
@@ -147,7 +148,7 @@
 
 #### Agent Work Areas
 
-- `.agents/workarea/<agent-name>/<task-id>` (fallback when git worktrees are unavailable) or `.agents/worktrees/<agent>--<task-id>`; created and pruned with the `delegate-work` skill. Ledger entries and `tasks.md` status always go to the canonical `.agents/workarea/`, never to a worktree-local copy.
+- Key `<session-token>.<task-id>.<instance>`: `.agents/workarea/<agent-name>/<key>/` (fallback when git worktrees are unavailable) or `.agents/worktrees/<agent>--<key>/`; created (instance allocated, never chosen by hand) and pruned with the `delegate-work` skill's `workarea.py … --session <token>`. Ledger entries and `tasks.md` status always go to the canonical `.agents/workarea/`, never to a worktree-local copy.
 
 ## Execution Guidelines
 

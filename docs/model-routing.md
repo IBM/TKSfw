@@ -70,7 +70,7 @@ with the other provider; the matching `[routing.<key>]` table is selected automa
 
 | Key | Default | Enforced by |
 |---|---|---|
-| `max_parallel_agents` | 4 | `route_model.py` denies the (N+1)th spawn while N subagents are live (`subagent_track.py` on SubagentStart/Stop) |
+| `max_parallel_agents` | 4 | `route_model.py` denies the (N+1)th spawn while N subagents of THIS session are live (`subagent_track.py` on SubagentStart/Stop; per session since 1.4.0); also bounds work-area instance numbers |
 | `deny_nested_spawn` | true | `route_model.py` denies a spawn whose hook payload shows a subagent context (Claude Code top-level `agent_id`/`agent_type`; Codex thread path depth ≥ 1). Set to false if a harness ever reports these fields for the main session |
 
 ## Constraints on model IDs

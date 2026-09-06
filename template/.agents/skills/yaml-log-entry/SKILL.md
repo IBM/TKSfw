@@ -119,3 +119,13 @@ with the expected grammar; evidence findings (COMPLETED leaf without `[ev:…]`)
 | `python3 assets/new_entry_id.py` | mint a TaskID (same base62 minting as ledger IDs) |
 | `python3 assets/tasks_lint.py [tasks.md] [--json]` | exit 0 clean · 1 warnings · 2 errors |
 | `python3 assets/cross_check.py` | FK resolution across ledgers and plan (live + archive) |
+
+## Ownership and parallel sessions (1.4.0)
+
+Every new entry carries `OwnerSessionId` (the session token shown at session start) and
+`OwnerSessionUserName` (the operator). `python3 assets/new_entry_id.py <ledger> --stamp [--session <token>]`
+prints the entry head with both. The PostToolUse hook requires them on the IDs a write adds and blocks a
+**lost update**: any EntryID that disappears from an append-only ledger, an entry owned by another session
+that disappears from `decisions.yaml`/`deliverables.yaml`, or a TaskID that leaves `tasks.md` without
+appearing in `tasks-archive.md`. On that block: re-read the file, restore the named entries, re-apply your
+change. Parallel sessions on one project are tolerated (guarded, attributed), not a design target.

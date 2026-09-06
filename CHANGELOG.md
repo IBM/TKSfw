@@ -2,6 +2,22 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [1.4.0] — 2026-09-06
+
+Parallel sessions: session token, entry ownership, lost-update guard, session-keyed work areas.
+
+### Added
+- Session token (base62-8) minted per harness session by `inject_state.py`, injected with the operator name (`TKSFW_USER` → `~/.config/tksfw/user.toml` → `git config user.name`); heartbeat per hook run; warning when another session is active; records pruned after 24 h.
+- Ledger schemas: `OwnerSessionId` / `OwnerSessionUserName` on all six files — required for new entries (`validate_yaml_log.py --require-owner`), accepted absent on legacy entries. `new_entry_id.py --stamp [--session]` prints a ready entry head.
+- Lost-update guard in `track_edits.py` (exit 2): EntryID removed from an append-only ledger; another session's entry removed from `decisions.yaml`/`deliverables.yaml`; TaskID removed from `tasks.md` without appearing in `tasks-archive.md`. Project-wide ID index keyed by file hash — catches A-B-A rewrites.
+- Per-session snapshots (`hashes.<token>.json`, `ids.<token>.json`) and change attribution `own | external | ambiguous`; external changes never count as unlogged nor as covering entries; Stop hook reports them.
+- `workarea.py`: key `<session>.<task>.<instance>` (instance allocated atomically, `< max_parallel_agents`; `--instance` to reuse; `--session` required when several sessions are active); `prune --session`; worktrees use the same key.
+- `subagent_track.py` / `route_model.py`: live-subagent cap per session; Stop clears only the own session.
+- ADR 0008 (incl. queue evaluation); docs; 21 new repo tests (122 total), skill tests updated.
+
+### Changed
+- AGENTS.md: § YAML-based Logs ownership line; § Agent Work Areas key (16,514 → 17,043 B).
+
 ## [1.3.0] — 2026-09-06
 
 Activity plan: rules stay in AGENTS.md; grammar and procedure move to `yaml-log-entry`; syntax is hook-enforced.

@@ -31,6 +31,11 @@
  13. Activity plan: tasks_lint severity split; the PostToolUse hook blocks malformed tasks.md writes
      (exit 2) and only advises on missing evidence; tasks-archive.md is not linted; AGENTS.md keeps
      the five rules and points to yaml-log-entry/references/tasks.md; STATE.md archive hint
+ 14. Parallel sessions (1.4.0): session token + operator injected at SessionStart, other-session
+     warning; owner fields required on new entries; lost-update guard (append-only removal, foreign
+     removal in decisions, own removal allowed, TaskID removal vs archive move, A-B-A rewrite);
+     per-session attribution (external ledger entry, ambiguous unnamed edit); per-session live cap;
+     work areas keyed <session>.<task>.<n>
 """
 import sys
 sys.dont_write_bytecode = True
@@ -481,6 +486,118 @@ def main():
         open(tmd, "w").write("# Block A\n- [x] AAAA1111 a - main : COMPLETED 2026-09-06 10:00:00 [ev:Tstevt01]\n# Block B\n- [ ] BBBB2222 b - main : OPEN 2026-09-06 10:00:00\n")
         r = run([PY, os.path.join(plug, "hooks", "refresh_state.py"), "--print"], cwd=pproj, env=penv)
         check("STATE.md reports archivable plan blocks", "Archivable plan blocks: 1" in r.stdout and "Block A" in r.stdout, r.stdout[-400:])
+
+        # 14 — parallel sessions
+        sproj = os.path.join(tmp, "sessions")
+        run([PY, os.path.join(work, "tools", "new_project.py"), sproj, "--plugin-mode"])
+        senv = penv | {"TKSFW_USER": "carlos"}
+        wa = os.path.join(sproj, ".agents", "workarea")
+        def hook(script, sid, turn, extra, env=senv, args=()):
+            return run([PY, os.path.join(plug, "hooks", script), *args], cwd=sproj, env=env,
+                       inp=json.dumps({"session_id": sid, "turn_id": turn, "cwd": sproj, **extra}))
+        def post(sid, turn, path, tool="Write"):
+            ti = {"file_path": os.path.join(sproj, path)} if tool == "Write" else {"command": "ls"}
+            return hook("track_edits.py", sid, turn, {"hook_event_name": "PostToolUse", "tool_name": tool,
+                                                      "tool_use_id": f"u{len(os.listdir(wa))}{turn}{abs(hash(path)) % 997}", "tool_input": ti})
+        def token_of(sid):
+            for f in os.listdir(os.path.join(wa, ".hook-state", "sessions")):
+                d = json.load(open(os.path.join(wa, ".hook-state", "sessions", f)))
+                if d["harness_session_id"] == sid:
+                    return d["token"]
+            return ""
+        def change_entry(eid, owner, user):
+            return (f"- {eid}:\n    AuthorAgent: main\n    Model: gpt-5.6-sol\n    Timestamp: \"2026-09-06 10:00:00\"\n"
+                    f"    OwnerSessionId: {owner}\n    OwnerSessionUserName: {user}\n    Layer: PROJECT\n    Title: \"{eid}\"\n"
+                    "    Description: |-\n      x\n    StateBefore: |-\n      x\n    StateAfter: |-\n      x\n    Remarks: |-\n      x\n")
+        rA = hook("inject_state.py", "SA", "a1", {"source": "startup"})
+        ctxA = json.loads(rA.stdout)["hookSpecificOutput"]["additionalContext"]
+        tA = token_of("SA")
+        check("SessionStart injects session token and operator", len(tA) == 8 and f"Session token: {tA}" in ctxA and "Operator: carlos" in ctxA, ctxA[:300])
+        rB = hook("inject_state.py", "SB", "b1", {"source": "startup"})
+        ctxB = json.loads(rB.stdout)["hookSpecificOutput"]["additionalContext"]
+        tB = token_of("SB")
+        check("second session gets its own token and a warning about the first", tB and tB != tA and "WARNING: 1 other session" in ctxB and tA in ctxB, ctxB[:400])
+        r = hook("inject_state.py", "SA", "a1", {"source": "resume"})
+        check("resume keeps the same token", f"Session token: {tA}" in json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"])
+        ch = os.path.join(wa, "changes.yaml")
+        open(ch, "w").write(change_entry("Aaaa1111", tA, "carlos"))
+        r = post("SA", "a1", ".agents/workarea/changes.yaml")
+        check("entry with owner fields accepted", r.returncode == 0, r.stderr[:300])
+        open(ch, "a").write(change_entry("Bbbb2222", tB, "bob").replace(f"    OwnerSessionId: {tB}\n    OwnerSessionUserName: bob\n", ""))
+        r = post("SB", "b1", ".agents/workarea/changes.yaml")
+        check("new entry without owner fields is rejected", r.returncode == 2 and "OwnerSessionId" in r.stderr, r.stderr[:300])
+        open(ch, "w").write(change_entry("Aaaa1111", tA, "carlos") + change_entry("Bbbb2222", tB, "bob"))
+        r = post("SB", "b1", ".agents/workarea/changes.yaml")
+        check("corrected entry accepted", r.returncode == 0, r.stderr[:300])
+        open(ch, "w").write(change_entry("Aaaa1111", tA, "carlos"))          # byte-identical to A's last view
+        r = post("SA", "a1", ".agents/workarea/changes.yaml")
+        check("A-B-A rewrite that drops another session's entry is blocked as LOST UPDATE",
+              r.returncode == 2 and "LOST UPDATE" in r.stderr and "Bbbb2222" in r.stderr and tB in r.stderr, r.stderr[:300])
+        open(ch, "w").write(change_entry("Aaaa1111", tA, "carlos") + change_entry("Bbbb2222", tB, "bob"))
+        r = post("SA", "a1", ".agents/workarea/changes.yaml")
+        check("restored file accepted", r.returncode == 0, r.stderr[:300])
+        # attribution: B's unnamed hook run sees A's ledger write as external
+        open(ch, "a").write(change_entry("Cccc3333", tA, "carlos"))
+        post("SA", "a1", ".agents/workarea/changes.yaml")
+        open(os.path.join(sproj, "AGENTS.md"), "a").write("\n# touched by A\n")
+        post("SA", "a1", "AGENTS.md")
+        r = post("SB", "b1", "x", tool="Bash")
+        jl = [json.loads(l) for l in open(os.path.join(wa, ".hook-state", "journal.jsonl"))]
+        lastB = [e for e in jl if e.get("session") == tB][-1]["changed"]
+        att = {c["path"].split("/")[-1]: c.get("attrib") for c in lastB}
+        check("B sees A's ledger entry as external and A's unnamed edit as ambiguous",
+              att.get("changes.yaml") == "external" and att.get("AGENTS.md") == "ambiguous", str(att))
+        r = hook("check_ledgers_on_stop.py", "SB", "b1", {"hook_event_name": "Stop"})
+        check("B's Stop reports the external change and still reminds about the ambiguous edit",
+              "other session(s) observed" in r.stdout and "AGENTS.md" in r.stdout, r.stdout[:300])
+        # decisions: own removal allowed, foreign blocked
+        dec = os.path.join(wa, "decisions.yaml")
+        good_dec = open(os.path.join(REPO, "template", ".agents", "skills", "yaml-log-entry", "tests", "fixtures", "good_decisions.yaml")).read()
+        def dec_entry(eid, owner, user):
+            return good_dec.replace("Tstdec01", eid).replace('    LastUpdate: "2026-07-21 10:00:00"\n', f'    LastUpdate: "2026-07-21 10:00:00"\n    OwnerSessionId: {owner}\n    OwnerSessionUserName: {user}\n')
+        open(dec, "w").write(dec_entry("Dddd1111", tA, "carlos") + dec_entry("Eeee2222", tB, "bob"))
+        r = post("SA", "a2", ".agents/workarea/decisions.yaml")
+        check("decisions with owners accepted", r.returncode == 0, r.stderr[:300])
+        open(dec, "w").write(dec_entry("Eeee2222", tB, "bob"))
+        r = post("SA", "a2", ".agents/workarea/decisions.yaml")
+        check("removing an OWN decision entry is allowed (mutable ledger)", r.returncode == 0, r.stderr[:300])
+        open(dec, "w").write(dec_entry("Ffff3333", tA, "carlos"))
+        r = post("SA", "a2", ".agents/workarea/decisions.yaml")
+        check("removing ANOTHER session's decision entry is blocked", r.returncode == 2 and "Eeee2222" in r.stderr, r.stderr[:300])
+        # tasks: removal vs archive
+        tmd = os.path.join(wa, "tasks.md")
+        open(tmd, "w").write("# plan\n- [ ] T001 a - main : OPEN 2026-09-06 10:00:00\n- [ ] T002 b - main : OPEN 2026-09-06 10:00:00\n")
+        post("SA", "a3", ".agents/workarea/tasks.md")
+        open(tmd, "w").write("# plan\n- [ ] T002 b - main : OPEN 2026-09-06 10:00:00\n")
+        r = post("SA", "a3", ".agents/workarea/tasks.md")
+        check("TaskID removed without archiving is blocked", r.returncode == 2 and "T001" in r.stderr, r.stderr[:300])
+        open(os.path.join(wa, "tasks-archive.md"), "w").write("- [ ] T001 a - main : OPEN 2026-09-06 10:00:00\n")
+        r = post("SA", "a3", ".agents/workarea/tasks.md")
+        check("archive move is accepted", r.returncode == 0, r.stderr[:300])
+        # per-session cap
+        for i in range(4):
+            hook("subagent_track.py", "SA", "a4", {"hook_event_name": "SubagentStart", "agent_id": f"sa{i}", "agent_type": "x-builder"}, args=["--start"])
+        rA = hook("route_model.py", "SA", "a4", {"hook_event_name": "PreToolUse", "tool_name": "spawn_agent", "tool_input": {"agent_type": "sources-researcher"}})
+        rB = hook("route_model.py", "SB", "b4", {"hook_event_name": "PreToolUse", "tool_name": "spawn_agent", "tool_input": {"agent_type": "sources-researcher"}})
+        check("live-subagent cap is per session", '"deny"' in rA.stdout and '"allow"' in rB.stdout, rA.stdout[:200] + rB.stdout[:200])
+        hook("check_ledgers_on_stop.py", "SA", "a4", {"hook_event_name": "Stop"})
+        rA = hook("route_model.py", "SA", "a5", {"hook_event_name": "PreToolUse", "tool_name": "spawn_agent", "tool_input": {"agent_type": "sources-researcher"}})
+        check("A's Stop clears only A's live set", '"allow"' in rA.stdout, rA.stdout[:200])
+        # work areas keyed by session
+        watool = os.path.join(plug, "skills", "delegate-work", "assets", "workarea.py")
+        r1 = run([PY, watool, "create", "x-builder", "T002", "--session", tA], cwd=sproj, env=senv)
+        r2 = run([PY, watool, "create", "x-builder", "T002", "--session", tA], cwd=sproj, env=senv)
+        r3 = run([PY, watool, "create", "x-builder", "T002", "--session", tB], cwd=sproj, env=senv)
+        check("work areas: <session>.<task>.<instance>, instances allocated, sessions separate",
+              r1.stdout.strip().endswith(f"{tA}.T002.0") and r2.stdout.strip().endswith(f"{tA}.T002.1") and r3.stdout.strip().endswith(f"{tB}.T002.0"),
+              r1.stdout + r2.stdout + r3.stdout + r3.stderr)
+        r = run([PY, watool, "create", "x-builder", "T002"], cwd=sproj, env=senv)
+        check("--session required while two sessions are active", r.returncode != 0 and "2 sessions" in r.stderr, r.stderr)
+        stamp = run([PY, os.path.join(plug, "skills", "yaml-log-entry", "assets", "new_entry_id.py"), ch, "--stamp", "--session", tA], cwd=sproj, env=senv)
+        check("new_entry_id --stamp prints owner fields", f"OwnerSessionId: {tA}" in stamp.stdout and "OwnerSessionUserName: carlos" in stamp.stdout, stamp.stdout)
+        agents_md = open(os.path.join(REPO, "template", "AGENTS.md"), encoding="utf-8").read()
+        check("AGENTS.md carries the ownership rule and the session-keyed work-area line",
+              "OwnerSessionId" in agents_md and "<session-token>.<task-id>.<instance>" in agents_md)
 
         agents_md = open(os.path.join(full, "AGENTS.md"), encoding="utf-8").read()
         check("AGENTS.md keeps the naming kernel and points to define-agent",

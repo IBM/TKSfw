@@ -70,15 +70,19 @@ def main():
         sys.exit(0)
     try:                                               # main stopped → every subagent has returned
         import subagent_track
-        subagent_track.clear()
+        subagent_track.clear(H.session_token(payload))
     except Exception:
         pass
     stale = stale_workareas()
+    ext = H.external_changes(turn_entries)
 
-    if not any(flags.values()) and not stale:
+    if not any(flags.values()) and not stale and not ext:
         sys.exit(0)                                    # silent on clean turns
 
     items = []
+    if ext:
+        items.append(f"• {len(ext)} change(s) by other session(s) observed this turn — not attributed to you: "
+                     + ", ".join(f"{p} (session {s})" for p, s in ext[:4]) + (" …" if len(ext) > 4 else ""))
     if stale:
         items.append("• Stale subagent isolation left behind (task COMPLETED / branch merged): "
                      + ", ".join(stale[:6]) + (" …" if len(stale) > 6 else "")

@@ -11,6 +11,7 @@ validator **and** add a fixture under `tests/fixtures/` (see `SKILL.md § Tests`
 - Each file is a YAML **list of single-key mappings**: the entry ID is the key, its fields are the nested mapping (this keeps entries foldable in editors).
 - Ledger IDs are random base62 strings of 8 characters; Handoff IDs are `<base62-8>-<BEGIN|END>`. Mint them with `assets/new_entry_id.py` — never invent an ID or a timestamp.
 - Timestamps use `"YYYY-MM-DD hh:mm:ss"` (quoted). Decisions use `LastUpdate`, every other ledger uses `Timestamp`.
+- **Ownership (1.4.0):** every new entry in every ledger and in the registry carries `OwnerSessionId` (the 8-char base62 session token the SessionStart hook shows in context) and `OwnerSessionUserName` (the operator: `TKSFW_USER` → `~/.config/tksfw/user.toml` `name = "…"` → `git config user.name`; also shown at session start). They make entries attributable across parallel sessions and let the hook block lost updates. Required for new entries (the PostToolUse hook enforces it for the IDs a write adds); entries older than 1.4.0 are accepted without them and never rewritten. `assets/new_entry_id.py --stamp` prints both.
 - `Title` fields are at most 80 characters.
 - Memo-like fields (any free-prose field that can run long or span lines) MUST use the literal block scalar `|-` so content is preserved verbatim and stays foldable; short single-line fields remain inline; the block body must be indented consistently under its key (4 spaces for fields, 6 for block bodies, as in the examples).
 - `Scope` is dual-typed by log: in the Handoff and Event logs it is a short single-line field (≤ 80 chars, inline); in the Decision Log it is a memo (`|-`). Never convert the Handoff/Event `Scope` to a block scalar.
@@ -26,6 +27,8 @@ validator **and** add a fixture under `tests/fixtures/` (see `SKILL.md § Tests`
 - File Schema:
 	- ChangeID: random base62 string of 8 characters.
 		- AuthorAgent: Agent name
+		- OwnerSessionId: session token (base62-8) — see Ownership
+		- OwnerSessionUserName: operator name — see Ownership
 		- Model: Model name used
 		- Timestamp: with format "YYYY-MM-DD hh:mm:ss"
 		- Layer: < METHOD | ARCHETYPE | PROJECT > — the scope of the change (see Clarifications and the Layer table).
@@ -39,6 +42,8 @@ validator **and** add a fixture under `tests/fixtures/` (see `SKILL.md § Tests`
 ```yaml
 - 7Kd2Rf9Q:
     AuthorAgent: main
+    OwnerSessionId: Xk9Qm2Ab
+    OwnerSessionUserName: cveira
     Model: gpt-5.6-sol
     Timestamp: "2026-07-21 11:05:00"
     Layer: METHOD
@@ -73,6 +78,8 @@ validator **and** add a fixture under `tests/fixtures/` (see `SKILL.md § Tests`
 - File Schema:
 	- DecisionID: random base62 string of 8 characters.
 		- AuthorAgent: Agent name
+		- OwnerSessionId: session token (base62-8) — see Ownership
+		- OwnerSessionUserName: operator name — see Ownership
 		- Model: Model name used
 		- LastUpdate: with format "YYYY-MM-DD hh:mm:ss"
 		- Title: Summarize to a maximum of 80 characters
@@ -97,6 +104,8 @@ validator **and** add a fixture under `tests/fixtures/` (see `SKILL.md § Tests`
 ```yaml
 - Qv7mK2pL:
     AuthorAgent: planner
+    OwnerSessionId: Xk9Qm2Ab
+    OwnerSessionUserName: cveira
     Model: gpt-5.6-sol
     LastUpdate: "2026-07-21 15:00:00"
     Title: "Store records as newline-delimited JSON rather than one array"
@@ -126,6 +135,8 @@ validator **and** add a fixture under `tests/fixtures/` (see `SKILL.md § Tests`
         - 7Kd2Rf9Q
 - Rt9xN4wB:
     AuthorAgent: main
+    OwnerSessionId: Xk9Qm2Ab
+    OwnerSessionUserName: cveira
     Model: gpt-5.6-sol
     LastUpdate: "2026-07-21 16:30:00"
     Title: "Adopt a columnar on-disk format for the record set"
@@ -171,6 +182,8 @@ validator **and** add a fixture under `tests/fixtures/` (see `SKILL.md § Tests`
 - File Schema:
 	- LessonID: random base62 string of 8 characters.
 		- AuthorAgent: Agent name
+		- OwnerSessionId: session token (base62-8) — see Ownership
+		- OwnerSessionUserName: operator name — see Ownership
 		- Model: Model name used
 		- Timestamp: with format "YYYY-MM-DD hh:mm:ss"
 		- Title: Summarize to a maximum of 80 characters
@@ -181,6 +194,8 @@ validator **and** add a fixture under `tests/fixtures/` (see `SKILL.md § Tests`
 ```yaml
 - Wq2sL8dH:
     AuthorAgent: validator
+    OwnerSessionId: Xk9Qm2Ab
+    OwnerSessionUserName: cveira
     Model: gpt-5.6-sol
     Timestamp: "2026-07-21 11:10:00"
     Title: "Confirm a generated file reproduces before using it as a baseline"
@@ -206,6 +221,8 @@ validator **and** add a fixture under `tests/fixtures/` (see `SKILL.md § Tests`
 		- EventID: reference to the corresponding `events.yaml` entry.
 		- TaskID: reference to the corresponding `tasks.md` entry.
 		- AuthorAgent: Agent name
+		- OwnerSessionId: session token (base62-8) — see Ownership
+		- OwnerSessionUserName: operator name — see Ownership
 		- TargetAgent: Agent name
 		- Timestamp: with format "YYYY-MM-DD hh:mm:ss"
 		- Title: Summarize to a maximum of 80 characters
@@ -226,6 +243,8 @@ validator **and** add a fixture under `tests/fixtures/` (see `SKILL.md § Tests`
     EventID: 8sT4wN1c
     TaskID: Kp3nR8wQ
     AuthorAgent: main
+    OwnerSessionId: Xk9Qm2Ab
+    OwnerSessionUserName: cveira
     TargetAgent: data-fetcher
     Timestamp: "2026-07-21 11:15:00"
     Title: "Fetch source records for the in-scope set"
@@ -244,6 +263,8 @@ validator **and** add a fixture under `tests/fixtures/` (see `SKILL.md § Tests`
     EventID: 8sT4wN1c
     TaskID: Kp3nR8wQ
     AuthorAgent: data-fetcher
+    OwnerSessionId: Xk9Qm2Ab
+    OwnerSessionUserName: cveira
     TargetAgent: main
     Timestamp: "2026-07-21 11:40:00"
     Title: "Fetched source records for the in-scope set"
@@ -286,6 +307,8 @@ validator **and** add a fixture under `tests/fixtures/` (see `SKILL.md § Tests`
 	- EventID: random base62 string of 8 characters.
 		- TaskID: reference to the corresponding `tasks.md` entry.
 		- AuthorAgent: Agent name
+		- OwnerSessionId: session token (base62-8) — see Ownership
+		- OwnerSessionUserName: operator name — see Ownership
 		- Model: Model name used
 		- Timestamp: with format "YYYY-MM-DD hh:mm:ss"
 		- EventType: < TASK | HANDOFF | ISSUE | CHANGE | DECISION | REVIEW | AUDIT | APPROVAL | TEST >
@@ -307,6 +330,8 @@ validator **and** add a fixture under `tests/fixtures/` (see `SKILL.md § Tests`
 - 8sT4wN1c:
     TaskID: Kp3nR8wQ
     AuthorAgent: data-fetcher
+    OwnerSessionId: Xk9Qm2Ab
+    OwnerSessionUserName: cveira
     Model: gpt-5.6-luna
     Timestamp: "2026-07-21 11:40:00"
     EventType: HANDOFF
@@ -317,6 +342,8 @@ validator **and** add a fixture under `tests/fixtures/` (see `SKILL.md § Tests`
 - 5rB7xC3k:
     TaskID: Ln6vT2yb
     AuthorAgent: validator
+    OwnerSessionId: Xk9Qm2Ab
+    OwnerSessionUserName: cveira
     Model: gpt-5.6-sol
     Timestamp: "2026-07-21 12:05:00"
     EventType: AUDIT
@@ -335,12 +362,15 @@ validator **and** add a fixture under `tests/fixtures/` (see `SKILL.md § Tests`
 - File Schema:
 	- DeliverableID: short alphanumeric id, `^[A-Za-z0-9]{1,32}$` (e.g. `REPORT`, `CODE`). No `.`, `_`, or `-`. Folder deliverables still take an alphanumeric id; their folder-ness lives in the `Path` glob.
 		- Title: Summarize to a maximum of 80 characters
+		- OwnerSessionId / OwnerSessionUserName: see Ownership (required on new entries)
 		- Path: a quoted glob relative to the workspace root, or a block list of quoted globs. Folder deliverables use `"<dir>/**"`. Must be relative (no leading `/`), contain no `..` segment, and not be a bare `*`/`**` catch-all. Block list only (never flow style).
 - Example:
 
 ```yaml
 - REPORT:
     Title: "Final report document"
+    OwnerSessionId: Xk9Qm2Ab
+    OwnerSessionUserName: cveira
     Path: "report-*.md"
 - CODE:
     Title: "Analysis scripts and data"
