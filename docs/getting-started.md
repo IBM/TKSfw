@@ -22,7 +22,8 @@ Ten steps, once per machine (steps 1–7) and once per project (8–10). Command
 | 6 | Shell completion (optional) | add `source ~/tksfw/tools/ks-completion.sh` to `~/.zshrc` / `~/.bashrc` |
 | 7 | Verify the install | `ks doctor` — must show 0 FAIL; WARN lines name the step that fixes them |
 | 8 | Create (arm) a project | `cd <project> && ks project init` (tooling from the plugin) or `ks project init --full` (self-contained: hooks and skills copied in-tree, no plugin dependency) |
-| 9 | First session | Launch Codex or Claude Code in the project. SessionStart shows the session token, operator and routing table. Codex asks to trust the project `.codex` layer (and the hooks in full mode) |
+| 8b | Describe the project (optional, recommended) | Put the archetype in `KS_PROJECT.md` (L3: what kind of project this is and how such projects run) and the project spec in `KS_SPEC.md` (L4: what this one must deliver) at the project root. Other names or folders: `ks layers pin --l3 <path> --l4 <path>`. L4 alone is fine |
+| 9 | First session | Launch Codex or Claude Code in the project. SessionStart shows the session token, operator, routing table and the project layers (L3/L4) with their status. Type `/ks-start` to begin executing as the archetype prescribes. Codex asks to trust the project `.codex` layer (and the hooks in full mode) |
 | 10 | Acknowledge the hooks | After trusting in Codex: `ks harness retrust --ack`. From now on `ks doctor` / `ks harness retrust` tell you when a framework update needs re-trusting |
 
 ## After that
@@ -31,6 +32,7 @@ Ten steps, once per machine (steps 1–7) and once per project (8–10). Command
 |---|---|
 | Check the model routing this machine will use | `ks routing show` — the provider table (`[routing.<provider>]` in `.agents/models.toml`) must match your endpoint; pin one with `ks routing use <table>` |
 | See where a project stands | `ks project status` |
+| Change or move the L3/L4 files | edit them (Layer ARCHETYPE / PROJECT in `changes.yaml`); the next start reports *changed*; `ks layers resolve` at any time; `ks layers pin` for other paths |
 | Everyday operations (switch routing, update, archive, second session, upgrade) | `docs/operations.md` |
 | All commands | `docs/ks.md` |
 

@@ -97,6 +97,11 @@ def main():
                      "(Layer: METHOD or ARCHETYPE): "
                      + ", ".join(paths["framework"][:6])
                      + (" …" if len(paths["framework"]) > 6 else ""))
+    if flags.get("layer"):
+        items.append("• Project layer edits without a later `changes.yaml` entry "
+                     "(Layer: ARCHETYPE for L3 / PROJECT for L4): "
+                     + ", ".join(paths["layer"][:6])
+                     + (" …" if len(paths["layer"]) > 6 else ""))
     if flags["handoff"]:
         items.append("• A subagent delegation without a matching `handoffs.yaml` (BEGIN/END) + "
                      "`events.yaml` entry.")

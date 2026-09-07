@@ -7,6 +7,7 @@
     ks project reset [--archive [--label L]] [--keep-agents] [--registry] [--dry-run] [--yes] [--force]
     ks routing show | check | resolve <agent> | use <table> | use --clear
     ks hil show | set [--impact L] [--reversibility L] [--logic and|or] [--mode enforce|advisory]
+    ks layers resolve [--l3 P] [--l4 P] [--json] | pin --l3 P | --l4 P | --clear | journal | section
     ks ledger check | find <id> [--refs] [--json] | digest [--task T] [--agent A] [--json]
               | export all|<kinds> [--out F] [--archive] [--csv DIR]
               | archive-plan [--dry-run] | archive <ledger|all> --before YYYY-MM-DD [--dry-run]
@@ -335,6 +336,12 @@ def cmd_project(home, args):
                   + ("" if not d.get("drift") else "   → `ks project drift` / `ks project update`"))
         sess = active_sessions(proj)
         print(f"sessions: {len(sess)} active" + (" (" + ", ".join(f"{s['token']}/{s.get('operator') or '?'}" for s in sess) + ")" if sess else ""))
+        lay = run([PY, os.path.join(proj.hooks, "layers.py"), "resolve", "--json"], cwd=proj.root, env=proj.env(), capture=True)
+        try:
+            L = json.loads(lay.stdout).get("layers", [])
+            print("layers  : " + (", ".join(f"{e['layer'].upper()} {e['path']} ({e['journal_status']})" for e in L) if L else "none (KS_PROJECT.md / KS_SPEC.md or `ks layers pin`)"))
+        except Exception:
+            pass
         state = os.path.join(proj.workarea, "STATE.md")
         if os.path.isfile(state):
             for line in open(state, encoding="utf-8"):
@@ -600,6 +607,23 @@ def cmd_hil(home, args):
     die(f"usage: {cmd_hil.__doc__}")
 
 
+def cmd_layers(home, args):
+    """L3/L4 project layers (2.2.0): one resolver (hooks/layers.py) for the SessionStart block, the
+    ks-start skill and this verb. Exit codes: 0 resolved, 3 nothing resolved, 4 declared but missing."""
+    sub = args[0] if args else "resolve"
+    proj = Project(home)
+    script = os.path.join(proj.hooks, "layers.py")
+    if sub not in ("resolve", "pin", "journal", "section"):
+        die("usage: ks layers resolve [--l3 P] [--l4 P] [--json] | pin --l3 P | --l4 P | --clear | journal | section")
+    if sub == "pin":
+        refuse_if_busy(proj, "layers pin", args)
+    rc = run([PY, script, *args], cwd=proj.root, env=proj.env()).returncode
+    if sub == "pin" and rc == 0:
+        print("→ log it in changes.yaml (Layer: METHOD)")
+        effect("prompt")
+    sys.exit(rc)
+
+
 def cmd_ledger(home, args):
     sub = args[0] if args else "check"
     proj = Project(home)
@@ -838,7 +862,7 @@ def cmd_dev(home, args):
 
 
 COMMANDS = {"self": cmd_self, "operator": cmd_operator, "project": cmd_project, "routing": cmd_routing, "hil": cmd_hil,
-            "ledger": cmd_ledger, "harness": cmd_harness, "doctor": cmd_doctor, "dev": cmd_dev}
+            "layers": cmd_layers, "ledger": cmd_ledger, "harness": cmd_harness, "doctor": cmd_doctor, "dev": cmd_dev}
 
 
 def main():

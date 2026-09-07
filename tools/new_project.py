@@ -179,8 +179,9 @@ def main():
 
     manifest = {"framework": "TKSfw", "version": version(), "plugin_mode": plugin_mode,
                 "enabled": (prev or {}).get("enabled", True) is not False, "files": new_hashes}
-    if (prev or {}).get("resets"):
-        manifest["resets"] = prev["resets"]                # generation history (ks project reset)
+    for keep in ("resets", "layers"):                      # generation history (ks project reset); L3/L4 paths (ks layers pin)
+        if (prev or {}).get(keep):
+            manifest[keep] = prev[keep]
     mp = os.path.join(target, MANIFEST_REL)
     os.makedirs(os.path.dirname(mp), exist_ok=True)
     with open(mp, "w", encoding="utf-8") as fh:

@@ -63,6 +63,15 @@
      AUTO-MODE decision and a Worker-accepted one; compliant OPEN/OPERATOR passes; legacy entries warn
      only; advisory mode warns; ks hil show/set (validation, effect line, live prompt notice); digest
      marks pending HIL decisions; doctor line; AGENTS.md section
+ 23. Project layers L3/L4 (2.2.0): layers.py resolves by convention (KS_PROJECT.md / KS_SPEC.md),
+     by the manifest `layers` stanza and by arguments; declared-but-missing → exit 4, nothing → exit 3,
+     L4 alone is valid; frontmatter title/ks_layer mismatch warning; SessionStart emits the
+     `<!-- tksfw:layers -->` block even on a fresh project, statuses new → unchanged → changed after an
+     edit, the block is re-journaled; `state` section still marked; layer edits are classified
+     `layer:l3/l4`, watched, reported by the Stop hook and STATE.md; `ks layers resolve|pin|journal|
+     section`, `ks project status` line; `new_project --update` keeps the `layers` stanza; ks-start
+     skill bundled and mirrored; Codex prompts reference the new files; AGENTS.md section + no legacy
+     `_project-archetype.md` mention; kernel < 19,000 B
 """
 import sys
 sys.dont_write_bytecode = True
@@ -131,7 +140,7 @@ def main():
               cmds and all('"${CLAUDE_PLUGIN_ROOT}/hooks/' in c and ".agents/hooks" not in c for c in cmds), str(cmds))
         check("sync_harness.py excluded from plugin", not os.path.exists(os.path.join(plug, "hooks", "sync_harness.py")))
         skills = sorted(os.listdir(os.path.join(plug, "skills")))
-        check("skills bundled", skills == ["define-agent", "delegate-work", "register-deliverables", "tksfw-init", "verify-integrity", "verify-sources", "yaml-log-entry"], str(skills))
+        check("skills bundled", skills == ["define-agent", "delegate-work", "ks-start", "register-deliverables", "tksfw-init", "verify-integrity", "verify-sources", "yaml-log-entry"], str(skills))
         check("skill tests dropped from bundle", not os.path.exists(os.path.join(plug, "skills", "yaml-log-entry", "tests")))
         check("validator present in bundle", os.path.isfile(os.path.join(plug, "skills", "yaml-log-entry", "assets", "validate_yaml_log.py")))
 
@@ -1121,6 +1130,106 @@ def main():
                  inp=json.dumps({"session_id": "s", "prompt_id": "p", "source": "startup", "cwd": proj}))
         check("check_tools.py: browsers missing → warning; all present → silent",
               "Playwright browser" in r.stdout and r2.returncode == 0 and r2.stdout.strip() == "", r.stdout + "|" + r2.stdout)
+
+        # 23 — Project layers L3/L4 (2.2.0)
+        lp = os.path.join(tmp, "layersp")
+        run([PY, ks, "project", "init", lp], cwd=tmp, env=kenv)
+        L_HOOK = os.path.join(plug, "hooks", "layers.py")
+        def lstart(sid, src="startup"):
+            r = run([PY, os.path.join(plug, "hooks", "inject_state.py")], cwd=lp, env=kenv,
+                    inp=json.dumps({"session_id": sid, "turn_id": "l1", "source": src, "cwd": lp}))
+            try:
+                return json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
+            except Exception:
+                return ""
+        def lblock(text):
+            return text.split("<!-- tksfw:layers -->")[1].split("<!-- /tksfw:layers -->")[0] if "<!-- tksfw:layers -->" in text else ""
+        r = run([PY, L_HOOK, "resolve", "--json"], cwd=lp, env=kenv)
+        check("layers: nothing resolves on a bare project → exit 3, empty list", r.returncode == 3 and json.loads(r.stdout)["layers"] == [] and json.loads(r.stdout)["tier"] == "none", r.stdout[:200] + r.stderr[:200])
+        t0 = lstart("L0")
+        check("SessionStart on a fresh project without layers injects nothing (unchanged behaviour)", t0 == "" or "tksfw:layers" not in t0, t0[:200])
+        open(os.path.join(lp, "KS_PROJECT.md"), "w").write("---\nks_layer: project\ntitle: Engagement archetype\n---\n# Archetype\nrun it like this\n")
+        open(os.path.join(lp, "KS_SPEC.md"), "w").write("# ACME landing zone review\n\nspec\n")
+        r = run([PY, L_HOOK, "resolve", "--json"], cwd=lp, env=kenv)
+        d = json.loads(r.stdout)
+        check("layers: convention resolves L3 + L4 with titles (frontmatter / first heading) and status new",
+              r.returncode == 0 and d["tier"] == "convention" and [e["layer"] for e in d["layers"]] == ["l3", "l4"]
+              and d["layers"][0]["title"] == "Engagement archetype" and d["layers"][1]["title"] == "ACME landing zone review"
+              and all(e["journal_status"] == "new" and e["source"] == "convention" and len(e["hash"]) == 64 for e in d["layers"]) and d["warnings"] == [], r.stdout[:600])
+        t1 = lstart("L1")
+        b1 = lblock(t1)
+        check("SessionStart injects the layers block on a fresh project (no STATE yet), marked, with both rows as new",
+              "| L3 | `KS_PROJECT.md` | new, not yet journaled |" in b1 and "| L4 | `KS_SPEC.md` | new, not yet journaled |" in b1
+              and "Read L3 then L4 in full" in b1 and "/ks-start" in b1, t1[:800])
+        check("layers block stays within its 600-byte cap", 0 < len(b1.encode()) <= 600, str(len(b1.encode())))
+        t2 = lstart("L2")
+        check("second start: statuses unchanged (hashes journaled by the hook)", "| L3 | `KS_PROJECT.md` | unchanged |" in lblock(t2) and "| L4 | `KS_SPEC.md` | unchanged |" in lblock(t2), lblock(t2))
+        check("state section is marked when present", ("<!-- tksfw:state -->" in t2) == ("Session token:" in t2), t2[:300])
+        with open(os.path.join(lp, "KS_SPEC.md"), "a") as fh:
+            fh.write("\nmore scope\n")
+        t3 = lstart("L3", "compact")
+        check("after an edit the compaction re-injection reports L4 changed with the re-read hint", "| L4 | `KS_SPEC.md` | changed since last session |" in lblock(t3) and "Re-read changed layers" in lblock(t3) and "| L3 | `KS_PROJECT.md` | unchanged |" in lblock(t3), lblock(t3))
+        t4 = lstart("L4")
+        check("…and the next start is unchanged again (block re-journaled)", "| L4 | `KS_SPEC.md` | unchanged |" in lblock(t4), lblock(t4))
+        # watched + classified + reported
+        run([PY, os.path.join(plug, "hooks", "track_edits.py")], cwd=lp, env=kenv, inp=json.dumps({"session_id": "L4", "turn_id": "l2", "hook_event_name": "PostToolUse", "tool_name": "Write", "cwd": lp, "tool_input": {"file_path": os.path.join(lp, "KS_SPEC.md")}}))
+        with open(os.path.join(lp, "KS_SPEC.md"), "a") as fh:
+            fh.write("agent edit\n")
+        r = run([PY, os.path.join(plug, "hooks", "track_edits.py")], cwd=lp, env=kenv, inp=json.dumps({"session_id": "L4", "turn_id": "l2", "hook_event_name": "PostToolUse", "tool_name": "Write", "cwd": lp, "tool_input": {"file_path": os.path.join(lp, "KS_SPEC.md")}}))
+        jl = [json.loads(l) for l in open(os.path.join(host_state(lp), "journal.jsonl")) if l.strip()]
+        cls = [c for e in jl for c in e.get("changed", []) if c["path"] == "KS_SPEC.md"]
+        check("PostToolUse journals the L4 edit as class layer:l4, attributed own", cls and cls[-1]["class"] == "layer:l4" and cls[-1]["attrib"] == "own", str(cls[-1:]))
+        r = run([PY, os.path.join(plug, "hooks", "check_ledgers_on_stop.py")], cwd=lp, env=kenv, inp=json.dumps({"session_id": "L4", "turn_id": "l2", "cwd": lp}))
+        check("Stop hook reminds about the un-logged layer edit with the ARCHETYPE/PROJECT hint", "Project layer edits without a later `changes.yaml` entry" in r.stdout and "KS_SPEC.md" in r.stdout and "PROJECT for L4" in r.stdout, r.stdout[:400])
+        r = run([PY, os.path.join(plug, "hooks", "refresh_state.py"), "--print"], cwd=lp, env=kenv)
+        check("STATE.md lists the layer edit under un-logged edits", "layer: KS_SPEC.md" in r.stdout, r.stdout[-600:])
+        # config tier: pin, missing, L4 alone, clear; ks verbs; update keeps the stanza
+        r = run([PY, ks, "layers", "pin", "--l4", "docs/brief.md"], cwd=lp, env=kenv)
+        man = json.load(open(os.path.join(lp, ".agents", ".tksfw.json")))
+        check("ks layers pin writes the manifest stanza and prints the effect line", r.returncode == 0 and man.get("layers") == {"l4": "docs/brief.md"} and "Layer: METHOD" in r.stdout, r.stdout + r.stderr)
+        r = run([PY, ks, "layers", "resolve", "--json"], cwd=lp, env=kenv)
+        d = json.loads(r.stdout)
+        check("declared but missing L4 → exit 4, status missing, source config; L3 still by convention",
+              r.returncode == 4 and d["layers"][1] == d["layers"][1] | {"path": "docs/brief.md", "source": "config", "exists": False, "journal_status": "missing"} and d["layers"][0]["source"] == "convention", r.stdout[:500])
+        b = run([PY, L_HOOK, "section"], cwd=lp, env=kenv).stdout
+        check("section names the missing declaration and how to fix it", "declared in .agents/.tksfw.json but missing" in b and "ks layers pin" in b, b)
+        os.makedirs(os.path.join(lp, "docs"), exist_ok=True)
+        open(os.path.join(lp, "docs", "brief.md"), "w").write("# Brief\n")
+        r = run([PY, ks, "layers", "resolve"], cwd=lp, env=kenv)
+        check("declared L4 found → exit 0, tier config in the human view", r.returncode == 0 and "docs/brief.md  [config]" in r.stdout, r.stdout)
+        r = run([PY, ks, "layers", "resolve", "--l4", "KS_SPEC.md", "--json"], cwd=lp, env=kenv)
+        check("arguments (tier 1) win over the config for the key they name", json.loads(r.stdout)["layers"][1]["path"] == "KS_SPEC.md" and json.loads(r.stdout)["layers"][1]["source"] == "args" and json.loads(r.stdout)["tier"] == "args", r.stdout[:400])
+        r = run([PY, ks, "layers", "pin", "--l3", "../outside.md"], cwd=lp, env=kenv)
+        check("pin refuses a path outside the project", r.returncode != 0 and "project-relative" in r.stderr, r.stderr)
+        r = run([PY, os.path.join(plug, "skills", "tksfw-init", "assets", "new_project.py"), lp, "--update", "--no-sync"], cwd=tmp, env=kenv)
+        man = json.load(open(os.path.join(lp, ".agents", ".tksfw.json")))
+        check("new_project --update preserves the layers stanza", r.returncode == 0 and man.get("layers") == {"l4": "docs/brief.md"}, r.stdout[-300:] + str(man.get("layers")))
+        r = run([PY, ks, "project", "status"], cwd=lp, env=kenv)
+        check("ks project status prints the layers line", "layers  : L3 KS_PROJECT.md" in r.stdout and "L4 docs/brief.md" in r.stdout, r.stdout)
+        r = run([PY, ks, "layers", "pin", "--clear"], cwd=lp, env=kenv)
+        os.remove(os.path.join(lp, "KS_PROJECT.md"))
+        r = run([PY, ks, "layers", "resolve", "--json"], cwd=lp, env=kenv)
+        d = json.loads(r.stdout)
+        check("after --clear and without L3: L4 alone by convention is valid (exit 0, one row)", r.returncode == 0 and "layers" not in json.load(open(os.path.join(lp, ".agents", ".tksfw.json"))) and [e["layer"] for e in d["layers"]] == ["l4"], r.stdout[:300])
+        check("section for L4 alone says Read L4", "Read L4 in full" in run([PY, L_HOOK, "section"], cwd=lp, env=kenv).stdout)
+        open(os.path.join(lp, "KS_PROJECT.md"), "w").write("---\nks_layer: spec\n---\n# Wrong marker\n")
+        r = run([PY, ks, "layers", "resolve", "--json"], cwd=lp, env=kenv)
+        check("frontmatter ks_layer mismatch is a warning, not a failure", r.returncode == 0 and any("ks_layer='spec'" in w and "L3" in w for w in json.loads(r.stdout)["warnings"]), r.stdout[-300:])
+        r = run([PY, ks, "layers", "journal"], cwd=lp, env=kenv)
+        check("ks layers journal records the hashes", r.returncode == 0 and "layers journaled: KS_PROJECT.md, KS_SPEC.md" in r.stdout and os.path.isfile(os.path.join(host_state(lp), "layers.json")), r.stdout + r.stderr)
+        # skill, prompts, kernel
+        check("ks-start skill bundled in the plugin and present in the template", os.path.isfile(os.path.join(plug, "skills", "ks-start", "SKILL.md")) and os.path.isfile(os.path.join(REPO, "template", ".agents", "skills", "ks-start", "SKILL.md")))
+        sk = open(os.path.join(plug, "skills", "ks-start", "SKILL.md"), encoding="utf-8").read()
+        check("ks-start skill calls the resolver and journals, never restates the tiers as policy", "ks layers resolve --json" in sk and "ks layers journal" in sk and "Layer conflict:" in sk and sk.startswith("---\nname: ks-start"))
+        check("ks-start mirrored into .claude/skills of the full-mode project", os.path.islink(os.path.join(full, ".claude", "skills", "ks-start")) or os.path.isdir(os.path.join(full, ".claude", "skills", "ks-start")))
+        prompts = os.path.join(REPO, "template", ".codex", "prompts")
+        pr = open(os.path.join(prompts, "reload-instructions.md"), encoding="utf-8").read()
+        check("Codex prompts: reload-instructions names KS_PROJECT.md/KS_SPEC.md and ks-start prompt exists", "KS_PROJECT.md" in pr and "KS_SPEC.md" in pr and "_project-archetype" not in pr and os.path.isfile(os.path.join(prompts, "ks-start.md")))
+        agents_md = open(os.path.join(REPO, "template", "AGENTS.md"), encoding="utf-8").read()
+        check("AGENTS.md: Project Layers section, precedence rule, no legacy layer file names, kernel < 19,000 B",
+              "#### Project Layers (L3 / L4)" in agents_md and "L4 overrides L3" in agents_md and "neither overrides this file or the method" in agents_md
+              and "`KS_PROJECT.md` (L3) + `KS_SPEC.md` (L4)" in agents_md and "_project-archetype.md" not in agents_md and "_project.md" not in agents_md
+              and len(agents_md.encode()) < 19000, str(len(agents_md.encode())))
 
     # 6 — committed plugin copy is current
     r = run([PY, os.path.join(REPO, "tools", "build_plugin.py"), "--check"])

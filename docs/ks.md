@@ -27,13 +27,17 @@ In a full-mode project the in-project hooks and skills (the pinned version) are 
 | `ks project init [dir] [--full]` | instantiate the method (plugin mode by default) | `new_project.py [--plugin-mode]` |
 | `ks project update [dir]` | refresh unmodified framework files, list edited ones | `new_project.py --update` |
 | `ks project enable` / `disable` | arm / disarm (`.agents/.tksfw.json` `enabled`) | `new_project.py --enable/--disable` |
-| `ks project status` | version vs installed, mode, armed, drift counts, active sessions, plan focus, isolation spaces | manifest, `--drift --json`, STATE.md, `workarea.py status` |
+| `ks project status` | version vs installed, mode, armed, drift counts, active sessions, project layers, plan focus, isolation spaces | manifest, `--drift --json`, STATE.md, `workarea.py status` |
 | `ks project drift [--json]` | unchanged / outdated / edited / missing per file; exit 1 on drift; writes nothing | `new_project.py --drift` |
 | `ks project reset [--archive [--label L]] [--keep-agents] [--registry] [--dry-run] [--yes] [--force]` | start over: clears ledgers (all shards + legacy), archives, `tasks.md`, STATE.md, exports, hook state (all hosts), work areas, worktrees, agent definitions + mirrors. `--archive` moves ledgers/plan/archives/exports/work areas/agents to `.agents/history/<stamp>[-label]/` instead (hook state is always deleted; worktree branches kept). Registry kept unless `--registry`; agents kept with `--keep-agents`. Refuses while sessions are active, without `--yes` (non-interactive) or with unmerged worktree branches (`--force`). Records the generation in `.agents/.tksfw.json` → SessionStart and STATE.md announce "Generation N" | — |
 | `ks routing show` / `check` / `resolve <agent>` | resolved table, validation, one agent's model | `route_model.py --print/--check/--resolve` |
 | `ks routing use <table>` / `use --clear` | pin a routing table (`selected = "<table>"` in `models.toml`, read after `TKSFW_ROUTING`, before the provider match) | edits `models.toml`, then `--check` |
 | `ks hil show` | effective Human-in-the-Loop threshold (`[hil]` in `models.toml`) | — |
 | `ks hil set [--impact L] [--reversibility L] [--logic and\|or] [--mode enforce\|advisory]` | change the threshold live: validated, `[hil]` rewritten in place, effect line; the session is told at its next prompt | — |
+| `ks layers resolve [--l3 P] [--l4 P] [--json]` | where the L3/L4 project layers are and their status: `KS_PROJECT.md` / `KS_SPEC.md` at the root (convention), paths pinned in `.agents/.tksfw.json` `layers`, or the arguments (win per key); `new` / `unchanged` / `changed` (re-read) / `missing` (declared but absent). Exit 0 resolved, 3 nothing, 4 missing | `layers.py` |
+| `ks layers pin --l3 P \| --l4 P` / `pin --clear` | declare non-conventional paths (relative, inside the project, `.md`; either key alone) / return to the convention; refuses while subagents run | edits `.agents/.tksfw.json` |
+| `ks layers journal` | record the current L3/L4 hashes — the baseline the next SessionStart compares against (the hook and the `ks-start` skill do this too) | `.hook-state/hosts/<host>/layers.json` |
+| `ks layers section` | print the pointer block the SessionStart hook injects | `layers.py` |
 | `ks ledger check` | validate every live ledger and archive, lint `tasks.md`, cross-check FKs | `validate_yaml_log.py`, `tasks_lint.py`, `cross_check.py` |
 | `ks ledger find <id> [--refs] [--json]` / `find --prefix <chars>` | locate an entry or task across live files, archives and plan; `--refs` lists everything that references it | `find_entry.py` |
 | `ks ledger digest [--task T] [--agent A] [--json]` | the ledgers read back as decision context: blocked gates, decisions in force, pending decisions, open issues, work in flight, recent lessons/changes; `--task` narrows to one task and adds its evidence chain; `--agent` shows the briefing a subagent would receive | `digest.py` |
@@ -47,7 +51,7 @@ In a full-mode project the in-project hooks and skills (the pinned version) are 
 
 ## Effects and safety
 
-Every mutating verb ends with an effect line: **next spawn** (`routing use`), **next prompt** (`operator set`, `project enable`), **next session** (`project update`, `harness sync` — restart, Codex `/hooks` re-trust, then `ks harness retrust --ack`), **files** (`ledger archive*`, `project disable`). `routing use` refuses while subagents are running and `project update` while sessions are active (`--force` overrides). The UserPromptSubmit hook tells the model what changed at its next prompt, so `ks` can be used while a session is open (`docs/operations.md`).
+Every mutating verb ends with an effect line: **next spawn** (`routing use`), **next prompt** (`operator set`, `project enable`, `layers pin`), **next session** (`project update`, `harness sync` — restart, Codex `/hooks` re-trust, then `ks harness retrust --ack`), **files** (`ledger archive*`, `project disable`). `routing use` refuses while subagents are running and `project update` while sessions are active (`--force` overrides). The UserPromptSubmit hook tells the model what changed at its next prompt, so `ks` can be used while a session is open (`docs/operations.md`).
 
 ## Ledger archives
 

@@ -2,6 +2,23 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [2.2.0] — 2026-09-07
+
+Project layers. L3 (archetype) and L4 (project spec) get a home in the AGENTS.md architecture: a convention, one resolver, a pointer block at session start and an explicit `/ks-start`.
+
+### Added
+- Convention for the project layers at the project root: `KS_PROJECT.md` (L3 — what kind of project this is and how such projects run) and `KS_SPEC.md` (L4 — what this project must deliver). Non-mandatory: `ks layers pin --l3 P | --l4 P` declares other paths (`layers` stanza in `.agents/.tksfw.json`, preserved by `ks project update`); L4 alone is valid; both keys may name one file.
+- `hooks/layers.py` — the one resolver (arguments → manifest → convention; a declared-but-absent file is `missing`, never a silent fallback) with status `new` / `unchanged` / `changed` / `missing` against a per-host record, optional frontmatter (`ks_layer`, `ks_version`, `title`) validated when present. `ks layers resolve [--l3 P] [--l4 P] [--json] | pin | journal | section`; exit 0 / 3 (nothing) / 4 (missing). `ks project status` layers line.
+- SessionStart injects a `<!-- tksfw:layers -->` pointer block (paths + status, ≤ 600 B, never content) on every start, resume and compaction — also on a fresh project without STATE.md; `changed` carries a re-read hint; the hook journals the hashes afterwards.
+- L3/L4 are watched inputs (class `layer:l3` / `layer:l4`): PostToolUse journals their edits; the Stop hook and STATE.md report "Project layer edits without a later changes.yaml entry (Layer: ARCHETYPE for L3 / PROJECT for L4)".
+- `ks-start` skill (Group A; Claude `/ks-start`, Codex `.codex/prompts/ks-start.md`): resolve → offer to pin argument paths → read L3 then L4 → check precedence → `ks layers journal` → run the L3 start protocol → report. Layer conflicts are `decisions.yaml` entries titled `Layer conflict: …` (no new ledger kind).
+- AGENTS.md § Project Layers (L3 / L4): read them in full before planning, re-read *changed* ones, L4 > L3, neither overrides the method. ADR 0013. 30 new tests (243 total).
+
+### Changed
+- `inject_state.py` refactored into section emitters + one assembler (`SECTIONS`): `state` (the only truncated section) and `layers` (reserved first), each between `<!-- tksfw:<id> -->` markers; a failing emitter degrades to an error marker instead of failing the injection.
+- AGENTS.md: Skill Layering Group B and the Change-Log `Layer` taxonomy now name `KS_PROJECT.md` / `KS_SPEC.md` (legacy `_project-archetype.md` / `_project.md` removed); redundant sentences trimmed (State Snapshot mechanics, Playwright bullets, model-ID rule, shard naming detail, "next prompt confirms", "consider using the skills") to fit the new section — 18,958 B.
+- `.codex/prompts/reload-instructions.md` names AGENTS.md / KS_PROJECT.md / KS_SPEC.md. `ks project status`, `ks-completion.sh`, docs (`ks.md`, `getting-started.md`, `operations.md`) updated.
+
 ## [2.1.0] — 2026-09-07
 
 ### Added

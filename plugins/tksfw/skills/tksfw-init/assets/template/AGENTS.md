@@ -60,9 +60,9 @@
 - Before delegating any plan step, check `.agents/agents/` (harness-neutral agent definitions; the hooks render the harness-specific copies) for a matching agent by role.
 	- If an existing agent's scope partially matches, update its definition rather than reuse or duplicate.
 	- Agent definitions should never carry task history. History lives only in the ledger.
-- If none exists, create `.agents/agents/<agent-name>.toml` — **load the `define-agent` skill first** (it owns the field rules, the naming convention and the validator; the PostToolUse hook blocks a non-conforming file). Never write `model`/`model_reasoning_effort`: models are routed by **tier** from `.agents/models.toml` (`research` = search/read-only, `build` = implementation, `judge` = planning/architecture/judgement/validation); the agent's `-<role>` suffix selects the tier via `[roles]`, the hooks render the model into the harness copies, and the `route_model.py` PreToolUse hook applies the tier at every spawn (unknown role → spawn refused).
+- If none exists, create `.agents/agents/<agent-name>.toml` — **load the `define-agent` skill first** (it owns the field rules, the naming convention and the validator; the PostToolUse hook blocks a non-conforming file). Never write `model`/`model_reasoning_effort`: models are routed by **tier** from `.agents/models.toml` (`research` = search/read-only, `build` = implementation, `judge` = planning/architecture/judgement/validation); the agent's `-<role>` suffix selects the tier via `[roles]`; the hooks render the model into the harness copies and apply the tier at every spawn (unknown role → spawn refused).
 - Never delegate to the `judge` tier unless the task involves planning or architectural thinking, or judgment/validation.
-- Never write a model ID in an agent file or in this document: models come from `.agents/models.toml` (change procedure in the `delegate-work` skill). Record the model the hook reports in the Handoff/Event `Model` field.
+- Never write a model ID in an agent file or in this document (change procedure: `delegate-work` skill); record the model the hook reports in the Handoff/Event `Model` field.
 - Try to constrain each subagent to just one task for focused execution, improved traceability, and optimized handoffs.
 - Subagents cannot spawn further subagents — all decomposition happens from the main session only (the routing hook refuses nested spawns).
 - Only parallelize subagents when their tasks touch independent files/directories/domains; chain sequentially otherwise.
@@ -98,23 +98,25 @@
 
 ### Tools
 
-- Use the Playwright MCP tools to interact with websites.
-	- Take screenshots when needed.
-	- Keep the main folder clean: Playwright temporary files, screenshots and other related artifacts MUST be stored inside the `.playwright` folder.
+- Use the Playwright MCP tools to interact with websites; their temporary files and screenshots MUST live inside the `.playwright` folder.
 - Use the Perplexity MCP tools to search and verify data over the internet.
-- Consider using the skills found in the project folder.
-- `ks` (the framework command line) may be run through the shell tool when the operator asks for an operational change — e.g. `ks routing use <table>`, `ks ledger archive-plan`; such changes are METHOD-layer and logged in `changes.yaml`. The next prompt confirms what took effect.
+- `ks` (the framework command line) may be run through the shell tool when the operator asks for an operational change — e.g. `ks routing use <table>`, `ks ledger archive-plan`; such changes are METHOD-layer and logged in `changes.yaml`.
 
 ### Skill Layering
 
 - Every skill binds to **exactly one** dependency group and never straddles both:
 	- **Group A — policy + method.** Depends only on `AGENTS.md` (L1 + L2). A domain-agnostic mechanism; any archetype/project specifics it needs are passed in as **data**, never hardcoded (e.g. an alias list, a register path, a candidate set). Examples: `yaml-log-entry`, `register-deliverables`, `verify-integrity`, `verify-sources`.
-	- **Group B — archetype + project.** Depends only on `_project-archetype.md` (L3) + `_project.md` (L4). Examples: `find-questionnaire-sources`, `refresh-price-book`, `regenerate-deliverables`, `build-excel-model`, `update-capacity-plan-docx`, `roadmap-image`, `verify-deliverables`.
+	- **Group B — archetype + project.** Depends only on the project layers `KS_PROJECT.md` (L3) + `KS_SPEC.md` (L4). Examples: `find-questionnaire-sources`, `regenerate-deliverables`, `verify-deliverables`.
 - Dependencies point **B → A only.** A Group-B skill MUST NOT restate a policy/method rule; it references it or **calls a Group-A skill** (e.g. `verify-deliverables` calls `verify-integrity`; `find-questionnaire-sources` calls `verify-sources`). A Group-A skill MUST NOT name or depend on any Group-B skill.
 - Change-logging is an **ambient** method obligation (always-on memory + the `PostToolUse`/`Stop` hooks); no skill restates "log this change" as a step.
 - Because every rule's Source of Truth is an instruction layer (L1–L4), skills are **not standalone**: the relevant layers must travel with them when the skill set is reused elsewhere.
 
 ### Other Specifications
+
+#### Project Layers (L3 / L4)
+
+- The session-start block lists the project layers when present: L3 `KS_PROJECT.md` (archetype) and L4 `KS_SPEC.md` (project spec), or the paths pinned under `layers` in `.agents/.tksfw.json`. **Read them in full before planning or executing**; re-read any marked *changed*. L4 overrides L3; **neither overrides this file or the method** — on a conflict follow the method and log a `decisions.yaml` entry titled `Layer conflict: …` (Scope: layer, rule, resolution).
+- Start execution as the archetype prescribes with `/ks-start` (the `ks-start` skill). Edits: L3 = `Layer: ARCHETYPE`, L4 = `Layer: PROJECT`.
 
 #### Activity Plan
 
@@ -128,8 +130,8 @@
 #### State Snapshot (Resume Entrypoint)
 
 - File: `.agents/workarea/STATE.md` — a compact, **generated** projection of current state (active block, next action, the ledger digest, deliverables built vs pending, last activity, pointers). **Read it first** on resume or after a compaction.
-- It is **generated, not hand-edited** (do not author content into it): `.agents/hooks/refresh_state.py` rebuilds it at every turn-end (`Stop` hook) and `inject_state.py` injects it into context on every session start, resume and compaction (`SessionStart` hook) from `tasks.md` + the `.agents/workarea/` ledgers + the deliverables registry. It is a **view, not a Source of Truth**; the listed files remain authoritative.
-- `STATE.md` and `tasks-archive.md` are internal working files, **not deliverables** (do not register them). Its fidelity tracks `tasks.md`: keep the plan's statuses current and the snapshot is correct.
+- It is **generated, not hand-edited**: the `Stop` hook rebuilds it at every turn end and the `SessionStart` hook injects it on every start, resume and compaction, from `tasks.md`, the ledgers and the registry. It is a **view, not a Source of Truth**; those files remain authoritative.
+- Its fidelity tracks `tasks.md`: keep the plan's statuses current and the snapshot is correct.
 
 #### YAML-based Logs
 
@@ -145,9 +147,9 @@
 | Handoff Log | `handoffs.yaml` | append-only | Every subagent delegation: `<stem>-BEGIN` (Orchestrator → Worker, spec + inputs) before dispatch, `<stem>-END` (Worker → Orchestrator, outputs + summary) on return. Each pair is tied to one `events.yaml` entry and one `tasks.md` TaskID. |
 | Event Log | `events.yaml` | append-only | Every trackable event — `TASK`, `HANDOFF`, `ISSUE`, `CHANGE`, `DECISION`, `REVIEW`, `AUDIT`, `APPROVAL`, `TEST` — with its typed `Status`. A COMPLETED leaf task cites its terminal-positive event via `[ev:<EventID>]` (Activity Plan). |
 
-- `Layer` (Change Log) reuses the L1–L4 / Group A–B taxonomy, so classification is mechanical: `METHOD` = `AGENTS.md`, Group-A skills, `.agents/hooks/**`, harness config (`.codex/config.toml`, `.claude/settings.json`) — reusable across all projects · `ARCHETYPE` = the archetype spec, Group-B skills, reusable scaffolding — reusable across instances of this archetype · `PROJECT` = the project spec, the deliverables, instance-specific data — this instance only.
+- `Layer` (Change Log) reuses the L1–L4 / Group A–B taxonomy, so classification is mechanical: `METHOD` = `AGENTS.md`, Group-A skills, `.agents/hooks/**`, harness config (`.codex/config.toml`, `.claude/settings.json`) — reusable across all projects · `ARCHETYPE` = `KS_PROJECT.md` (the archetype spec), Group-B skills, reusable scaffolding — reusable across instances of this archetype · `PROJECT` = `KS_SPEC.md` (the project spec), the deliverables, instance-specific data — this instance only.
 - Enforcement is harness-level, not memory: a `PostToolUse` hook detects writes to the ledgers by content hashing (any tool, shell or script) and blocks a malformed entry, feeding back the validator's report; a `Stop` hook advises when a deliverable/framework edit or a delegation looks un-logged (from the hash journal, never the transcript).
-- **Partitioning and ownership:** each session writes only its own ledger shards `.agents/workarea/<ledger>.<session-token>.yaml` (changes, lessons, handoffs, events, decisions — the token is shown at session start); every other shard and the unsuffixed legacy files are read-only, and the hook rejects writes to them. Every new entry carries `OwnerSessionId` and `OwnerSessionUserName` (`new_entry_id.py --stamp` prints both and the target file). Readers (STATE.md, checks, `find`) merge all shards; decisions are append-only — a status change is an `events` entry of `EventType: DECISION` with `DecisionID`.
+- **Partitioning and ownership:** each session writes only its own ledger shards `.agents/workarea/<ledger>.<session-token>.yaml` (the token is shown at session start); every other shard and the unsuffixed legacy files are read-only, and the hook rejects writes to them. Every new entry carries `OwnerSessionId` and `OwnerSessionUserName` (minted by the `yaml-log-entry` skill). Readers (STATE.md, checks, `find`) merge all shards; decisions are append-only — a status change is an `events` entry of `EventType: DECISION` with `DecisionID`.
 
 #### Deliverables Registry
 

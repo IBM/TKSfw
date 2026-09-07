@@ -313,7 +313,7 @@ def build():
     try:
         flags, paths = unlogged_edits()
         pend = []
-        for cls in ("deliverable", "framework"):
+        for cls in ("deliverable", "framework", "layer"):
             if flags.get(cls):
                 lst = paths.get(cls, [])
                 pend.append(f"{cls}: " + ", ".join(lst[:8]) + (" …" if len(lst) > 8 else ""))

@@ -142,6 +142,10 @@ SESSION_EXPIRE_SEC = 24 * 3600                                        # snapshot
 ROOT_INSTRUCTION_FILES = ("AGENTS.md", "CLAUDE.md", "CLAUDE.local.md", "MISSION.md",
                           "Job Role Definitions.md")
 FRAMEWORK_DIRS = (".agents", ".codex", ".claude")           # minus the workarea, see classify()
+# 2.2.0 — project layers: L3 archetype (Layer: ARCHETYPE) and L4 project spec (Layer: PROJECT) are watched
+# INPUTS (class `layer:l3` / `layer:l4`), never deliverables. Convention at the project root; a `layers`
+# stanza in the manifest declares other paths. Resolution, status and the injected block: layers.py.
+LAYER_CONVENTION = {"l3": "KS_PROJECT.md", "l4": "KS_SPEC.md"}
 # Tool names that mean "a subagent was delegated to" (Claude: Agent (formerly Task);
 # Codex: spawn_agent, which its matcher also exposes as Agent).
 DELEGATION_TOOLS = {"Agent", "Task", "spawn_agent"}
@@ -181,6 +185,32 @@ def armed():
     if not PLUGIN_MODE and ROOT_HOW in ("marker", "legacy", "env"):
         return True, "in-project layout without manifest (legacy)"
     return False, "no .agents/.tksfw.json (project not initialised for TKSfw)"
+
+
+def layer_paths():
+    """{'l3': rel, 'l4': rel} — declared in the manifest `layers` stanza (relative, inside the root,
+    .md) or the convention. Declared-but-absent files are included so their appearance is journaled."""
+    m = read_manifest() or {}
+    lay = m.get("layers") if isinstance(m.get("layers"), dict) else {}
+    out = {}
+    for k, conv in LAYER_CONVENTION.items():
+        raw = lay.get(k)
+        rel = None
+        if isinstance(raw, str) and raw.strip():
+            p = raw.strip().replace("\\", "/")
+            p = p[2:] if p.startswith("./") else p
+            if not p.startswith("/") and not re.match(r"^[A-Za-z]:/", p) and ".." not in p.split("/") and p.lower().endswith(".md"):
+                rel = p
+        out[k] = rel or conv
+    return out
+
+
+def layer_class(rel):
+    """'layer:l3' | 'layer:l4' when `rel` is a resolved layer file (config or convention), else None."""
+    for k, p in layer_paths().items():
+        if rel == p:
+            return "layer:" + k
+    return None
 
 
 def guard():
@@ -629,6 +659,9 @@ def classify(rel, globs=None):
         return None                           # STATE.md, scratch
     if rel.startswith(MIRROR_PREFIXES):
         return None                           # generated mirrors (skills, agent definitions), not sources
+    lc = layer_class(rel)
+    if lc:
+        return lc                             # L3/L4 project layers (2.2.0): watched inputs
     top = rel.split("/", 1)[0]
     if top in FRAMEWORK_DIRS:
         return "framework"
@@ -688,6 +721,9 @@ def watched_files():
     for f in ROOT_INSTRUCTION_FILES:
         if os.path.isfile(os.path.join(PROJECT_ROOT, f)):
             files.add(f)
+    for rel in layer_paths().values():                    # L3/L4 (2.2.0)
+        if os.path.isfile(os.path.join(PROJECT_ROOT, rel)) and not _ignored(rel):
+            files.add(rel)
     # deliverables (registry globs, relative to the project root; ** is recursive)
     for g in globs:
         if g in ("*", "**") or g.startswith("/") or ".." in g.split("/"):
@@ -1042,11 +1078,13 @@ def unlogged(entries):
       deliverable  edit to a registry-matched deliverable AFTER the last changes.yaml write
       framework    edit to .agents/.codex/.claude/** or a root instruction file AFTER the last
                    changes.yaml write
+      layer        edit to the L3/L4 project layer files (KS_PROJECT.md → ARCHETYPE, KS_SPEC.md →
+                   PROJECT) AFTER the last changes.yaml write (2.2.0)
       handoff      a delegation AFTER the last handoffs.yaml OR events.yaml write
     Returns (flags dict, paths dict) where paths lists the offending files."""
-    last = {"deliverable": -1, "framework": -1, "delegation": -1,
+    last = {"deliverable": -1, "framework": -1, "layer": -1, "delegation": -1,
             "changes": -1, "handoffs": -1, "events": -1}
-    paths = {"deliverable": [], "framework": []}
+    paths = {"deliverable": [], "framework": [], "layer": []}
     i = 0
     for e in entries:
         if e.get("phase") not in (None, "tool"):
@@ -1058,20 +1096,23 @@ def unlogged(entries):
             cls = c.get("class") or ""
             if c.get("attrib") == "external":
                 continue                          # another session's write: neither ours to log nor a cover
+            if cls.startswith("layer:"):
+                cls = "layer"
             if cls == "ledger:changes":
                 last["changes"] = i
-                paths["deliverable"].clear(); paths["framework"].clear()
+                paths["deliverable"].clear(); paths["framework"].clear(); paths["layer"].clear()
             elif cls == "ledger:handoffs":
                 last["handoffs"] = i
             elif cls == "ledger:events":
                 last["events"] = i
-            elif cls in ("deliverable", "framework"):
+            elif cls in ("deliverable", "framework", "layer"):
                 last[cls] = i
                 if c["path"] not in paths[cls]:
                     paths[cls].append(c["path"])
     flags = {
         "deliverable": last["deliverable"] >= 0 and last["deliverable"] > last["changes"],
         "framework": last["framework"] >= 0 and last["framework"] > last["changes"],
+        "layer": last["layer"] >= 0 and last["layer"] > last["changes"],
         "handoff": last["delegation"] >= 0 and (last["delegation"] > last["handoffs"]
                                                 or last["delegation"] > last["events"]),
     }
