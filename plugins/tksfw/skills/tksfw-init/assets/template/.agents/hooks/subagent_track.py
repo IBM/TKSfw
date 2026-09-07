@@ -10,8 +10,10 @@ State: .agents/workarea/.hook-state/subagents.json  {"live": {<id>: {"turn", "ag
   * A main-session Stop clears the set (check_ledgers_on_stop.py calls `clear()`): when `main` stops,
     every child has returned, so a missed SubagentStop can never wedge future spawns.
   * Entries older than TTL_SEC are ignored when counting (belt and braces).
-Both harnesses emit these events (Codex: SubagentStart/SubagentStop; Claude Code: same names).
-Fail-open, exit 0 always.
+Both harnesses emit these events (Codex: SubagentStart/SubagentStop; Claude Code: same names) and accept
+`additionalContext` on SubagentStart — since 2.0.0 the hook injects a ledger briefing into the subagent
+(digest.py --agent <name>): its handoff BEGIN, task evidence chain, blocked gates, decisions in force,
+open issues, recent lessons. Fail-open, exit 0 always.
 """
 import sys
 sys.dont_write_bytecode = True
@@ -92,7 +94,34 @@ def main():
             save(data)
     except Exception as e:
         H.log(f"subagent_track: {type(e).__name__}: {e}")
+    if start:
+        brief = briefing(payload)
+        if brief:
+            H.emit(H.additional_context("SubagentStart", brief))
     sys.exit(0)
+
+
+def briefing(payload):
+    """Ledger context for the subagent (2.0.0): its open handoff BEGIN, the task's evidence chain,
+    blocked gates, decisions in force, open issues, recent lessons — bounded by
+    [state].subagent_budget_chars. '' when the digest is empty or unavailable."""
+    agent = payload.get("agent_type") or payload.get("subagent_type") or ""
+    try:
+        sys.path.insert(0, H.VALIDATOR_DIR)
+        import digest as DG
+        lim = DG.limits(H.WORKAREA)
+        d = DG.build(H.WORKAREA, agent=agent or None)
+        text = DG.format_digest(d, lim, lim.get("subagent_budget_chars", 4000), heading_level="##",
+                                title="Ledger briefing")
+        if not text:
+            return ""
+        head = (f"TKSfw briefing for {agent or 'this subagent'} from the project ledgers (`.agents/workarea/`). "
+                "Respect decisions in force; report issues and results back in your END handoff and events; "
+                "write ledger entries only in this session's shards.\n")
+        return head + text
+    except Exception as e:
+        H.log(f"subagent_track: briefing: {type(e).__name__}: {e}")
+        return ""
 
 
 if __name__ == "__main__":

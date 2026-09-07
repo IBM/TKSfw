@@ -28,7 +28,7 @@
 - After ANY problem, failure, or validation errors: update `lessons.yaml` with the pattern
 - Write rules for yourself that prevent the same mistake
 - Ruthlessly iterate on these lessons until the mistake rate drops
-- Review lessons at session start for relevant project insights/planning
+- Review lessons at session start (recent ones are in STATE.md's ledger digest)
 
 ## 4. Verification Before Done
 
@@ -89,6 +89,7 @@
 7. **Record Decisions**: Log a `decisions.yaml` entry whenever you make a non-trivial, hard-to-reverse, or architecture-shaping choice — anything a reviewer would later ask "why was it done this way?" about.
 	- This is a semantic trigger (like lessons): no hook can detect a missing decision, so it is on you to record it when the choice is made, not reconstruct it later.
 	- Policy: a decision with `Impact` ≥ HIGH **or** `Reversibility` ≥ HARD SHOULD be `OPERATOR`-confirmed (`ConfirmationType: OPERATOR`); lower-stakes calls delegated to an agent or the main session are `AUTO-MODE`.
+8. **Consult before deciding**: STATE.md carries a ledger digest (decisions in force, pending decisions, open issues, blocked gates, work in flight, recent lessons/changes) — read it before planning a phase or recording a decision; `ks ledger digest --task <TaskID>` before working a task. Never contradict an ACCEPTED decision silently: log a `DECISION` event (`DecisionID`, `Status: SUPERSEDED`) first. Subagents get the digest for their handoff at start; a handoff BEGIN lists the decision and lesson IDs the Worker must respect in `Inputs`.
 
 ### Tools
 
@@ -121,7 +122,7 @@
 
 #### State Snapshot (Resume Entrypoint)
 
-- File: `.agents/workarea/STATE.md` — a compact, **generated** projection of current state (active block, next action, open decisions/issues, dangling handoffs, deliverables built vs pending, last recorded activity, and pointers). **Read it first** on resume or after a compaction.
+- File: `.agents/workarea/STATE.md` — a compact, **generated** projection of current state (active block, next action, the ledger digest — decisions in force, pending decisions, open issues, blocked gates, work in flight, recent lessons/changes —, deliverables built vs pending, last recorded activity, and pointers). **Read it first** on resume or after a compaction.
 - It is **generated, not hand-edited** (do not author content into it): `.agents/hooks/refresh_state.py` rebuilds it at every turn-end (`Stop` hook) and `inject_state.py` injects it into context on every session start, resume and compaction (`SessionStart` hook) from `tasks.md` + the `.agents/workarea/` ledgers + the deliverables registry. It is a **view, not a Source of Truth** — it copies no rule content, so it cannot drift; the listed files remain authoritative.
 - `STATE.md` and `tasks-archive.md` are internal working files, **not deliverables** (do not register them). Its fidelity tracks `tasks.md`: keep the plan's statuses current and the snapshot is correct.
 

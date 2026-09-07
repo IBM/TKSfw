@@ -130,6 +130,24 @@ def prompt_notice(payload, changed):
         H.log(f"prompt_notice: {type(e).__name__}: {e}")
     # At prompt time nothing in the diff can be this session's own tool call (PostToolUse already
     # journaled those), so every change is "outside": ks, an editor, another session.
+    # new blockers since the last prompt: open issues and negative gates among the entries added
+    try:
+        neg = {("REVIEW", "FAIL"), ("TEST", "KO"), ("AUDIT", "NON-CONFORMANT"), ("APPROVAL", "NO-GO")}
+        for c in changed:
+            if (c.get("class") or "") != "ledger:events":
+                continue
+            ids = set((c.get("added_ids") or {}).keys()) | set((c.get("new_for_session") or {}).keys())
+            if not ids:
+                continue
+            for eid, f in H.load_entries(os.path.join(H.PROJECT_ROOT, c["path"])):
+                if eid in ids and isinstance(f, dict):
+                    et, st = str(f.get("EventType")), str(f.get("Status"))
+                    if et == "ISSUE" and st == "OPEN":
+                        lines.append(f"New open issue {eid} “{str(f.get('Title', ''))[:60]}” on task {f.get('TaskID')}.")
+                    elif (et, st) in neg:
+                        lines.append(f"Gate failed: {et} {st} — {eid} “{str(f.get('Title', ''))[:60]}” on task {f.get('TaskID')} (blocked until a later positive gate).")
+    except Exception as e:
+        H.log(f"prompt_notice: blockers: {e}")
     ext = [c for c in changed if not (lines and c["path"] == H.MODELS_TOML_REL)]
     shard_news = [c for c in ext if H.shard_token(c["path"]) not in (None, "") and H.shard_token(c["path"]) != H.session_token(payload)]
     for c in shard_news:

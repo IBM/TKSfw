@@ -35,6 +35,12 @@ twice). `inject_state.py` warns when the project manifest and the installed plug
 - **ID index** (`ids.json`): project-wide `{file: {hash, ids→owner}}` for ledgers and plans, refreshed whenever a file's hash differs from the last indexed one — independent of any session's diff, so an A-B-A rewrite that restores a byte-identical older file is still caught. `track_edits.py` blocks (exit 2, "LOST UPDATE") when an EntryID disappears from an append-only ledger, an entry owned by another session disappears from `decisions.yaml`/`deliverables.yaml`, or a TaskID leaves `tasks.md` without appearing in `tasks-archive.md`. New entries must carry `OwnerSessionId`/`OwnerSessionUserName` (validator `--require-owner`).
 - Limits: the write has happened when PostToolUse runs — the block names what to restore, it cannot roll back. Shell edits under concurrency stay `ambiguous`. Sessions without the plugin are unattributed.
 
+## Ledgers as context (2.0.0)
+
+- `refresh_state.py` embeds the ledger digest (`digest.py`) in STATE.md: blocked gates, decisions in force, pending decisions, open issues, work in flight, recent lessons and changes — within `[state].budget_chars`; the whole SessionStart injection stays under the harnesses' 10,000-character hook-output cap.
+- `subagent_track.py --start` injects a briefing into the subagent (`additionalContext` on SubagentStart, both harnesses): its open handoff BEGIN, the task's evidence chain, blocked gates, all decisions in force, open issues on the task, recent lessons — `[state].subagent_budget_chars`.
+- The prompt notice adds "New open issue" / "Gate failed" lines when such events are added during the session.
+
 ## Partitioned ledgers and per-host state (1.7.0)
 
 - Ledgers are sharded per session: `<ledger>.<token>.yaml`. `track_edits.py` rejects (exit 2, "READ-ONLY LEDGER") a tool-call write to another session's shard or to the legacy unsuffixed file; readers merge all shards (`hooklib.load_kind`). Decisions are append-only; the effective status is the latest DECISION event with `DecisionID`.

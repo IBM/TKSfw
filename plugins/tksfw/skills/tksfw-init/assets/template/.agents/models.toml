@@ -33,6 +33,16 @@ codex_agent_files = "inline"
 # selected = "ibm"                # optional: pin the routing table (`ks routing use ibm`; `ks routing use --clear`
                                  # removes it). Order: TKSFW_ROUTING → selected → provider match → [routing.default]
 
+[state]                          # ledger digest limits (STATE.md / SessionStart / SubagentStart briefing) — digest.py
+lessons = 8                      # most recent lessons shown
+decisions = 10                   # decisions in force / pending shown (each)
+issues = 10                      # open ISSUE events shown
+changes = 5                      # most recent changes shown
+handoffs = 10                    # in-flight handoffs shown
+blocked = 10                     # tasks with a negative latest gate shown
+budget_chars = 3500              # digest budget inside STATE.md (the whole injection stays < 9,000 chars)
+subagent_budget_chars = 4000     # briefing injected into a subagent at SubagentStart
+
 [delegation]                     # enforced by route_model.py (PreToolUse on spawn) — AGENTS.md § Subagents
 max_parallel_agents = 4          # the (N+1)th live subagent of a turn is refused; SubagentStart/Stop hooks track liveness
 deny_nested_spawn = true         # a spawn issued from inside a subagent is refused (decomposition happens in main only)

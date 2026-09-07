@@ -6,7 +6,8 @@
     ks project init [dir] [--full] | update [dir] | enable | disable | status | drift [--json]
     ks project reset [--archive [--label L]] [--keep-agents] [--registry] [--dry-run] [--yes] [--force]
     ks routing show | check | resolve <agent> | use <table> | use --clear
-    ks ledger check | find <id> [--refs] [--json] | export all|<kinds> [--out F] [--archive] [--csv DIR]
+    ks ledger check | find <id> [--refs] [--json] | digest [--task T] [--agent A] [--json]
+              | export all|<kinds> [--out F] [--archive] [--csv DIR]
               | archive-plan [--dry-run] | archive <ledger|all> --before YYYY-MM-DD [--dry-run]
     ks harness sync [--check] | retrust [--ack]
     ks doctor                                     installation integrity (user-level + project)
@@ -560,6 +561,8 @@ def cmd_ledger(home, args):
         sys.exit(1 if rc else 0)
     if sub == "find":
         sys.exit(run([PY, a("yaml-log-entry", "find_entry.py"), *args[1:]], cwd=proj.root, env=proj.env()).returncode)
+    if sub == "digest":
+        sys.exit(run([PY, a("yaml-log-entry", "digest.py"), *args[1:]], cwd=proj.root, env=proj.env()).returncode)
     if sub == "export":
         if len(args) < 2 or args[1].startswith("--"):
             die("usage: ks ledger export all | <kind>[,<kind>…] [--out FILE] [--archive] [--session TOKEN] [--csv DIR]\n"
@@ -573,7 +576,7 @@ def cmd_ledger(home, args):
             effect("files")
             print("→ log the archive run in changes.yaml (Layer: PROJECT)")
         sys.exit(rc)
-    die("usage: ks ledger check | find <id> [--refs] [--json] | export all|<kinds> [--out F] [--archive] [--session T] [--csv DIR] | archive-plan [--dry-run] | archive <ledger|all> --before YYYY-MM-DD [--dry-run]")
+    die("usage: ks ledger check | find <id> [--refs] [--json] | digest [--task T] [--agent A] [--json] | export all|<kinds> [--out F] [--archive] [--session T] [--csv DIR] | archive-plan [--dry-run] | archive <ledger|all> --before YYYY-MM-DD [--dry-run]")
 
 
 def sync_conflicts(proj):

@@ -55,6 +55,10 @@
      --archive moves ledgers/plan/archives/agents to .agents/history/<stamp>, clear deletes, hook
      state always deleted, registry kept unless --registry, --keep-agents, manifest `resets`,
      generation line at SessionStart and in STATE.md, history never watched
+ 21. Ledger digest (2.0.0): blocked gates / in force / pending / issues / in flight / lessons / changes
+     in STATE.md within budget; task view with evidence chain; SubagentStart briefing with the open
+     handoff, global in-force decisions and lessons; prompt notice for new issues and failed gates;
+     ks ledger digest; AGENTS.md consult rule; [state] limits honoured
 """
 import sys
 sys.dont_write_bytecode = True
@@ -945,6 +949,64 @@ def main():
               and "generation 3" in r.stdout, r.stdout + r.stderr)
         r = run([PY, home_np := os.path.join(work, "tools", "new_project.py"), rproj, "--update"], cwd=rproj, env=kenv)
         check("project update preserves the resets record", len(json.load(open(os.path.join(rproj, ".agents", ".tksfw.json"))).get("resets", [])) == 2, r.stdout + r.stderr)
+
+        # 21 — ledger digest
+        dgp = os.path.join(tmp, "digestp")
+        run([PY, ks, "project", "init", dgp], cwd=tmp, env=kenv)
+        dwa = os.path.join(dgp, ".agents", "workarea")
+        run([PY, os.path.join(plug, "hooks", "inject_state.py")], cwd=dgp, env=kenv, inp=json.dumps({"session_id": "SD", "turn_id": "d1", "source": "startup", "cwd": dgp}))
+        tD = next(json.load(open(os.path.join(dwa, ".hook-state", "sessions", f)))["token"] for f in os.listdir(os.path.join(dwa, ".hook-state", "sessions")))
+        own = f"    OwnerSessionId: {tD}\n    OwnerSessionUserName: carlos\n"
+        def evd(i, task, ts, et, st, title, extra=""):
+            return f"- {i}:\n    TaskID: {task}\n    AuthorAgent: main\n    Model: m\n    Timestamp: \"{ts}\"\n{own}    EventType: {et}\n{extra}    Title: \"{title}\"\n    Remarks: |-\n      x\n    Status: {st}\n"
+        open(os.path.join(dwa, f"events.{tD}.yaml"), "w").write(
+            evd("Evis0001", "T001", "2026-09-07 09:00:00", "ISSUE", "OPEN", "MCP times out") +
+            evd("Evrv0001", "T002", "2026-09-07 09:30:00", "REVIEW", "FAIL", "Review failed: missing sources") +
+            evd("Evts0001", "T003", "2026-09-07 09:40:00", "TEST", "KO", "Test KO") +
+            evd("Evts0002", "T003", "2026-09-07 09:50:00", "TEST", "OK", "Test OK after fix") +
+            evd("Evdc0001", "N/A", "2026-09-07 10:00:00", "DECISION", "ACCEPTED", "Accept archive layout", "    DecisionID: Dcsn0001\n"))
+        def decd(i, title, status, scope):
+            return good_dec.replace("Tstdec01", i).replace('"Fixture decision (valid)"', f'"{title}"').replace("Status: ACCEPTED", f"Status: {status}").replace("      Tests only.", f"      {scope}").replace('    LastUpdate: "2026-07-21 10:00:00"\n', '    LastUpdate: "2026-09-07 09:00:00"\n' + own)
+        open(os.path.join(dwa, f"decisions.{tD}.yaml"), "w").write(decd("Dcsn0001", "One archive per ledger", "OPEN", "Ledger layout") + decd("Dcsn0002", "Terra for builders", "OPEN", "Routing"))
+        open(os.path.join(dwa, f"handoffs.{tD}.yaml"), "w").write(f"- Hnd00001-BEGIN:\n    EventID: N/A\n    TaskID: T002\n    AuthorAgent: main\n    TargetAgent: report-writer\n    Timestamp: \"2026-09-07 09:20:00\"\n{own}    Title: \"Draft section 3\"\n    Description: |-\n      Write section 3; cite every figure.\n    Scope: sections/03.md\n    Inputs: |-\n      - sources/*.md\n      - Dcsn0001\n    Outputs: |-\n      - sections/03.md\n")
+        open(os.path.join(dwa, f"lessons.{tD}.yaml"), "w").write(f"- Lssn0001:\n    AuthorAgent: main\n    Model: m\n    Timestamp: \"2026-09-07 08:00:00\"\n{own}    Title: \"Cite the source next to each figure\"\n    Description: |-\n      Reviewer rejected unsourced figures twice.\n    Remarks: |-\n      x\n")
+        open(os.path.join(dwa, "tasks.md"), "w").write("# Phase 1\n- [ ] T001 Fetch sources - sources-researcher : IN-PROGRESS 2026-09-07 09:00:00\n- [ ] T002 Draft report - report-writer : IN-PROGRESS 2026-09-07 09:20:00\n- [x] T003 Integration test - x-builder : COMPLETED 2026-09-07 09:50:00 [ev:Evts0002]\n")
+        rs = run([PY, os.path.join(plug, "hooks", "refresh_state.py"), "--print"], cwd=dgp, env=kenv)
+        st = rs.stdout
+        check("STATE.md digest: blocked gate T002 only (T003 recovered), decision in force via event, pending, issue, in-flight handoff, lesson",
+              "## Ledger digest" in st and "task T002: REVIEW FAIL" in st and "T003" not in st.split("Blocked gates")[1].split("###")[0]
+              and "Dcsn0001" in st.split("Decisions in force")[1].split("###")[0] and "Dcsn0002" in st.split("Pending decisions")[1].split("###")[0]
+              and "Evis0001" in st and "Hnd00001-BEGIN" in st and "Lssn0001" in st, st[-1500:])
+        check("STATE.md stays under the injection budget", len(st) < 9000, str(len(st)))
+        r = run([PY, ks, "ledger", "digest", "--task", "T002"], cwd=dgp, env=kenv)
+        check("ks ledger digest --task shows the task line, evidence chain and only T002 items",
+              r.returncode == 0 and "### Task T002" in r.stdout and "Evidence chain: Evrv0001" in r.stdout and "Evis0001" not in r.stdout and "Hnd00001-BEGIN" in r.stdout, r.stdout + r.stderr)
+        r = run([PY, ks, "ledger", "digest", "--json"], cwd=dgp, env=kenv)
+        check("ks ledger digest --json", r.returncode == 0 and json.loads(r.stdout)["blocked"][0]["task"] == "T002", r.stdout[:200])
+        r = run([PY, os.path.join(plug, "hooks", "subagent_track.py"), "--start"], cwd=dgp, env=kenv,
+                inp=json.dumps({"session_id": "SD", "turn_id": "d1", "hook_event_name": "SubagentStart", "agent_id": "sub1", "agent_type": "report-writer", "cwd": dgp}))
+        ctx = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"] if r.stdout.strip() else ""
+        check("SubagentStart briefing: own handoff, task evidence, blocked gate, in-force decision, lesson; under budget",
+              "Your handoff: Hnd00001-BEGIN" in ctx and "Inputs: sources/*.md; Dcsn0001" in ctx and "REVIEW FAIL" in ctx
+              and "Dcsn0001" in ctx.split("Decisions in force")[1] and "Lssn0001" in ctx and len(ctx) <= 4200, ctx[:600])
+        r = run([PY, os.path.join(plug, "hooks", "subagent_track.py"), "--start"], cwd=dgp, env=kenv,
+                inp=json.dumps({"session_id": "SD", "turn_id": "d1", "hook_event_name": "SubagentStart", "agent_id": "sub2", "agent_type": "sources-researcher", "cwd": dgp}))
+        ctx2 = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"] if r.stdout.strip() else ""
+        check("briefing without an open handoff still carries global context", "Decisions in force" in ctx2 and "Your handoff" not in ctx2, ctx2[:300])
+        # prompt notice: new issue + failed gate appended during the session
+        run([PY, os.path.join(plug, "hooks", "track_edits.py"), "--phase", "prompt"], cwd=dgp, env=kenv, inp=json.dumps({"session_id": "SD", "turn_id": "d2", "cwd": dgp, "prompt": "x"}))
+        open(os.path.join(dwa, f"events.{tD}.yaml"), "a").write(evd("Evis0002", "T002", "2026-09-07 11:00:00", "ISSUE", "OPEN", "Source list incomplete") + evd("Evau0001", "T001", "2026-09-07 11:10:00", "AUDIT", "NON-CONFORMANT", "Audit failed"))
+        r = run([PY, os.path.join(plug, "hooks", "track_edits.py"), "--phase", "prompt"], cwd=dgp, env=kenv, inp=json.dumps({"session_id": "SD", "turn_id": "d3", "cwd": dgp, "prompt": "x"}))
+        check("prompt notice announces the new open issue and the failed gate", "New open issue Evis0002" in r.stdout and "Gate failed: AUDIT NON-CONFORMANT" in r.stdout, r.stdout[:400])
+        # [state] limits honoured
+        mt = os.path.join(dgp, ".agents", "models.toml")
+        open(mt, "a").write("\n")
+        txt = open(mt).read().replace("issues = 10", "issues = 1")
+        open(mt, "w").write(txt)
+        r = run([PY, ks, "ledger", "digest"], cwd=dgp, env=kenv)
+        check("[state] limits honoured (issues = 1 → '… 1 more')", "… 1 more" in r.stdout.split("Open issues")[1].split("###")[0], r.stdout)
+        agents_md = open(os.path.join(REPO, "template", "AGENTS.md"), encoding="utf-8").read()
+        check("AGENTS.md carries the consult-before-deciding rule", "Consult before deciding" in agents_md and "SUPERSEDED" in agents_md)
 
         agents_md = open(os.path.join(full, "AGENTS.md"), encoding="utf-8").read()
         check("AGENTS.md keeps the naming kernel and points to define-agent",

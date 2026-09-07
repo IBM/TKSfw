@@ -2,6 +2,31 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [2.0.0] — 2026-09-07
+
+Ledgers as context. Major version: the 2.x line consolidates the project-format changes accumulated since 1.0 (see "Upgrading from 1.x").
+
+### Added
+- `yaml-log-entry/assets/digest.py`: deterministic ledger digest — blocked gates (latest REVIEW/TEST/AUDIT/APPROVAL negative with no later positive), decisions in force (effective ACCEPTED), pending decisions, open issues, work in flight (BEGIN without END), recent lessons, recent changes; `--task <T>` view with the task line and evidence chain; `--agent <A>` briefing with the open handoff BEGIN; `--json`.
+- STATE.md "Ledger digest" section within `[state].budget_chars` (3,500; whole injection < 9,000 chars), lowest-priority items dropped first with a pointer to `ks ledger digest`.
+- `SubagentStart` briefing injected into the subagent (`subagent_track.py --start`): its handoff, task evidence chain, blocked gates, all decisions in force, open issues, recent lessons; `[state].subagent_budget_chars` (4,000).
+- Prompt notice: "New open issue …" / "Gate failed: …" when such events are added during the session.
+- `ks ledger digest [--task T] [--agent A] [--json]`. `[state]` table in `models.toml`. ADR 0011. 9 new tests (199 total).
+
+### Changed
+- AGENTS.md § Task Management: rule 8 "Consult before deciding" (digest before planning/deciding; SUPERSEDED transition before contradicting an ACCEPTED decision; handoff BEGIN lists decision/lesson IDs in `Inputs`); Self-Improvement Loop line points to the digest. 18,858 B.
+
+### Upgrading from 1.x
+| Since | Change | What to do |
+|---|---|---|
+| 1.4.0 | New ledger entries must carry `OwnerSessionId` / `OwnerSessionUserName`; operator name is a per-user item | `ks operator set "<name>"` once per machine; legacy entries stay valid |
+| 1.7.0 | Ledgers are partitioned per session (`<ledger>.<token>.yaml`); unsuffixed files are read-only; decisions append-only (status via DECISION events with `DecisionID`); hook state under `.hook-state/hosts/<host>/` | `ks project update`; fold legacy files with `ks ledger archive all --before <today>` when no session is open |
+| 1.5.0 | Cumulative archives under `workarea/archive/`; `tasks-archive.md` migrated by `ks ledger archive-plan` | run `ks ledger archive-plan` once |
+| 1.9.0 | `ks project reset` and generation records in `.agents/.tksfw.json` | none |
+| 2.0.0 | STATE.md carries the digest; subagents receive a briefing; rule 8 | `ks project update`; restart; Codex `/hooks` re-trust; `ks harness retrust --ack` |
+
+2.x compatibility promise: manifest schema (`.agents/.tksfw.json` keys), shard naming, `models.toml` tables (`[tiers] [roles] [routing.*] [delegation] [state]`, `selected`), hook events and their outputs, `ks` verbs and flags, ledger schemas (fields only added as optional, statuses only added). `version_skew()` warns 1.x projects to update.
+
 ## [1.9.1] — 2026-09-07
 
 ### Fixed

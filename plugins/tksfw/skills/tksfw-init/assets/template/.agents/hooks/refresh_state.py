@@ -265,6 +265,19 @@ def build():
         lines.append("- (open-items scan unavailable)")
     lines.append("")
 
+    # ---- Ledger digest (2.0.0): the ledgers read back as decision context ----
+    try:
+        sys.path.insert(0, H.VALIDATOR_DIR)
+        import digest as DG
+        lim = DG.limits(WORKAREA)
+        text = DG.format_digest(DG.build(WORKAREA), lim, lim.get("budget_chars", 3500), heading_level="###")
+        if text:
+            lines.append("## Ledger digest")
+            lines.append(text.rstrip("\n"))
+            lines.append("")
+    except Exception as e:
+        H.log(f"refresh_state: digest: {type(e).__name__}: {e}")
+
     # ---- Deliverables ----
     try:
         present, total, pending_ids = deliverables_status()
