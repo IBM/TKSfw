@@ -2,6 +2,20 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [1.9.1] — 2026-09-07
+
+### Fixed
+- `ks project reset` (and `ks self setup`) prompted for confirmation whenever stdin was a terminal — including when invoked by the test suite from an interactive shell, where the prompt waited until the 120 s timeout. Prompts now require a terminal on both stdin and stdout; otherwise `--yes` is required. The test harness no longer inherits the terminal's stdin (`stdin=DEVNULL` when no input is given).
+
+## [1.9.0] — 2026-09-07
+
+`ks project reset` — prepare a project to start over.
+
+### Added
+- `ks project reset [--archive [--label L]] [--keep-agents] [--registry] [--dry-run] [--yes] [--force]`: clears ledgers (shards + legacy), archives, plan, STATE.md, exports, hook state (all hosts and sessions), work areas, worktrees (+ branches), agent definitions and mirrors; `--archive` moves the durable groups to `.agents/history/<stamp>[-label]/` (faithful snapshot: `workarea/`, `agents/`) and keeps worktree branches. Registry kept by default (`--registry` clears), agents deleted by default (`--keep-agents`). Guardrails: active sessions, `--yes`, unmerged branches, dry run.
+- Generation record: `.agents/.tksfw.json` `resets: [{ts, operator, mode, history, …}]`, preserved by `--update`; `hooklib.generation_line()` shown at SessionStart and at the top of STATE.md ("Generation N — reset … previous generation in …").
+- `.agents/history/` is never watched. Docs (ks.md, operations.md). 10 new tests (190 total).
+
 ## [1.8.0] — 2026-09-07
 
 Excel export of the ledgers.

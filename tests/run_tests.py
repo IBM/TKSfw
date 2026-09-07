@@ -51,12 +51,17 @@
      archive refuses while sessions are active, per-host hook state
  19. Excel export (1.8.0): xlsx_lite produces a valid workbook (zip + XML parsed; openpyxl when
      available), ks ledger export all / by kind / --csv / --archive / --session
+ 20. ks project reset (1.9.0): dry run, refusals (active session, no --yes, unmerged worktree),
+     --archive moves ledgers/plan/archives/agents to .agents/history/<stamp>, clear deletes, hook
+     state always deleted, registry kept unless --registry, --keep-agents, manifest `resets`,
+     generation line at SessionStart and in STATE.md, history never watched
 """
 import sys
 sys.dont_write_bytecode = True
 import os
 import json
 import shutil
+import glob
 import re
 import subprocess
 import tempfile
@@ -86,7 +91,10 @@ def run(cmd, cwd=None, env=None, inp=None):
     e.pop("TKSFW_PROJECT_ROOT", None)
     if env:
         e.update(env)
-    return subprocess.run(cmd, cwd=cwd, env=e, input=inp, capture_output=True, text=True, timeout=120)
+    # No inherited stdin: when the suite runs from a terminal, an interactive prompt in a child
+    # (e.g. `ks project reset` confirmation) would otherwise wait for the keyboard until the timeout.
+    return subprocess.run(cmd, cwd=cwd, env=e, input=inp, capture_output=True, text=True, timeout=120,
+                          **({} if inp is not None else {"stdin": subprocess.DEVNULL}))
 
 
 def main():
@@ -875,6 +883,68 @@ def main():
         check("export rejects an unknown kind", r.returncode != 0 and "unknown kind" in r.stderr, r.stderr)
         r = run([PY, ks, "ledger", "export", "all"], cwd=sproj, env=senv)
         check("default output lands under workarea/exports", r.returncode == 0 and os.path.isdir(os.path.join(wa, "exports")) and any(f.endswith(".xlsx") for f in os.listdir(os.path.join(wa, "exports"))), r.stdout + r.stderr)
+
+        # 20 — project reset
+        rproj = os.path.join(tmp, "resetp")
+        os.makedirs(rproj)
+        run(["git", "init", "-q"], cwd=rproj)
+        run([PY, ks, "project", "init"], cwd=rproj, env=kenv)
+        run(["git", "add", "-A"], cwd=rproj); run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"], cwd=rproj)
+        rwa = os.path.join(rproj, ".agents", "workarea")
+        run([PY, os.path.join(plug, "hooks", "inject_state.py")], cwd=rproj, env=kenv, inp=json.dumps({"session_id": "SR", "turn_id": "r1", "source": "startup", "cwd": rproj}))
+        tR = next(json.load(open(os.path.join(rwa, ".hook-state", "sessions", f)))["token"] for f in os.listdir(os.path.join(rwa, ".hook-state", "sessions")))
+        open(os.path.join(rwa, f"changes.{tR}.yaml"), "w").write(change_entry("Rrrr1111", tR, "carlos"))
+        open(os.path.join(rwa, "tasks.md"), "w").write("# A\n- [ ] T001 a - main : OPEN 2026-09-07 10:00:00\n")
+        os.makedirs(os.path.join(rwa, "archive")); open(os.path.join(rwa, "archive", "events.yaml"), "w").write("[]\n")
+        open(os.path.join(rwa, "deliverables.yaml"), "w").write("- REPORT:\n    Title: \"r\"\n    Path: \"report-*.md\"\n")
+        open(os.path.join(rproj, ".agents", "agents", "x-builder.toml"), "w").write('name = "x-builder"\ndescription = "d"\n')
+        os.makedirs(os.path.join(rproj, ".codex", "agents")); open(os.path.join(rproj, ".codex", "agents", "x-builder.toml"), "w").write("# tksfw:mirror\n")
+        run([PY, watool, "create", "x-builder", "T001", "--session", tR], cwd=rproj, env=kenv)
+        run([PY, watool, "create", "x-builder", "T001", "--session", tR, "--worktree"], cwd=rproj, env=kenv)
+        wtd = os.path.join(rproj, ".agents", "worktrees", f"x-builder--{tR}.T001.0")
+        open(os.path.join(wtd, "w.txt"), "w").write("w\n"); run(["git", "add", "w.txt"], cwd=wtd); run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "w"], cwd=wtd)
+        r = run([PY, ks, "project", "reset", "--dry-run"], cwd=rproj, env=kenv)
+        check("reset --dry-run plans and changes nothing", r.returncode == 0 and "dry run" in r.stdout and "ledgers" in r.stdout and os.path.isfile(os.path.join(rwa, f"changes.{tR}.yaml")), r.stdout + r.stderr)
+        r = run([PY, ks, "project", "reset", "--yes"], cwd=rproj, env=kenv)
+        check("reset refuses while a session is active", r.returncode != 0 and "session" in r.stderr, r.stderr)
+        for f in os.listdir(os.path.join(rwa, ".hook-state", "sessions")):
+            d = json.load(open(os.path.join(rwa, ".hook-state", "sessions", f))); d["last_seen"] = 0; json.dump(d, open(os.path.join(rwa, ".hook-state", "sessions", f), "w"))
+        r = run([PY, ks, "project", "reset", "--archive"], cwd=rproj, env=kenv)
+        check("reset refuses without --yes when not interactive", r.returncode != 0 and "--yes" in r.stderr, r.stderr)
+        r = run([PY, ks, "project", "reset", "--yes"], cwd=rproj, env=kenv)
+        check("reset refuses to delete an unmerged worktree branch without --force", r.returncode != 0 and "unmerged" in r.stderr, r.stderr)
+        r = run([PY, ks, "project", "reset", "--archive", "--label", "phase 1", "--yes"], cwd=rproj, env=kenv)
+        hist = glob.glob(os.path.join(rproj, ".agents", "history", "*-phase_1"))
+        check("reset --archive moves ledgers, plan, archives, agents to history and records the generation",
+              r.returncode == 0 and len(hist) == 1 and os.path.isfile(os.path.join(hist[0], "workarea", f"changes.{tR}.yaml"))
+              and os.path.isfile(os.path.join(hist[0], "workarea", "tasks.md")) and os.path.isfile(os.path.join(hist[0], "workarea", "archive", "events.yaml"))
+              and os.path.isfile(os.path.join(hist[0], "agents", "x-builder.toml"))
+              and not os.path.exists(os.path.join(rwa, f"changes.{tR}.yaml")) and not os.path.exists(os.path.join(rwa, ".hook-state"))
+              and os.path.isfile(os.path.join(rwa, "deliverables.yaml")) and not os.path.exists(os.path.join(rproj, ".codex", "agents", "x-builder.toml"))
+              and not os.path.exists(wtd) and json.load(open(os.path.join(rproj, ".agents", ".tksfw.json")))["resets"][0]["mode"] == "archive",
+              r.stdout + r.stderr)
+        br = run(["git", "branch", "--list", "agent/*"], cwd=rproj, capture_output=True, text=True) if False else run(["git", "branch", "--list", "agent/*"], cwd=rproj)
+        check("--archive keeps the worktree branch", "agent/x-builder" in br.stdout, br.stdout)
+        r = run([PY, os.path.join(plug, "hooks", "inject_state.py")], cwd=rproj, env=kenv, inp=json.dumps({"session_id": "SR2", "turn_id": "r2", "source": "startup", "cwd": rproj}))
+        ctx = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"] if r.stdout.strip() else ""
+        rs = run([PY, os.path.join(plug, "hooks", "refresh_state.py"), "--print"], cwd=rproj, env=kenv)
+        check("next session and STATE.md announce generation 2", "Generation 2" in ctx and "history/" in ctx and "Generation 2" in rs.stdout, ctx[:300] + rs.stdout[:200])
+        probe = "import sys; sys.path.insert(0, %r); import hooklib as H; print(H.classify('.agents/history/x/workarea/tasks.md'))"
+        r = run([PY, "-c", probe % os.path.join(plug, "hooks")], cwd=rproj, env=kenv)
+        check(".agents/history/ is never watched", r.stdout.strip() == "None", r.stdout)
+        # clear mode with --keep-agents and --registry
+        open(os.path.join(rproj, ".agents", "agents", "y-writer.toml"), "w").write('name = "y-writer"\ndescription = "d"\n')
+        tR2 = next(json.load(open(os.path.join(rwa, ".hook-state", "sessions", f)))["token"] for f in os.listdir(os.path.join(rwa, ".hook-state", "sessions")))
+        open(os.path.join(rwa, f"lessons.{tR2}.yaml"), "w").write("[]\n")
+        for f in os.listdir(os.path.join(rwa, ".hook-state", "sessions")):
+            d = json.load(open(os.path.join(rwa, ".hook-state", "sessions", f))); d["last_seen"] = 0; json.dump(d, open(os.path.join(rwa, ".hook-state", "sessions", f), "w"))
+        r = run([PY, ks, "project", "reset", "--keep-agents", "--registry", "--yes"], cwd=rproj, env=kenv)
+        check("clear reset: ledgers deleted, agents kept, registry cleared, generation 3",
+              r.returncode == 0 and not os.path.exists(os.path.join(rwa, f"lessons.{tR2}.yaml")) and os.path.isfile(os.path.join(rproj, ".agents", "agents", "y-writer.toml"))
+              and not os.path.exists(os.path.join(rwa, "deliverables.yaml")) and len(json.load(open(os.path.join(rproj, ".agents", ".tksfw.json")))["resets"]) == 2
+              and "generation 3" in r.stdout, r.stdout + r.stderr)
+        r = run([PY, home_np := os.path.join(work, "tools", "new_project.py"), rproj, "--update"], cwd=rproj, env=kenv)
+        check("project update preserves the resets record", len(json.load(open(os.path.join(rproj, ".agents", ".tksfw.json"))).get("resets", [])) == 2, r.stdout + r.stderr)
 
         agents_md = open(os.path.join(full, "AGENTS.md"), encoding="utf-8").read()
         check("AGENTS.md keeps the naming kernel and points to define-agent",

@@ -4,6 +4,7 @@
     ks self install | setup | version | home      put ks on PATH; one-shot user setup; version / home
     ks operator set <name> | show                 per-user ~/.config/tksfw/user.toml
     ks project init [dir] [--full] | update [dir] | enable | disable | status | drift [--json]
+    ks project reset [--archive [--label L]] [--keep-agents] [--registry] [--dry-run] [--yes] [--force]
     ks routing show | check | resolve <agent> | use <table> | use --clear
     ks ledger check | find <id> [--refs] [--json] | export all|<kinds> [--out F] [--archive] [--csv DIR]
               | archive-plan [--dry-run] | archive <ledger|all> --before YYYY-MM-DD [--dry-run]
@@ -259,7 +260,7 @@ def cmd_setup(home, args):
     if op:
         run([PY, home.new_project, "--set-operator", op], check=True)
     elif r.returncode != 0 or "source: git" in r.stdout:
-        if sys.stdin.isatty():
+        if sys.stdin.isatty() and sys.stdout.isatty():
             name = input("Operator name for ledger entries (OwnerSessionUserName): ").strip()
             if name:
                 run([PY, home.new_project, "--set-operator", name], check=True)
@@ -313,6 +314,9 @@ def cmd_project(home, args):
             if sub == "disable":
                 print("→ hooks are inert here from now on (the model is not told — it has no hook to tell it); `ks project enable` re-arms")
         sys.exit(rc)
+    if sub == "reset":
+        cmd_reset(home, rest)
+        return
     if sub == "status":
         proj = Project(home)
         m = proj.manifest
@@ -340,7 +344,139 @@ def cmd_project(home, args):
         except Exception:
             pass
         return
-    die("usage: ks project init [dir] [--full] | update [dir] | enable | disable | status | drift [--json]")
+    die("usage: ks project init [dir] [--full] | update [dir] | enable | disable | status | drift [--json] | reset [--archive [--label L]] [--keep-agents] [--registry] [--dry-run] [--yes] [--force]")
+
+
+SHARD_RE = re.compile(r"^(changes|lessons|handoffs|events|decisions)\.([0-9A-Za-z]{8})\.yaml$")
+LEDGER_NAMES = ("changes.yaml", "lessons.yaml", "handoffs.yaml", "events.yaml", "decisions.yaml")
+
+
+def cmd_reset(home, args):
+    """ks project reset [--archive [--label NAME]] [--keep-agents] [--registry] [--dry-run] [--yes] [--force]"""
+    import time, glob
+    proj = Project(home)
+    archive = "--archive" in args
+    label = args[args.index("--label") + 1] if "--label" in args else ""
+    keep_agents, registry, dry, yes, force = "--keep-agents" in args, "--registry" in args, "--dry-run" in args, "--yes" in args, "--force" in args
+    wa = proj.workarea
+    root = proj.root
+    if not dry:
+        refuse_if_busy(proj, "project reset", args, sessions=True)
+    # ---- plan
+    groups = {}                                            # name → [(abs path, kind: file|dir)]
+    def add(name, path):
+        if os.path.exists(path):
+            groups.setdefault(name, []).append(path)
+    names = os.listdir(wa) if os.path.isdir(wa) else []
+    for n in names:
+        p = os.path.join(wa, n)
+        if n in LEDGER_NAMES or SHARD_RE.match(n):
+            add("ledgers", p)
+        elif n in ("tasks.md", "tasks-archive.md", "STATE.md"):
+            add("plan & view", p)
+        elif n == "archive":
+            add("archives", p)
+        elif n == "exports":
+            add("exports", p)
+        elif n == ".hook-state":
+            add("hook state", p)
+        elif n == "deliverables.yaml":
+            if registry:
+                add("registry", p)
+        elif os.path.isdir(p) and n != ".keep":
+            add("work areas", p)
+    wt_dir = os.path.join(root, ".agents", "worktrees")
+    worktrees = [d for d in glob.glob(os.path.join(wt_dir, "*")) if os.path.isdir(d)]
+    for d in worktrees:
+        add("worktrees", d)
+    agents_dir = os.path.join(root, ".agents", "agents")
+    agent_files = [] if keep_agents else [p for p in glob.glob(os.path.join(agents_dir, "*.toml"))]
+    for p in agent_files:
+        add("agent definitions", p)
+    for p in agent_files:
+        name = os.path.splitext(os.path.basename(p))[0]
+        for mirror in (os.path.join(root, ".codex", "agents", name + ".toml"), os.path.join(root, ".claude", "agents", name + ".md")):
+            add("agent mirrors", mirror)
+    if not groups:
+        print("nothing to reset — the project is already clean")
+        return
+    stamp = time.strftime("%Y%m%d-%H%M")
+    hist = os.path.join(root, ".agents", "history", stamp + (f"-{re.sub(r'[^A-Za-z0-9_-]', '_', label)}" if label else ""))
+    unmerged = []
+    if worktrees and shutil.which("git"):
+        for d in worktrees:
+            branch = "agent/" + os.path.basename(d).replace("--", "/", 1)
+            r = run(["git", "branch", "--merged", "HEAD", "--format=%(refname:short)"], cwd=root, capture=True)
+            if r.returncode == 0 and branch not in {l.strip() for l in r.stdout.splitlines()}:
+                unmerged.append(branch)
+    print(f"reset plan for {root}  ({'ARCHIVE to ' + os.path.relpath(hist, root) if archive else 'CLEAR'})")
+    archived_groups = {"ledgers", "plan & view", "archives", "exports", "work areas", "agent definitions", "registry"}
+    for g, items in groups.items():
+        action = "→ history" if archive and g in archived_groups else "delete"
+        print(f"  {g:<18} {len(items):>3}  {action}")
+    if unmerged:
+        print("  unmerged worktree branches: " + ", ".join(unmerged) + ("  (kept)" if archive else ("  (DELETED with --force)" if force else "  → refusing without --force")))
+    if dry:
+        print("dry run — nothing changed")
+        return
+    if unmerged and not archive and not force:
+        die("refusing: unmerged worktree branches would be lost — merge them, use --archive (keeps branches) or --force")
+    if not yes:
+        if sys.stdin.isatty() and sys.stdout.isatty():          # a real terminal on both ends; never prompt into a pipe
+            ans = input("Proceed? Type 'reset' to confirm: ").strip()
+            if ans != "reset":
+                die("aborted")
+        else:
+            die("refusing without --yes (non-interactive)")
+    # ---- execute
+    def move_or_delete(path, group):
+        if archive and group in archived_groups:
+            rel = os.path.relpath(path, root)
+            dst = os.path.join(hist, rel.replace(".agents/", "", 1))
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.move(path, dst)
+        elif os.path.isdir(path):
+            shutil.rmtree(path, ignore_errors=True)
+        else:
+            os.remove(path)
+    for d in worktrees:
+        run(["git", "worktree", "remove", "--force", d], cwd=root, capture=True)
+        if os.path.isdir(d):
+            shutil.rmtree(d, ignore_errors=True)
+        branch = "agent/" + os.path.basename(d).replace("--", "/", 1)
+        if not archive:
+            run(["git", "branch", "-D", branch], cwd=root, capture=True)
+    if shutil.which("git"):
+        run(["git", "worktree", "prune"], cwd=root, capture=True)
+    for g, items in groups.items():
+        if g == "worktrees":
+            continue
+        for p in items:
+            if os.path.exists(p):
+                move_or_delete(p, g)
+    os.makedirs(wa, exist_ok=True)
+    open(os.path.join(wa, ".keep"), "a").close()
+    if not keep_agents:
+        os.makedirs(agents_dir, exist_ok=True)
+        open(os.path.join(agents_dir, ".keep"), "a").close()
+    # ---- record the generation in the manifest
+    mp = os.path.join(root, ".agents", ".tksfw.json")
+    try:
+        m = json.load(open(mp))
+    except Exception:
+        m = proj.manifest or {}
+    op = run([PY, home.new_project, "--show-operator"], capture=True).stdout
+    op = op.split("operator:", 1)[1].split("(")[0].strip() if "operator:" in op else ""
+    m.setdefault("resets", []).append({"ts": time.strftime("%Y-%m-%d %H:%M:%S"), "operator": op,
+                                      "mode": "archive" if archive else "clear",
+                                      "history": os.path.relpath(hist, root) if archive else "",
+                                      "kept_agents": keep_agents, "cleared_registry": registry})
+    with open(mp, "w", encoding="utf-8") as fh:
+        json.dump(m, fh, indent=2, sort_keys=True)
+        fh.write("\n")
+    print(f"reset done — generation {len(m['resets']) + 1}" + (f"; previous generation in {os.path.relpath(hist, root)}" if archive else ""))
+    effect("files")
+    print("→ commit the working tree; the next session starts with empty ledgers and a fresh token")
 
 
 def active_sessions(proj, within=1800):

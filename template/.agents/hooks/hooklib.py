@@ -119,7 +119,8 @@ AGENT_VALIDATOR = os.path.normpath(AGENT_VALIDATOR)                  # sibling s
 AGENTS_SRC = os.path.join(PROJECT_ROOT, ".agents", "agents")           # neutral agent definitions
 AGENT_FILE_RE = re.compile(r"^\.agents/agents/[^/]+\.toml$")
 MIRROR_PREFIXES = (".claude/skills/", ".codex/agents/", ".claude/agents/",   # generated, never watched
-                   ".agents/worktrees/")                                       # subagent worktrees (delegate-work)
+                   ".agents/worktrees/",                                       # subagent worktrees (delegate-work)
+                   ".agents/history/")                                         # previous generations (ks project reset --archive)
 STATE_MD = os.path.join(WORKAREA, "STATE.md")
 
 LEDGER_FILES = ("changes.yaml", "lessons.yaml", "handoffs.yaml", "events.yaml",
@@ -188,6 +189,18 @@ def guard():
     ok, _reason = armed()
     if not ok:
         sys.exit(0)
+
+
+def generation_line():
+    """'Generation N — reset <ts> by <op> (<mode>); previous generation in <history>' or ''."""
+    m = read_manifest() or {}
+    resets = m.get("resets") or []
+    if not resets:
+        return ""
+    last = resets[-1]
+    where = f"; previous generation in `{last['history']}`" if last.get("history") else "; previous ledgers were cleared"
+    return (f"Generation {len(resets) + 1} — reset {last.get('ts', '?')} by {last.get('operator') or '?'} "
+            f"({last.get('mode', 'clear')}){where}. Empty ledgers are expected; start the plan afresh.")
 
 
 def plugin_version():

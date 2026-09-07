@@ -119,7 +119,8 @@ def main():
     head = PREAMBLE.get(source, PREAMBLE["startup"])
     routing = routing_summary(payload)
     skew = H.version_skew()
-    routing = (skew + "\n" if skew else "") + (session_line + "\n" if session_line else "") + routing
+    gen = H.generation_line()
+    routing = (skew + "\n" if skew else "") + (gen + "\n" if gen else "") + (session_line + "\n" if session_line else "") + routing
     body = (f"{head}\n{routing}Authoritative files: {H.WORKAREA_REL}/tasks.md and "
             f"{H.WORKAREA_REL}/*.yaml (STATE.md is a generated view). Before writing any of those "
             "YAML files, load the yaml-log-entry skill (schemas + ID minting); before creating or renaming "

@@ -192,6 +192,11 @@ def build():
     lines.append("> Those files are authoritative; this is a resume cursor, not a source of truth.")
     lines.append("")
 
+    gen = H.generation_line()
+    if gen:
+        lines.append("- " + gen)
+        lines.append("")
+
     # ---- Focus (document order — never sorted) ----
     lines.append("## Focus")
     try:
