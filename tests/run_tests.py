@@ -45,6 +45,10 @@
  17. Live reconfiguration (1.6.0): UserPromptSubmit notice for routing/operator/armed changes and
      external file changes; ks effect lines; `routing use` refuses while subagents run; `ks self setup`
      idempotent stanzas; docs present
+ 18. Partitioned ledgers (1.7.0, exercised inside 14/16): own-shard writes accepted, foreign shard and
+     legacy writes rejected, own append-only drop = lost update, decisions append-only with DECISION
+     events, STATE.md sessions section, prompt notice with titles, sync conflict copies reported,
+     archive refuses while sessions are active, per-host hook state
 """
 import sys
 sys.dont_write_bytecode = True
@@ -64,6 +68,14 @@ def check(name, cond, detail=""):
     print(("[PASS] " if cond else "[FAIL] ") + name + (f"  — {detail}" if detail and not cond else ""))
     if not cond:
         FAILS.append(name)
+
+
+HOST = "testhost"
+
+
+def host_state(project):
+    """This host's hook-state dir (1.7.0: .hook-state/hosts/<host>/)."""
+    return os.path.join(project, ".agents", "workarea", ".hook-state", "hosts", HOST)
 
 
 def run(cmd, cwd=None, env=None, inp=None):
@@ -184,7 +196,7 @@ def main():
         os.makedirs(codex_home)
         with open(os.path.join(codex_home, "config.toml"), "w") as fh:
             fh.write('model = "gpt-5.6-sol"\nmodel_provider = "ibm"\n\n[model_providers.ibm]\nbase_url = "https://x"\n')
-        base_env = {"CODEX_HOME": codex_home, "ANTHROPIC_BASE_URL": "", "TKSFW_ROUTING": ""}
+        base_env = {"CODEX_HOME": codex_home, "ANTHROPIC_BASE_URL": "", "TKSFW_ROUTING": "", "TKSFW_HOST": HOST}
         base_env = {k: v for k, v in base_env.items() if v} | {"CODEX_HOME": codex_home}
         rm = os.path.join(full, ".agents", "hooks", "route_model.py")
         r = run([PY, rm, "--check"], cwd=full, env=base_env)
@@ -216,7 +228,7 @@ def main():
         check("routing: unknown role denied", hs.get("permissionDecision") == "deny" and "atlas" in hs.get("permissionDecisionReason", ""), r.stdout)
         r, out = hook("Bash", {"command": "ls"}, env=base_env, extra={"turn_id": "t3"})
         check("routing: non-spawn tool untouched", r.returncode == 0 and out == {}, r.stdout + r.stderr)
-        jl = os.path.join(full, ".agents", "workarea", ".hook-state", "routing.jsonl")
+        jl = os.path.join(host_state(full), "routing.jsonl")
         check("routing: decisions journaled", os.path.isfile(jl) and sum(1 for _ in open(jl)) >= 4)
         # plugin bundle: hook runs from the plugin dir against the plugin-mode project (has models.toml)
         check("plugin-mode project carries models.toml", os.path.isfile(os.path.join(proj, ".agents", "models.toml")))
@@ -434,7 +446,7 @@ def main():
         for i in range(4):
             run([PY, os.path.join(plug, "hooks", "subagent_track.py"), "--start"], cwd=dproj, env=penv,
                 inp=json.dumps({"session_id": "d", "turn_id": "t9", "hook_event_name": "SubagentStart", "agent_id": f"a{i}", "agent_type": "x-builder", "cwd": dproj}))
-        live = json.load(open(os.path.join(dproj, ".agents", "workarea", ".hook-state", "subagents.json")))["live"]
+        live = json.load(open(os.path.join(host_state(dproj), "subagents.json")))["live"]
         check("SubagentStart tracked", len(live) == 4)
         r = rm(spawn())
         check("5th concurrent spawn denied", '"deny"' in r.stdout and "4 subagents are already running" in r.stdout, r.stdout[:300])
@@ -446,7 +458,7 @@ def main():
         open(os.path.join(dproj, ".agents", "workarea", "tasks.md"), "w").write("# plan\n- [x] T001 done - main : COMPLETED 2026-09-06 10:00:00 [ev:abc12345]\n")
         r = run([PY, os.path.join(plug, "hooks", "check_ledgers_on_stop.py")], cwd=dproj, env=penv,
                 inp=json.dumps({"session_id": "d", "turn_id": "t9", "hook_event_name": "Stop", "cwd": dproj}))
-        live = json.load(open(os.path.join(dproj, ".agents", "workarea", ".hook-state", "subagents.json")))["live"]
+        live = json.load(open(os.path.join(host_state(dproj), "subagents.json")))["live"]
         check("main Stop clears the live set and reports the stale work area",
               live == {} and "x-builder/T001" in r.stdout and "prune --stale" in r.stdout, r.stdout[:300])
         # worktrees never watched
@@ -529,51 +541,76 @@ def main():
         check("second session gets its own token and a warning about the first", tB and tB != tA and "WARNING: 1 other session" in ctxB and tA in ctxB, ctxB[:400])
         r = hook("inject_state.py", "SA", "a1", {"source": "resume"})
         check("resume keeps the same token", f"Session token: {tA}" in json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"])
-        ch = os.path.join(wa, "changes.yaml")
-        open(ch, "w").write(change_entry("Aaaa1111", tA, "carlos"))
-        r = post("SA", "a1", ".agents/workarea/changes.yaml")
-        check("entry with owner fields accepted", r.returncode == 0, r.stderr[:300])
-        open(ch, "a").write(change_entry("Bbbb2222", tB, "bob").replace(f"    OwnerSessionId: {tB}\n    OwnerSessionUserName: bob\n", ""))
-        r = post("SB", "b1", ".agents/workarea/changes.yaml")
+        chA = os.path.join(wa, f"changes.{tA}.yaml")
+        chB = os.path.join(wa, f"changes.{tB}.yaml")
+        open(chA, "w").write(change_entry("Aaaa1111", tA, "carlos"))
+        r = post("SA", "a1", f".agents/workarea/changes.{tA}.yaml")
+        check("entry with owner fields in the own shard accepted", r.returncode == 0, r.stderr[:300])
+        open(chB, "w").write(change_entry("Bbbb2222", tB, "bob").replace(f"    OwnerSessionId: {tB}\n    OwnerSessionUserName: bob\n", ""))
+        r = post("SB", "b1", f".agents/workarea/changes.{tB}.yaml")
         check("new entry without owner fields is rejected", r.returncode == 2 and "OwnerSessionId" in r.stderr, r.stderr[:300])
-        open(ch, "w").write(change_entry("Aaaa1111", tA, "carlos") + change_entry("Bbbb2222", tB, "bob"))
-        r = post("SB", "b1", ".agents/workarea/changes.yaml")
+        open(chB, "w").write(change_entry("Bbbb2222", tB, "bob"))
+        r = post("SB", "b1", f".agents/workarea/changes.{tB}.yaml")
         check("corrected entry accepted", r.returncode == 0, r.stderr[:300])
-        open(ch, "w").write(change_entry("Aaaa1111", tA, "carlos"))          # byte-identical to A's last view
+        open(chB, "a").write(change_entry("Xxxx9999", tA, "carlos"))          # A writes into B's shard
+        r = post("SA", "a1", f".agents/workarea/changes.{tB}.yaml")
+        check("write to another session's shard is rejected as READ-ONLY", r.returncode == 2 and "READ-ONLY LEDGER" in r.stderr and tB in r.stderr, r.stderr[:300])
+        open(chB, "w").write(change_entry("Bbbb2222", tB, "bob"))               # restore
+        post("SA", "a1", f".agents/workarea/changes.{tB}.yaml")
+        legacy = os.path.join(wa, "changes.yaml")
+        open(legacy, "w").write(change_entry("Llll0000", tA, "carlos"))
         r = post("SA", "a1", ".agents/workarea/changes.yaml")
-        check("A-B-A rewrite that drops another session's entry is blocked as LOST UPDATE",
-              r.returncode == 2 and "LOST UPDATE" in r.stderr and "Bbbb2222" in r.stderr and tB in r.stderr, r.stderr[:300])
-        open(ch, "w").write(change_entry("Aaaa1111", tA, "carlos") + change_entry("Bbbb2222", tB, "bob"))
-        r = post("SA", "a1", ".agents/workarea/changes.yaml")
-        check("restored file accepted", r.returncode == 0, r.stderr[:300])
-        # attribution: B's unnamed hook run sees A's ledger write as external
-        open(ch, "a").write(change_entry("Cccc3333", tA, "carlos"))
+        check("write to the legacy unsuffixed ledger is rejected", r.returncode == 2 and "legacy" in r.stderr, r.stderr[:300])
+        os.remove(legacy)
         post("SA", "a1", ".agents/workarea/changes.yaml")
+        open(chA, "a").write(change_entry("Cccc3333", tA, "carlos"))
+        post("SA", "a1", f".agents/workarea/changes.{tA}.yaml")
+        open(chA, "w").write(change_entry("Aaaa1111", tA, "carlos"))          # own shard, entry dropped
+        r = post("SA", "a1", f".agents/workarea/changes.{tA}.yaml")
+        check("dropping an entry from the own append-only shard is a LOST UPDATE", r.returncode == 2 and "LOST UPDATE" in r.stderr and "Cccc3333" in r.stderr, r.stderr[:300])
+        open(chA, "w").write(change_entry("Aaaa1111", tA, "carlos") + change_entry("Cccc3333", tA, "carlos"))
+        r = post("SA", "a1", f".agents/workarea/changes.{tA}.yaml")
+        check("restored shard accepted", r.returncode == 0, r.stderr[:300])
+        # attribution: B's unnamed hook run sees A's shard write as external
+        open(chA, "a").write(change_entry("Dddd4444", tA, "carlos"))
+        post("SA", "a1", f".agents/workarea/changes.{tA}.yaml")
         open(os.path.join(sproj, "AGENTS.md"), "a").write("\n# touched by A\n")
         post("SA", "a1", "AGENTS.md")
         r = post("SB", "b1", "x", tool="Bash")
-        jl = [json.loads(l) for l in open(os.path.join(wa, ".hook-state", "journal.jsonl"))]
+        jl = [json.loads(l) for l in open(os.path.join(host_state(sproj), "journal.jsonl"))]
         lastB = [e for e in jl if e.get("session") == tB][-1]["changed"]
         att = {c["path"].split("/")[-1]: c.get("attrib") for c in lastB}
-        check("B sees A's ledger entry as external and A's unnamed edit as ambiguous",
-              att.get("changes.yaml") == "external" and att.get("AGENTS.md") == "ambiguous", str(att))
+        check("B sees A's shard as external and A's unnamed edit as ambiguous",
+              att.get(f"changes.{tA}.yaml") == "external" and att.get("AGENTS.md") == "ambiguous", str(att))
         r = hook("check_ledgers_on_stop.py", "SB", "b1", {"hook_event_name": "Stop"})
         check("B's Stop reports the external change and still reminds about the ambiguous edit",
               "other session(s) observed" in r.stdout and "AGENTS.md" in r.stdout, r.stdout[:300])
-        # decisions: own removal allowed, foreign blocked
-        dec = os.path.join(wa, "decisions.yaml")
+        r = hook("track_edits.py", "SB", "b2", {"prompt": "hi"}, args=["--phase", "prompt"])
+        # decisions: append-only shards; status via DECISION events
+        decA = os.path.join(wa, f"decisions.{tA}.yaml")
         good_dec = open(os.path.join(REPO, "template", ".agents", "skills", "yaml-log-entry", "tests", "fixtures", "good_decisions.yaml")).read()
         def dec_entry(eid, owner, user):
-            return good_dec.replace("Tstdec01", eid).replace('    LastUpdate: "2026-07-21 10:00:00"\n', f'    LastUpdate: "2026-07-21 10:00:00"\n    OwnerSessionId: {owner}\n    OwnerSessionUserName: {user}\n')
-        open(dec, "w").write(dec_entry("Dddd1111", tA, "carlos") + dec_entry("Eeee2222", tB, "bob"))
-        r = post("SA", "a2", ".agents/workarea/decisions.yaml")
-        check("decisions with owners accepted", r.returncode == 0, r.stderr[:300])
-        open(dec, "w").write(dec_entry("Eeee2222", tB, "bob"))
-        r = post("SA", "a2", ".agents/workarea/decisions.yaml")
-        check("removing an OWN decision entry is allowed (mutable ledger)", r.returncode == 0, r.stderr[:300])
-        open(dec, "w").write(dec_entry("Ffff3333", tA, "carlos"))
-        r = post("SA", "a2", ".agents/workarea/decisions.yaml")
-        check("removing ANOTHER session's decision entry is blocked", r.returncode == 2 and "Eeee2222" in r.stderr, r.stderr[:300])
+            return good_dec.replace("Tstdec01", eid).replace('    LastUpdate: "2026-07-21 10:00:00"\n', f'    LastUpdate: "2026-07-21 10:00:00"\n    OwnerSessionId: {owner}\n    OwnerSessionUserName: {user}\n').replace("Status: ACCEPTED", "Status: OPEN")
+        open(decA, "w").write(dec_entry("Dddd1111", tA, "carlos"))
+        r = post("SA", "a2", f".agents/workarea/decisions.{tA}.yaml")
+        check("decision in own shard accepted", r.returncode == 0, r.stderr[:300])
+        open(decA, "w").write("[]\n")
+        r = post("SA", "a2", f".agents/workarea/decisions.{tA}.yaml")
+        check("removing an own decision entry is blocked (append-only since 1.7.0)", r.returncode == 2 and "Dddd1111" in r.stderr, r.stderr[:300])
+        open(decA, "w").write(dec_entry("Dddd1111", tA, "carlos"))
+        post("SA", "a2", f".agents/workarea/decisions.{tA}.yaml")
+        evB = os.path.join(wa, f"events.{tB}.yaml")
+        open(evB, "w").write(f"- Evdc0001:\n    TaskID: N/A\n    AuthorAgent: main\n    Model: m\n    Timestamp: \"2026-09-07 12:00:00\"\n    OwnerSessionId: {tB}\n    OwnerSessionUserName: bob\n    EventType: DECISION\n    DecisionID: Dddd1111\n    Title: \"accept Dddd1111\"\n    Remarks: |-\n      x\n    Status: ACCEPTED\n")
+        r = post("SB", "b2", f".agents/workarea/events.{tB}.yaml")
+        rs = run([PY, os.path.join(plug, "hooks", "refresh_state.py"), "--print"], cwd=sproj, env=senv)
+        check("B accepts A's decision through a DECISION event; STATE.md shows no open decision and lists both sessions",
+              r.returncode == 0 and "Open decisions: 0" in rs.stdout and "## Sessions (ledger shards)" in rs.stdout and tA in rs.stdout and tB in rs.stdout, r.stderr[:200] + rs.stdout[-600:])
+        r = hook("track_edits.py", "SA", "a3", {"prompt": "hi"}, args=["--phase", "prompt"])
+        check("A's prompt notice summarises B's new entries with titles", f"Session {tB}" in r.stdout and "accept Dddd1111" in r.stdout, r.stdout[:400])
+        open(os.path.join(wa, "changes (1).yaml"), "w").write(change_entry("Zzzz0000", tB, "bob"))
+        rs = run([PY, os.path.join(plug, "hooks", "refresh_state.py"), "--print"], cwd=sproj, env=senv)
+        check("sync conflict copy is reported in STATE.md", "SYNC CONFLICT COPIES" in rs.stdout and "changes (1).yaml" in rs.stdout, rs.stdout[-400:])
+        os.remove(os.path.join(wa, "changes (1).yaml"))
         # tasks: removal vs archive
         tmd = os.path.join(wa, "tasks.md")
         open(tmd, "w").write("# plan\n- [ ] T001 a - main : OPEN 2026-09-06 10:00:00\n- [ ] T002 b - main : OPEN 2026-09-06 10:00:00\n")
@@ -603,7 +640,7 @@ def main():
               r1.stdout + r2.stdout + r3.stdout + r3.stderr)
         r = run([PY, watool, "create", "x-builder", "T002"], cwd=sproj, env=senv)
         check("--session required while two sessions are active", r.returncode != 0 and "2 sessions" in r.stderr, r.stderr)
-        stamp = run([PY, os.path.join(plug, "skills", "yaml-log-entry", "assets", "new_entry_id.py"), ch, "--stamp", "--session", tA], cwd=sproj, env=senv)
+        stamp = run([PY, os.path.join(plug, "skills", "yaml-log-entry", "assets", "new_entry_id.py"), chA, "--stamp", "--session", tA], cwd=sproj, env=senv)
         check("new_entry_id --stamp prints owner fields", f"OwnerSessionId: {tA}" in stamp.stdout and "OwnerSessionUserName: carlos" in stamp.stdout, stamp.stdout)
         agents_md = open(os.path.join(REPO, "template", "AGENTS.md"), encoding="utf-8").read()
         check("AGENTS.md carries the ownership rule and the session-keyed work-area line",
@@ -625,7 +662,7 @@ def main():
         r = run([PY, os.path.join(plug, "hooks", "inject_state.py")], cwd=sproj, env=oenv,
                 inp=json.dumps({"session_id": "SC", "turn_id": "c1", "source": "startup", "cwd": sproj}))
         check("SessionStart shows the configured operator", "Operator: Carlos Veira" in json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"], r.stdout[:300])
-        stamp = run([PY, os.path.join(plug, "skills", "yaml-log-entry", "assets", "new_entry_id.py"), ch, "--stamp", "--session", tA], cwd=sproj, env=oenv)
+        stamp = run([PY, os.path.join(plug, "skills", "yaml-log-entry", "assets", "new_entry_id.py"), chA, "--stamp", "--session", tA], cwd=sproj, env=oenv)
         check("new_entry_id --stamp reads the same config item", "OwnerSessionUserName: Carlos Veira" in stamp.stdout, stamp.stdout)
 
         # 16 — ks + archives
@@ -672,7 +709,7 @@ def main():
         def ev(eid, task, ts, status):
             return (f"- {eid}:\n    TaskID: {task}\n    AuthorAgent: main\n    Model: m\n    Timestamp: \"{ts}\"\n    OwnerSessionId: Xk9Qm2Ab\n"
                     f"    OwnerSessionUserName: carlos\n    EventType: TASK\n    Title: \"ev {eid}\"\n    Remarks: |-\n      x\n    Status: {status}\n")
-        open(os.path.join(kwa, "events.yaml"), "w").write(ev("Evnt0001", "T001", "2026-01-05 10:00:00", "COMPLETED") + ev("Evnt0002", "T002", "2026-01-06 10:00:00", "OPEN") + ev("Evnt0003", "T002", "2026-09-01 10:00:00", "COMPLETED"))
+        open(os.path.join(kwa, "events.yaml"), "w").write(ev("Evnt0001", "T001", "2026-01-05 10:00:00", "COMPLETED") + ev("Evnt0002", "T002", "2026-01-06 10:00:00", "OPEN") + ev("Evnt0003", "T002", "2026-09-01 10:00:00", "COMPLETED"))   # legacy (pre-1.7.0) file
         open(os.path.join(kwa, "tasks.md"), "w").write("# Block A\n- [x] T001 a - main : COMPLETED 2026-01-05 10:00:00 [ev:Evnt0001]\n# Block B\n- [ ] T002 b - main : OPEN 2026-01-06 10:00:00\n")
         open(os.path.join(kwa, "tasks-archive.md"), "w").write("# Old\n- [x] T000 z - main : COMPLETED 2025-12-01 10:00:00 [ev:Evnt0000]\n")
         r = run([PY, ks, "ledger", "archive-plan", "--dry-run"], cwd=kproj, env=kenv)
@@ -693,26 +730,39 @@ def main():
               r.returncode == 0 and "archive/tasks.md" in r.stdout and "Evnt0001" in r.stdout and "archive/events.yaml" in r.stdout, r.stdout)
         r = run([PY, ks, "ledger", "find", "Nope0000"], cwd=kproj, env=kenv)
         check("ks ledger find: not found → exit 1", r.returncode == 1)
-        # hook guard vs archives
+        # hook guard vs archives (own shard)
+        run([PY, os.path.join(plug, "hooks", "inject_state.py")], cwd=kproj, env=kenv, inp=json.dumps({"session_id": "SK", "turn_id": "k1", "source": "startup", "cwd": kproj}))
+        tK = next(json.load(open(os.path.join(kwa, ".hook-state", "sessions", f)))["token"] for f in os.listdir(os.path.join(kwa, ".hook-state", "sessions"))
+                  if json.load(open(os.path.join(kwa, ".hook-state", "sessions", f)))["harness_session_id"] == "SK")
         kpost = lambda path, turn="k1": run([PY, os.path.join(plug, "hooks", "track_edits.py")], cwd=kproj, env=kenv,
                                              inp=json.dumps({"session_id": "SK", "turn_id": turn, "hook_event_name": "PostToolUse", "tool_name": "Write",
                                                              "tool_use_id": f"u{abs(hash(path + open(os.path.join(kproj, path)).read())) % 99991}", "cwd": kproj,
                                                              "tool_input": {"file_path": os.path.join(kproj, path)}}))
-        run([PY, os.path.join(plug, "hooks", "inject_state.py")], cwd=kproj, env=kenv, inp=json.dumps({"session_id": "SK", "turn_id": "k1", "source": "startup", "cwd": kproj}))
-        # move Evnt0003 by hand the right way: archive first, then remove
-        open(os.path.join(kwa, "archive", "events.yaml"), "a").write(ev("Evnt0003", "T002", "2026-09-01 10:00:00", "COMPLETED"))
+        shardK = f".agents/workarea/events.{tK}.yaml"
+        open(os.path.join(kproj, shardK), "w").write(ev("Evnt0005", "T002", "2026-09-01 10:00:00", "COMPLETED").replace("Xk9Qm2Ab", tK) + ev("Evnt0006", "T002", "2026-09-02 10:00:00", "OPEN").replace("Xk9Qm2Ab", tK))
+        r0 = kpost(shardK)
+        # move Evnt0005 by hand the right way: archive first, then remove
+        open(os.path.join(kwa, "archive", "events.yaml"), "a").write(ev("Evnt0005", "T002", "2026-09-01 10:00:00", "COMPLETED").replace("Xk9Qm2Ab", tK))
         r1 = kpost(".agents/workarea/archive/events.yaml")
-        open(os.path.join(kwa, "events.yaml"), "w").write(ev("Evnt0002", "T002", "2026-01-06 10:00:00", "OPEN"))
-        r2 = kpost(".agents/workarea/events.yaml")
-        check("guard: archive-first move of a ledger entry is accepted", r1.returncode == 0 and r2.returncode == 0, r1.stderr[:200] + r2.stderr[:200])
-        open(os.path.join(kwa, "events.yaml"), "w").write("[]\n")
-        r = kpost(".agents/workarea/events.yaml")
-        check("guard: removing an unarchived entry is still blocked", r.returncode == 2 and "Evnt0002" in r.stderr and "archive/events.yaml" in r.stderr, r.stderr[:300])
-        open(os.path.join(kwa, "events.yaml"), "w").write(ev("Evnt0002", "T002", "2026-01-06 10:00:00", "OPEN"))
-        kpost(".agents/workarea/events.yaml")
-        open(os.path.join(kwa, "archive", "events.yaml"), "w").write(ev("Evnt0001", "T001", "2026-01-05 10:00:00", "COMPLETED"))
+        open(os.path.join(kproj, shardK), "w").write(ev("Evnt0006", "T002", "2026-09-02 10:00:00", "OPEN").replace("Xk9Qm2Ab", tK))
+        r2 = kpost(shardK)
+        check("guard: archive-first move out of the own shard is accepted", r0.returncode == 0 and r1.returncode == 0 and r2.returncode == 0, r0.stderr[:200] + r1.stderr[:200] + r2.stderr[:200])
+        open(os.path.join(kproj, shardK), "w").write("[]\n")
+        r = kpost(shardK)
+        check("guard: removing an unarchived entry is still blocked", r.returncode == 2 and "Evnt0006" in r.stderr and "archive/events.yaml" in r.stderr, r.stderr[:300])
+        open(os.path.join(kproj, shardK), "w").write(ev("Evnt0006", "T002", "2026-09-02 10:00:00", "OPEN").replace("Xk9Qm2Ab", tK))
+        kpost(shardK)
+        arch_txt = open(os.path.join(kwa, "archive", "events.yaml")).read()
+        open(os.path.join(kwa, "archive", "events.yaml"), "w").write(arch_txt.split("- Evnt0005:")[0])
         r = kpost(".agents/workarea/archive/events.yaml")
-        check("guard: archives never lose an ID", r.returncode == 2 and "archive lost" in r.stderr and "Evnt0003" in r.stderr, r.stderr[:300])
+        check("guard: archives never lose an ID", r.returncode == 2 and "archive lost" in r.stderr and "Evnt0005" in r.stderr, r.stderr[:300])
+        open(os.path.join(kwa, "archive", "events.yaml"), "w").write(arch_txt)
+        kpost(".agents/workarea/archive/events.yaml")
+        r = run([PY, ks, "ledger", "archive", "events", "--before", "2026-12-31"], cwd=kproj, env=kenv)
+        r2 = run([PY, ks, "ledger", "archive", "events", "--before", "2026-12-31", "--force"], cwd=kproj, env=kenv)
+        check("ks ledger archive refuses while a session is active, --force archives the shard's closed entries",
+              r.returncode != 0 and "session" in r.stderr and r2.returncode == 0 and "Evnt0005" not in open(os.path.join(kproj, shardK)).read()
+              and "Evnt0006" in open(os.path.join(kproj, shardK)).read(), r.stderr + r2.stdout + r2.stderr)
         r = run([PY, ks, "harness", "retrust"], cwd=kproj, env=kenv)
         r2 = run([PY, ks, "harness", "retrust", "--ack"], cwd=kproj, env=kenv)
         r3 = run([PY, ks, "harness", "retrust"], cwd=kproj, env=kenv)

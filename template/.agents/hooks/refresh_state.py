@@ -60,8 +60,61 @@ except Exception:                                    # pragma: no cover - fail-o
 
 
 def load_ledger(name):
-    """(id, fields) entries via the shared pyyaml-optional parser; [] on any problem."""
+    """(id, fields) entries of a ledger kind — legacy file + every session shard (1.7.0); the
+    deliverables registry is a single file. [] on any problem."""
+    kind = name[:-5]
+    if kind in H.SHARDED:
+        return H.load_kind(kind)
     return H.load_entries(os.path.join(WORKAREA, name))
+
+
+def effective_decision_status(decs, evs):
+    """{decision_id: status} — the initial Status overridden by the latest DECISION event carrying
+    DecisionID (decisions are append-only since 1.7.0)."""
+    out = {d: status_of(f) for d, f in decs}
+    trans = {}
+    for _e, f in evs:
+        if isinstance(f, dict) and f.get("EventType") == "DECISION" and f.get("DecisionID") in out:
+            ts = str(f.get("Timestamp", ""))
+            if ts >= trans.get(f["DecisionID"], ("", ""))[0]:
+                trans[f["DecisionID"]] = (ts, str(f.get("Status")))
+    for d, (_ts, st) in trans.items():
+        out[d] = st
+    return out
+
+
+def other_sessions_section():
+    """Per-session shard activity: who wrote what last — the cross-session view."""
+    lines = []
+    tokens = {}
+    for kind in H.SHARDED:
+        for eid, f in H.load_kind(kind):
+            if not isinstance(f, dict):
+                continue
+            tok = H.shard_token(f"{H.WORKAREA_REL}/{f.get('_file', '')}")
+            tok = tok if tok else "legacy"
+            t = tokens.setdefault(tok, {"n": 0, "last": "", "title": "", "kind": "", "op": ""})
+            t["n"] += 1
+            ts = str(f.get("Timestamp") or f.get("LastUpdate") or "")
+            if ts >= t["last"]:
+                t["last"], t["title"], t["kind"] = ts, str(f.get("Title", ""))[:60], kind
+            if f.get("OwnerSessionUserName"):
+                t["op"] = str(f["OwnerSessionUserName"])
+    if not tokens:
+        return lines
+    recs = {d["token"]: d for d in H.list_sessions()}
+    import time
+    lines.append("## Sessions (ledger shards)")
+    for tok, t in sorted(tokens.items(), key=lambda kv: kv[1]["last"], reverse=True):
+        rec = recs.get(tok, {})
+        live = rec and time.time() - float(rec.get("last_seen", 0)) <= H.SESSION_ACTIVE_SEC
+        who = t["op"] or rec.get("operator") or "?"
+        lines.append(f"- {tok} ({who}{', active' if live else ''}): {t['n']} entries · last {t['last'] or '—'} {t['kind']} “{t['title']}”")
+    conflicts = H.sync_conflicts()
+    if conflicts:
+        lines.append(f"- SYNC CONFLICT COPIES in workarea: {', '.join(conflicts)} — merge by hand into the canonical files, then delete")
+    lines.append("")
+    return lines
 
 
 def unlogged_edits():
@@ -167,8 +220,9 @@ def build():
         top = ", ".join(t["id"] for t in open_tasks[:3]) or "—"
         lines.append(f"- Tasks not completed: {len(open_tasks)}  (next: {top})")
         decs = load_ledger("decisions.yaml")
-        open_dec = [d for d, f in decs if status_of(f) == "OPEN"]
         evs = load_ledger("events.yaml")
+        eff = effective_decision_status(decs, evs)
+        open_dec = [d for d in eff if eff[d] == "OPEN"]
         open_iss = [e for e, f in evs
                     if isinstance(f, dict) and f.get("EventType") == "ISSUE" and f.get("Status") == "OPEN"]
         dang = dangling_handoffs()
@@ -230,6 +284,12 @@ def build():
         lines.append("## Ledgers")
         lines.append("- (ledger scan unavailable)")
     lines.append("")
+
+    # ---- Sessions / shards (1.7.0) ----
+    try:
+        lines += other_sessions_section()
+    except Exception as e:
+        H.log(f"refresh_state: sessions section: {e}")
 
     # ---- Un-logged edits (from the hash journal; agent phases only) ----
     try:

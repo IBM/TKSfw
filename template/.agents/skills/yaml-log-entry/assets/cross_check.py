@@ -26,7 +26,8 @@ of the `verify-integrity` sweep — NOT a per-write PostToolUse gate (it is mult
 Usage: python3 cross_check.py [--workarea <dir>]   (default: the project's .claude/workarea)
 Std lib only.
 """
-import sys, os
+import sys
+import re, os
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -42,12 +43,27 @@ CLOSING = {
 }
 
 
+SHARD_RE = re.compile(r"^(changes|lessons|handoffs|events|decisions)\.([0-9A-Za-z]{8})\.yaml$")
+
+
+def ledger_files(name, workarea, with_archive=True):
+    """Legacy `<name>` + every session shard `<kind>.<token>.yaml` (+ archive)."""
+    kind = name[:-5]
+    paths = [os.path.join(workarea, name)]
+    try:
+        paths += [os.path.join(workarea, n) for n in sorted(os.listdir(workarea)) if SHARD_RE.match(n) and n.startswith(kind + ".")]
+    except FileNotFoundError:
+        pass
+    if with_archive:
+        paths.append(os.path.join(workarea, "archive", name))
+    return [p for p in paths if os.path.exists(p)]
+
+
 def _load(name, workarea, with_archive=True):
-    """Live entries + (by default) the cumulative archive `archive/<name>` — FKs may point into it."""
+    """Entries of a ledger kind across legacy file, session shards and (by default) the archive —
+    FKs may point anywhere in that set."""
     out = []
-    for p in ([os.path.join(workarea, name)] + ([os.path.join(workarea, "archive", name)] if with_archive else [])):
-        if not os.path.exists(p):
-            continue
+    for p in ledger_files(name, workarea, with_archive):
         try:
             entries, _ = load_entries(p)
             out.extend(entries)
@@ -108,6 +124,11 @@ def check(workarea=DEFAULT_WORKAREA):
             warns.append(f"handoffs.yaml: '{stem}' has BEGIN but no END (open/incomplete handoff)")
         if "END" in halves and "BEGIN" not in halves:
             errors.append(f"handoffs.yaml: '{stem}' has END but no BEGIN")
+
+    # 2b) events.DecisionID -> decisions (status transitions of partitioned, append-only decisions)
+    for eid, f in events:
+        if isinstance(f, dict) and f.get("DecisionID") and f["DecisionID"] not in dec_ids:
+            errors.append(f"events/{eid}: DecisionID '{f['DecisionID']}' not found in decisions")
 
     # 3) decisions.RelatedTo.* -> respective files
     rel_target = {"Tasks": task_ids, "Decisions": dec_ids, "Changes": chg_ids,

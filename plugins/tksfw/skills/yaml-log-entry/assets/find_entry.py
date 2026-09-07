@@ -43,10 +43,17 @@ def workarea():
 
 def files(wa):
     out = []
+    shard = re.compile(r"^(changes|lessons|handoffs|events|decisions)\.([0-9A-Za-z]{8})\.yaml$")
     for n in LEDGERS:
         for p in (os.path.join(wa, n), os.path.join(wa, "archive", n)):
             if os.path.isfile(p):
                 out.append(("ledger", p))
+    try:
+        for n in sorted(os.listdir(wa)):
+            if shard.match(n):
+                out.append(("ledger", os.path.join(wa, n)))
+    except FileNotFoundError:
+        pass
     for p in (os.path.join(wa, "tasks.md"), os.path.join(wa, "archive", "tasks.md"), os.path.join(wa, "tasks-archive.md")):
         if os.path.isfile(p):
             out.append(("plan", p))
@@ -117,7 +124,7 @@ def refs(wanted, wa):
                 if not isinstance(f, dict) or eid == wanted or eid.split("-")[0] == stem:
                     continue
                 where = []
-                for key in ("TaskID", "EventID", "RelatedTo", "Inputs", "Outputs", "Scope"):
+                for key in ("TaskID", "EventID", "DecisionID", "RelatedTo", "Inputs", "Outputs", "Scope"):
                     vals = set(_walk_ids(f.get(key)))
                     if wanted in vals or stem in vals or any(stem in str(x) for x in vals if key in ("Inputs", "Outputs", "Scope")):
                         where.append(key)

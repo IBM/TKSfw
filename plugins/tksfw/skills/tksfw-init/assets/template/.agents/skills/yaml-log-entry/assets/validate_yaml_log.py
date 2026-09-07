@@ -75,6 +75,10 @@ SCHEMAS = {
         "id": re.compile(rf"^{BASE62}$"),
         "required": ["TaskID", "AuthorAgent", "Model", "Timestamp",
                      "EventType", "Title", "Remarks", "Status"],
+        # 1.7.0: a DECISION event with DecisionID records a status transition of that decision
+        # (decisions are append-only and partitioned per session; the latest such event is the
+        # decision's effective Status).
+        "optional": ["DecisionID"],
     },
     # Registry (manifest), not a ledger. IDs are the project's own short alphanumeric
     # deliverable IDs — constrained to what the pure-Python fallback tokenizer can
@@ -83,7 +87,8 @@ SCHEMAS = {
         "id": re.compile(r"^[A-Za-z0-9]{1,32}$"),
         "required": ["Title", "Path"],
     },
-    # Mutable ADR-style log (NOT append-only). Uses `LastUpdate` (not `Timestamp`) and a
+    # ADR-style log. Since 1.7.0 append-only and partitioned per session: `Status` is the INITIAL
+    # status; later transitions are `events` of EventType DECISION carrying `DecisionID`. Uses `LastUpdate` (not `Timestamp`) and a
     # Status lifecycle; enum fields and a `RelatedTo` mapping of block lists are checked in
     # `_validate_decision`. See `references/schemas.md § YAML-based Logs → Decision Log`.
     # `RelatedTo` is OPTIONAL — a foundational decision may stand alone; omit it entirely
@@ -394,6 +399,12 @@ def _validate_event(tag, fields, problems):
     et = fields.get("EventType")
     if et is not None and et not in EVENT_TYPES:
         problems.append(f"{tag}: EventType {et!r} not in {sorted(EVENT_TYPES)}")
+    did = fields.get("DecisionID")
+    if did is not None:
+        if not re.fullmatch(BASE62, str(did)):
+            problems.append(f"{tag}: bad DecisionID {did!r} (base62, 8 chars)")
+        if et != "DECISION":
+            problems.append(f"{tag}: DecisionID only on EventType DECISION (got {et!r})")
     st = fields.get("Status")
     if et in STATUS_BY_TYPE and st is not None and str(st) not in STATUS_BY_TYPE[et]:
         problems.append(f"{tag}: Status {st!r} invalid for EventType {et} "
@@ -491,8 +502,15 @@ def _validate_decision(tag, fields, problems):
                 problems.append(f"{tag}: RelatedTo.{sub} entry must be a non-empty ID string")
 
 
+SHARD_RE = re.compile(r"^(changes|lessons|handoffs|events|decisions)\.([0-9A-Za-z]{8})\.yaml$")
+
+
 def infer_kind(path):
+    """Kind from the filename: `changes.yaml` (legacy / archive) or a session shard `changes.<token>.yaml`."""
     base = os.path.basename(path)
+    m = SHARD_RE.match(base)
+    if m:
+        return m.group(1)
     return FILENAME_KIND.get(base)
 
 

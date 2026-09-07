@@ -88,9 +88,15 @@ def main():
         shown = op or "UNKNOWN"
         if src == "git":
             shown += " (from git config — set it: new_project.py --set-operator / tksfw-init)"
-        session_line = (f"Session token: {token} · Operator: {shown} — every new ledger entry carries "
+        session_line = (f"Session token: {token} · Operator: {shown} — your ledger files are "
+                        f"`{H.WORKAREA_REL}/<ledger>.{token}.yaml` (changes, lessons, handoffs, events, decisions; other sessions' "
+                        f"shards and unsuffixed legacy files are READ-ONLY); every new entry carries "
                         f"`OwnerSessionId: {token}` and `OwnerSessionUserName: {op or '<set TKSFW_USER>'}`; "
                         f"work areas: `workarea.py create <agent> <task-id> --session {token}`.")
+        conflicts = H.sync_conflicts()
+        if conflicts:
+            session_line += ("\nWARNING: sync conflict copies in the workarea: " + ", ".join(conflicts)
+                             + " — not read by the framework; merge into the canonical files by hand, then delete.")
         if not op:
             session_line += (" OPERATOR UNKNOWN: run `python3 tools/new_project.py --set-operator \"<name>\"` "
                              f"(writes {H.USER_CONFIG}) or export TKSFW_USER — ledger entries need it.")

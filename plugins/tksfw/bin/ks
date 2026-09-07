@@ -174,13 +174,16 @@ def effect(kind):
 
 def live_subagents(proj):
     """Live subagents in this project (all sessions) from .hook-state/subagents.json."""
-    import time
-    p = os.path.join(proj.workarea or "", ".hook-state", "subagents.json")
-    try:
-        live = json.load(open(p)).get("live", {})
-        return [e for e in live.values() if time.time() - float(e.get("ts", 0)) < 4 * 3600]
-    except Exception:
-        return []
+    import time, glob
+    out = []
+    for p in glob.glob(os.path.join(proj.workarea or "", ".hook-state", "hosts", "*", "subagents.json")) + \
+             [os.path.join(proj.workarea or "", ".hook-state", "subagents.json")]:
+        try:
+            live = json.load(open(p)).get("live", {})
+            out += [e for e in live.values() if time.time() - float(e.get("ts", 0)) < 4 * 3600]
+        except Exception:
+            pass
+    return out
 
 
 def refuse_if_busy(proj, what, args, sessions=False):
@@ -403,10 +406,17 @@ def cmd_ledger(home, args):
     a = proj.asset
     if sub == "check":
         rc = 0
+        shard = re.compile(r"^(changes|lessons|handoffs|events|decisions)\.([0-9A-Za-z]{8})\.yaml$")
+        files = []
         for name in ("changes", "lessons", "handoffs", "events", "decisions", "deliverables"):
-            for p in (os.path.join(proj.workarea, name + ".yaml"), os.path.join(proj.workarea, "archive", name + ".yaml")):
-                if os.path.isfile(p):
-                    rc |= run([PY, a("yaml-log-entry", "validate_yaml_log.py"), p], env=proj.env()).returncode
+            files += [p for p in (os.path.join(proj.workarea, name + ".yaml"), os.path.join(proj.workarea, "archive", name + ".yaml")) if os.path.isfile(p)]
+        files += [os.path.join(proj.workarea, n) for n in sorted(os.listdir(proj.workarea)) if shard.match(n)]
+        for p in files:
+            rc |= run([PY, a("yaml-log-entry", "validate_yaml_log.py"), p], env=proj.env()).returncode
+        conflicts = sync_conflicts(proj)
+        if conflicts:
+            print("SYNC CONFLICT COPIES (not read by the framework — merge by hand, then delete): " + ", ".join(conflicts))
+            rc |= 1
         if os.path.isfile(os.path.join(proj.workarea, "tasks.md")):
             r = run([PY, a("yaml-log-entry", "tasks_lint.py"), os.path.join(proj.workarea, "tasks.md")], env=proj.env())
             rc |= 1 if r.returncode == 2 else 0
@@ -422,6 +432,22 @@ def cmd_ledger(home, args):
             print("→ log the archive run in changes.yaml (Layer: PROJECT)")
         sys.exit(rc)
     die("usage: ks ledger check | find <id> [--refs] [--json] | archive-plan [--dry-run] | archive <ledger|all> --before YYYY-MM-DD [--dry-run]")
+
+
+def sync_conflicts(proj):
+    """Ledger-like files with non-canonical names in the workarea (Box/Dropbox/OneDrive collision copies)."""
+    shard = re.compile(r"^(changes|lessons|handoffs|events|decisions)\.([0-9A-Za-z]{8})\.yaml$")
+    canon = {"changes.yaml", "lessons.yaml", "handoffs.yaml", "events.yaml", "decisions.yaml", "deliverables.yaml",
+             "tasks.md", "tasks-archive.md", "STATE.md"}
+    like = re.compile(r"^(changes|lessons|handoffs|events|decisions|deliverables|tasks)[ .(_-].*")
+    out = []
+    try:
+        for n in sorted(os.listdir(proj.workarea)):
+            if os.path.isfile(os.path.join(proj.workarea, n)) and n not in canon and not shard.match(n) and like.match(n):
+                out.append(n)
+    except Exception:
+        pass
+    return out
 
 
 def hook_hashes(hooks_dir):
@@ -566,7 +592,12 @@ def cmd_doctor(home, args):
         rc = run([PY, os.path.join(proj.hooks, "route_model.py"), "--check"], cwd=proj.root, env=proj.env(), capture=True)
         (ok if rc.returncode == 0 else fail)("routing: " + rc.stdout.strip().splitlines()[0] if rc.stdout.strip() else "routing: no output")
         sess = active_sessions(proj)
-        (ok if len(sess) <= 1 else warn)(f"active sessions: {len(sess)}" + ("" if len(sess) <= 1 else " — parallel sessions are tolerated, not a design target"))
+        (ok if len(sess) <= 1 else warn)(f"active sessions: {len(sess)}" + ("" if len(sess) <= 1 else " — ledgers are partitioned per session; tasks.md has one plan-writer"))
+        conf = sync_conflicts(proj)
+        (ok if not conf else fail)("sync conflict copies: " + (", ".join(conf) + " — merge by hand into the canonical files, then delete" if conf else "none"))
+        shards = [n for n in os.listdir(proj.workarea) if re.match(r"^(changes|lessons|handoffs|events|decisions)\.[0-9A-Za-z]{8}\.yaml$", n)] if os.path.isdir(proj.workarea) else []
+        legacy = [n for n in ("changes.yaml", "lessons.yaml", "handoffs.yaml", "events.yaml", "decisions.yaml") if os.path.isfile(os.path.join(proj.workarea, n))]
+        (ok if not legacy else warn)(f"ledger shards: {len(shards)}" + (f" · legacy unsuffixed (read-only): {', '.join(legacy)} — `ks ledger archive all --before <today>` folds them into the archive" if legacy else ""))
         cur = hook_hashes(proj.hooks)
         try:
             prev = json.load(open(TRUST_JSON)).get(proj.hooks, {})

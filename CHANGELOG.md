@@ -2,6 +2,27 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [1.7.1] — 2026-09-07
+
+### Fixed
+- Tool-input paths are matched against the project by real path (`hooklib._rel_input`): on macOS the harness reports `/var/folders/…` while the process cwd resolves to `/private/var/folders/…`, so "named in the tool call" never matched and the READ-ONLY LEDGER rule (foreign shard, legacy file) did not fire under two active sessions. Reproduced with a symlinked `TMPDIR`; the suite now passes in both spellings.
+
+## [1.7.0] — 2026-09-07
+
+Ledgers partitioned per session; per-host hook state — designed for project folders on Box/Dropbox/OneDrive.
+
+### Added
+- Session shards `<ledger>.<token>.yaml` for changes, lessons, handoffs, events, decisions: a session writes only its own shards; other shards and the unsuffixed legacy files are read-only (`track_edits.py` → exit 2 "READ-ONLY LEDGER"). All readers merge shards: STATE.md (`hooklib.load_kind`), `cross_check`, `find_entry`, `ks ledger check`, ID index, `archive_ledger` (archives every shard; emptied shards are removed; refuses while sessions are active unless `--force`).
+- Decisions append-only: `Status` is the initial status; transitions are `events` of `EventType: DECISION` with the new optional `DecisionID` (validated, cross-checked); STATE.md computes the effective status.
+- STATE.md "Sessions (ledger shards)" section; prompt notice "Session K (operator) added N entries: titles".
+- `.hook-state/hosts/<hostname>/` for all mutable per-machine state (journal, snapshots, ID index, live subagents, routing journal, lock); `sessions/` stays shared. `TKSFW_HOST` override.
+- Sync conflict-copy detection (`changes (1).yaml`, `tasks (conflicted copy).md`, …): SessionStart warning, STATE.md, `ks doctor` (FAIL), `ks ledger check` (fail). `ks doctor` also lists shards and legacy files.
+- `new_entry_id.py --stamp` prints the target shard path. ADR 0010. 171 tests.
+
+### Changed
+- AGENTS.md § YAML-based Logs: partitioning/ownership rule; § Activity Plan: one plan, one writer session per phase (18,120 B). schemas.md, SKILL.md, hooks README, operations.md updated.
+- `MUTABLE_LEDGERS` is now only `deliverables`.
+
 ## [1.6.0] — 2026-09-07
 
 Live reconfiguration and a usable installation path.

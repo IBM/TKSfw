@@ -35,6 +35,13 @@ twice). `inject_state.py` warns when the project manifest and the installed plug
 - **ID index** (`ids.json`): project-wide `{file: {hash, ids→owner}}` for ledgers and plans, refreshed whenever a file's hash differs from the last indexed one — independent of any session's diff, so an A-B-A rewrite that restores a byte-identical older file is still caught. `track_edits.py` blocks (exit 2, "LOST UPDATE") when an EntryID disappears from an append-only ledger, an entry owned by another session disappears from `decisions.yaml`/`deliverables.yaml`, or a TaskID leaves `tasks.md` without appearing in `tasks-archive.md`. New entries must carry `OwnerSessionId`/`OwnerSessionUserName` (validator `--require-owner`).
 - Limits: the write has happened when PostToolUse runs — the block names what to restore, it cannot roll back. Shell edits under concurrency stay `ambiguous`. Sessions without the plugin are unattributed.
 
+## Partitioned ledgers and per-host state (1.7.0)
+
+- Ledgers are sharded per session: `<ledger>.<token>.yaml`. `track_edits.py` rejects (exit 2, "READ-ONLY LEDGER") a tool-call write to another session's shard or to the legacy unsuffixed file; readers merge all shards (`hooklib.load_kind`). Decisions are append-only; the effective status is the latest DECISION event with `DecisionID`.
+- STATE.md gains "Sessions (ledger shards)" (per token: operator, count, last entry) and the prompt notice says "Session K added N entries: titles" — the cross-session read.
+- `.hook-state/hosts/<hostname>/` holds this machine's mutable state (journal, snapshots, ID index, live subagents, lock, routing journal); only `.hook-state/sessions/` is shared. A project folder synced by Box/Dropbox/OneDrive therefore never has two machines writing one state file. `TKSFW_HOST` overrides the hostname.
+- Sync conflict copies (`changes (1).yaml`, `tasks (conflicted copy).md`, …) are detected at SessionStart, in STATE.md, `ks doctor` and `ks ledger check`; they are never read.
+
 ## Archives
 
 `.agents/workarea/archive/<ledger>.yaml` and `archive/tasks.md` are watched as `archive:<kind>` / `plan-archive`: validated on write, never a covering `changes.yaml` entry, and the lost-update guard treats them as strictly append-only. An ID may leave a live ledger only when it already exists in the matching archive (archive-first move — `archive_ledger.py` / `ks ledger archive`).

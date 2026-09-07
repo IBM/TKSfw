@@ -2,11 +2,13 @@
 """Move closed history out of the live ledgers into the cumulative per-type archives.
 
     archive_ledger.py plan   [--dry-run]                      tasks.md → archive/tasks.md
-    archive_ledger.py <ledger|all> --before YYYY-MM-DD [--dry-run]
+    archive_ledger.py <ledger|all> --before YYYY-MM-DD [--dry-run] [--force]
                                                               changes|lessons|events|handoffs|decisions
                                                               → archive/<ledger>.yaml
 
-Layout: `.agents/workarea/archive/` holds ONE cumulative, append-only archive per type with the same
+Sources (1.7.0): the legacy `<ledger>.yaml` plus every session shard `<ledger>.<token>.yaml`; a shard
+emptied by archiving is removed. Refuses while sessions are active (the archive is the one file written
+from a single machine). Layout: `.agents/workarea/archive/` holds ONE cumulative, append-only archive per type with the same
 schema as the live file. Entries move verbatim (owner fields preserved). The PostToolUse hook accepts an
 ID leaving a live ledger only when it is already present in archive/<same ledger> — so the protocol is
 append-to-archive first, then remove from the live file (this script does exactly that, atomically per
@@ -106,24 +108,60 @@ def eligible(kind, entries, before):
     return out
 
 
+SHARD_RE = re.compile(r"^(changes|lessons|handoffs|events|decisions)\.([0-9A-Za-z]{8})\.yaml$")
+
+
+def live_files(kind, wa):
+    """Legacy `<kind>.yaml` + every session shard `<kind>.<token>.yaml`."""
+    out = []
+    if os.path.isfile(os.path.join(wa, f"{kind}.yaml")):
+        out.append(os.path.join(wa, f"{kind}.yaml"))
+    try:
+        out += [os.path.join(wa, n) for n in sorted(os.listdir(wa)) if SHARD_RE.match(n) and n.startswith(kind + ".")]
+    except FileNotFoundError:
+        pass
+    return out
+
+
+def active_sessions(wa, within=1800):
+    import json, time
+    d = os.path.join(wa, ".hook-state", "sessions")
+    out = []
+    try:
+        for f in os.listdir(d):
+            if f.endswith(".json"):
+                rec = json.load(open(os.path.join(d, f)))
+                if time.time() - float(rec.get("last_seen", 0)) <= within:
+                    out.append(rec.get("token", "?"))
+    except Exception:
+        pass
+    return out
+
+
 def archive_ledger(kind, before, dry, wa):
-    live = os.path.join(wa, f"{kind}.yaml")
-    arch = os.path.join(wa, "archive", f"{kind}.yaml")
-    if not os.path.isfile(live):
+    files = live_files(kind, wa)
+    if not files:
         print(f"{kind}: no live ledger")
         return 1
+    rcs = [archive_file(kind, live, before, dry, wa) for live in files]
+    return 0 if 0 in rcs else 1
+
+
+def archive_file(kind, live, before, dry, wa):
+    arch = os.path.join(wa, "archive", f"{kind}.yaml")
+    label = os.path.basename(live)
     text = open(live, encoding="utf-8").read()
     entries, _ = load_entries(live)
     move = eligible(kind, entries, before)
     if not move:
-        print(f"{kind}: nothing eligible before {before}")
+        print(f"{label}: nothing eligible before {before}")
         return 1
     pre, blocks = split_blocks(text)
     if {b[0] for b in blocks} != {e for e, _ in entries}:
-        sys.exit(f"{kind}: raw block scan disagrees with the parser — file layout not canonical; refusing")
+        sys.exit(f"{label}: raw block scan disagrees with the parser — file layout not canonical; refusing")
     moving = [b for b in blocks if b[0] in move]
     staying = [b for b in blocks if b[0] not in move]
-    print(f"{kind}: {len(moving)} entr{'y' if len(moving) == 1 else 'ies'} → archive/{kind}.yaml"
+    print(f"{label}: {len(moving)} entr{'y' if len(moving) == 1 else 'ies'} → archive/{kind}.yaml"
           + (" (dry run)" if dry else ""))
     for eid, _ in moving:
         print("  -", eid)
@@ -138,8 +176,13 @@ def archive_ledger(kind, before, dry, wa):
     problems, _ = validate(arch, kind)
     if problems:
         atomic_write(arch, existing)                       # roll back the archive append
-        sys.exit(f"{kind}: archive would be invalid, nothing moved:\n  - " + "\n  - ".join(problems))
-    atomic_write(live, pre + "".join(b[1] for b in staying))
+        sys.exit(f"{label}: archive would be invalid, nothing moved:\n  - " + "\n  - ".join(problems))
+    rest = pre + "".join(b[1] for b in staying)
+    if not staying and SHARD_RE.match(label):
+        os.remove(live)                                    # an emptied session shard disappears
+        print(f"  {label} removed (empty)")
+    else:
+        atomic_write(live, rest)
     return 0
 
 
@@ -201,6 +244,11 @@ def main():
     dry = "--dry-run" in a
     wa = workarea()
     what = a[0]
+    if not dry and what != "plan" and "--force" not in a:
+        act = active_sessions(wa)
+        if act:
+            sys.exit(f"refusing: {len(act)} session(s) active on this project ({', '.join(act)}) — archive when none is "
+                     "open (shards belong to their sessions; the archive is written from one machine), or --force")
     if what == "plan":
         sys.exit(archive_plan(dry, wa))
     if "--before" not in a:

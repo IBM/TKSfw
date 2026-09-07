@@ -121,6 +121,13 @@ def emit(eid, ts, args):
     if not getattr(args, "stamp", False):
         print(f"{eid}\t{ts}")
         return
+    tok = _session(args)
+    if args.logfile and re.match(r"^[0-9A-Za-z]{8}$", tok):
+        import os
+        base = os.path.basename(args.logfile)
+        m = re.match(r"^(changes|lessons|handoffs|events|decisions)(?:\.[0-9A-Za-z]{8})?\.yaml$", base)
+        if m:
+            print(f"# file: {os.path.join(os.path.dirname(args.logfile) or '.agents/workarea', f'{m.group(1)}.{tok}.yaml')}   (your shard — other shards are read-only)")
     print(f"- {eid}:")
     print(f'    Timestamp: "{ts}"')
     print(f"    OwnerSessionId: {_session(args)}")

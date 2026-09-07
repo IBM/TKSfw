@@ -90,10 +90,17 @@ def resolve_validator_dir(project_root):
 PROJECT_ROOT, ROOT_HOW = resolve_project_root()
 WORKAREA_REL = ".agents/workarea"
 WORKAREA = os.path.join(PROJECT_ROOT, ".agents", "workarea")
-STATE_DIR = os.path.join(WORKAREA, ".hook-state")
+import socket
+HOOK_STATE = os.path.join(WORKAREA, ".hook-state")
+HOSTNAME = re.sub(r"[^A-Za-z0-9._-]", "_", os.environ.get("TKSFW_HOST") or socket.gethostname().split(".")[0] or "host")
+# 1.7.0 — mutable per-machine state lives under hosts/<hostname>/ so a cloud-synced project folder (Box,
+# Dropbox, OneDrive) never has two machines writing the same journal/snapshot/lock file. Only sessions/
+# is shared: each record is written by exactly one machine, and sharing them makes "another session is
+# active" visible across machines.
+STATE_DIR = os.path.join(HOOK_STATE, "hosts", HOSTNAME)
 HASHES = os.path.join(STATE_DIR, "hashes.json")          # legacy single snapshot (pre-1.4.0); unused
-SESSIONS_DIR = os.path.join(STATE_DIR, "sessions")        # <token>.json per harness session (1.4.0)
-ID_INDEX = os.path.join(STATE_DIR, "ids.json")            # {rel: {id: owner_token|""}} as last seen by any hook
+SESSIONS_DIR = os.path.join(HOOK_STATE, "sessions")       # <token>.json per harness session (1.4.0) — shared
+ID_INDEX = os.path.join(STATE_DIR, "ids.json")            # {rel: {hash, ids→owner}} as last seen by any hook on this host
 JOURNAL = os.path.join(STATE_DIR, "journal.jsonl")
 LOG = os.path.join(STATE_DIR, "hooks.log")
 LOCK = os.path.join(STATE_DIR, ".lock")
@@ -117,11 +124,17 @@ STATE_MD = os.path.join(WORKAREA, "STATE.md")
 
 LEDGER_FILES = ("changes.yaml", "lessons.yaml", "handoffs.yaml", "events.yaml",
                 "decisions.yaml", "deliverables.yaml")
+# 1.7.0 — ledgers are PARTITIONED BY SESSION: a session writes only `<ledger>.<token>.yaml` (its shard);
+# every other shard is read-only for it; unsuffixed `<ledger>.yaml` is the read-only legacy shard.
+# deliverables.yaml (registry) and tasks.md (plan) stay single by nature.
+SHARDED = ("changes", "lessons", "handoffs", "events", "decisions")
+SHARD_RE = re.compile(r"^(changes|lessons|handoffs|events|decisions)\.([0-9A-Za-z]{8})\.yaml$")
+LEDGER_LIKE_RE = re.compile(r"^(changes|lessons|handoffs|events|decisions|deliverables|tasks)[ .(_-].*")
 PLAN_FILES = ("tasks.md", "tasks-archive.md")
 ARCHIVE_REL = "archive"                                             # .agents/workarea/archive/<ledger>.yaml, archive/tasks.md
 ARCHIVE_LEDGERS = ("changes.yaml", "lessons.yaml", "handoffs.yaml", "events.yaml", "decisions.yaml")
-APPEND_ONLY_LEDGERS = ("changes", "lessons", "handoffs", "events")   # removing an entry is always a lost update
-MUTABLE_LEDGERS = ("decisions", "deliverables")                       # own entries may be removed/rewritten
+APPEND_ONLY_LEDGERS = ("changes", "lessons", "handoffs", "events", "decisions")   # 1.7.0: decisions append-only too
+MUTABLE_LEDGERS = ("deliverables",)                                   # registry: own entries may be rewritten
 SESSION_ACTIVE_SEC = 30 * 60                                          # heartbeat window for "another session is active"
 SESSION_EXPIRE_SEC = 24 * 3600                                        # snapshot/session files older than this are pruned
 # Files whose edit is a loggable METHOD/ARCHETYPE change (Layer table in AGENTS.md).
@@ -552,6 +565,17 @@ def _rel(path):
     return os.path.relpath(path, PROJECT_ROOT).replace("\\", "/")
 
 
+def _rel_input(path):
+    """Project-relative path for a path supplied by the harness (tool input), symlink-safe: macOS spells
+    temp dirs `/var/folders/…` while cwd resolves to `/private/var/folders/…`; both must map to the same
+    rel as the snapshot walk produces. Only used for tool-input paths — the walk itself stays literal."""
+    try:
+        rel = os.path.relpath(os.path.realpath(path), os.path.realpath(PROJECT_ROOT))
+    except ValueError:                                     # different drives (Windows)
+        rel = os.path.relpath(path, PROJECT_ROOT)
+    return rel.replace("\\", "/")
+
+
 def classify(rel, globs=None):
     """Category of a project-relative path, or None when it is not watched.
        ledger:<name>  one of the six workarea YAML files (name without .yaml)
@@ -572,8 +596,11 @@ def classify(rel, globs=None):
             return None
         if "/" in base:
             return None                       # agent work areas: not tracked
+        m = SHARD_RE.match(base)
+        if m:
+            return "ledger:" + m.group(1)     # session shard <ledger>.<token>.yaml
         if base in LEDGER_FILES:
-            return "ledger:" + base[:-5]
+            return "ledger:" + base[:-5]      # legacy unsuffixed shard (read-only) or deliverables registry
         if base == "tasks-archive.md":
             return "plan-archive"             # legacy location (pre-1.5.0) of archive/tasks.md
         if base in PLAN_FILES:
@@ -619,6 +646,12 @@ def watched_files():
         p = os.path.join(WORKAREA, name)
         if os.path.isfile(p):
             files.add(_rel(p))
+    try:
+        for name in os.listdir(WORKAREA):
+            if SHARD_RE.match(name) and os.path.isfile(os.path.join(WORKAREA, name)):
+                files.add(f"{WORKAREA_REL}/{name}")
+    except FileNotFoundError:
+        pass
     for name in ARCHIVE_LEDGERS + ("tasks.md",):
         p = os.path.join(WORKAREA, ARCHIVE_REL, name)
         if os.path.isfile(p):
@@ -717,7 +750,7 @@ def paths_from_tool_input(payload):
     for k in ("file_path", "path", "notebook_path"):
         v = ti.get(k)
         if isinstance(v, str) and v:
-            out.add(_rel(v if os.path.isabs(v) else os.path.join(PROJECT_ROOT, v)))
+            out.add(_rel_input(v if os.path.isabs(v) else os.path.join(PROJECT_ROOT, v)))
     for k in ("patch", "input", "command"):
         v = ti.get(k)
         if isinstance(v, list):
@@ -725,7 +758,7 @@ def paths_from_tool_input(payload):
         if isinstance(v, str) and "*** " in v:
             for m in re.finditer(r"\*\*\* (?:Update|Add|Delete) File: (.+)", v):
                 p = m.group(1).strip()
-                out.add(_rel(p if os.path.isabs(p) else os.path.join(PROJECT_ROOT, p)))
+                out.add(_rel_input(p if os.path.isabs(p) else os.path.join(PROJECT_ROOT, p)))
     return out
 
 
@@ -792,6 +825,10 @@ def track_ids(changed, after, payload, token):
     others = bool(other_active_sessions(payload))
     for c in changed:
         cls = c.get("class") or ""
+        st = shard_token(c["path"])
+        if st is not None and st != "" and token and st != token:
+            c["attrib"] = "external"                     # another session's shard: never ours, whatever the tool said
+            continue
         added = c.get("new_for_session") or c.get("added_ids") or {}
         if cls.startswith(("ledger:", "archive:")) and added:
             owners = set(added.values())
@@ -898,6 +935,74 @@ def external_changes(entries):
                 owners = {o for o in (c.get("new_for_session") or c.get("added_ids") or {}).values() if o}
                 out.append((c["path"], ",".join(sorted(owners)) or "?"))
     return out
+
+
+def shard_token(rel):
+    """Token of a session shard, "" for a legacy unsuffixed ledger, None for anything else."""
+    base = os.path.basename(rel)
+    m = SHARD_RE.match(base)
+    if m:
+        return m.group(2)
+    if base in LEDGER_FILES and base != "deliverables.yaml" and rel == f"{WORKAREA_REL}/{base}":
+        return ""
+    return None
+
+
+def shard_path(kind, token):
+    """Project-relative path of a session's shard for a ledger kind."""
+    return f"{WORKAREA_REL}/{kind}.{token}.yaml"
+
+
+def ledger_paths(kind, archive=False):
+    """All absolute files holding entries of `kind`: legacy + every shard (+ archive)."""
+    out = []
+    p = os.path.join(WORKAREA, kind + ".yaml")
+    if os.path.isfile(p):
+        out.append(p)
+    try:
+        for name in sorted(os.listdir(WORKAREA)):
+            m = SHARD_RE.match(name)
+            if m and m.group(1) == kind:
+                out.append(os.path.join(WORKAREA, name))
+    except FileNotFoundError:
+        pass
+    if archive:
+        a = os.path.join(WORKAREA, ARCHIVE_REL, kind + ".yaml")
+        if os.path.isfile(a):
+            out.append(a)
+    return out
+
+
+def load_kind(kind, archive=False):
+    """Merged (id, fields) entries of a ledger kind across legacy + shards (+ archive), with the
+    source file added as fields['_file'] (relative name) for readers that care."""
+    out = []
+    for p in ledger_paths(kind, archive):
+        rel = os.path.relpath(p, WORKAREA)
+        for eid, f in load_entries(p):
+            if isinstance(f, dict):
+                f = dict(f, _file=rel)
+            out.append((eid, f))
+    return out
+
+
+def sync_conflicts():
+    """Files in the workarea that look like a ledger/plan but are not a canonical name — what Box,
+    Dropbox or OneDrive leave behind after a write collision ('changes (1).yaml',
+    'tasks (conflicted copy).md', 'events.7Kd2Rf9Q-host.yaml'). Never read, must be merged by hand."""
+    out = []
+    try:
+        names = os.listdir(WORKAREA)
+    except FileNotFoundError:
+        return out
+    for n in names:
+        if not os.path.isfile(os.path.join(WORKAREA, n)):
+            continue
+        if n in LEDGER_FILES or n in PLAN_FILES or SHARD_RE.match(n) or n == "STATE.md":
+            continue
+        if LEDGER_LIKE_RE.match(n):
+            out.append(n)
+    return sorted(out)
 
 
 def archive_path_for(rel):

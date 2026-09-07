@@ -120,6 +120,15 @@ with the expected grammar; evidence findings (COMPLETED leaf without `[ev:…]`)
 | `python3 assets/tasks_lint.py [tasks.md] [--json]` | exit 0 clean · 1 warnings · 2 errors |
 | `python3 assets/cross_check.py` | FK resolution across ledgers and plan (live + archive) |
 
+## Partitioned ledgers (1.7.0)
+
+Write only your own shards: `.agents/workarea/<ledger>.<token>.yaml` (the token is shown at session
+start; `assets/new_entry_id.py <ledger> --stamp` prints the exact file). Other sessions' shards and the
+unsuffixed legacy files are read-only — the hook rejects writes to them. Read everything: STATE.md,
+`cross_check.py`, `find_entry.py` and `ks ledger check` merge all shards. Decisions are append-only: to
+change a decision's status, add an `events` entry with `EventType: DECISION`, `DecisionID: <id>` and the
+new `Status`. `tasks.md` is one file with one writer session per phase.
+
 ## Ownership and parallel sessions (1.4.0)
 
 Every new entry carries `OwnerSessionId` (the session token shown at session start) and

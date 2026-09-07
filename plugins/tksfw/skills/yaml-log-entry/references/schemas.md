@@ -11,6 +11,7 @@ validator **and** add a fixture under `tests/fixtures/` (see `SKILL.md § Tests`
 - Each file is a YAML **list of single-key mappings**: the entry ID is the key, its fields are the nested mapping (this keeps entries foldable in editors).
 - Ledger IDs are random base62 strings of 8 characters; Handoff IDs are `<base62-8>-<BEGIN|END>`. Mint them with `assets/new_entry_id.py` — never invent an ID or a timestamp.
 - Timestamps use `"YYYY-MM-DD hh:mm:ss"` (quoted). Decisions use `LastUpdate`, every other ledger uses `Timestamp`.
+- **Partitioning (1.7.0):** ledgers are split per session: a session writes only `<ledger>.<token>.yaml` for changes, lessons, handoffs, events and decisions (`.agents/workarea/changes.7Kd2Rf9Q.yaml` …); every other shard and the unsuffixed legacy `<ledger>.yaml` are read-only (the PostToolUse hook rejects writes). All readers merge the shards. `deliverables.yaml` (registry) and `tasks.md` (plan) stay single files. Decisions are therefore append-only: `Status` is the initial status; transitions are `events` entries of `EventType: DECISION` with `DecisionID: <decision>` — the latest one is the effective status (STATE.md, `cross_check`, `find --refs`). Why: with a sync service (Box, Dropbox) between machines, two writers of one file produce duplicated "conflict copy" files that no hook can see; one writer per file removes the collision.
 - **Ownership (1.4.0):** every new entry in every ledger and in the registry carries `OwnerSessionId` (the 8-char base62 session token the SessionStart hook shows in context) and `OwnerSessionUserName` (the operator, configured once per user in `~/.config/tksfw/user.toml` — `python3 tools/new_project.py --set-operator "<name>"` or `tksfw-init`; `TKSFW_USER` overrides, `git config user.name` is the reported fallback; the value is shown at session start). They make entries attributable across parallel sessions and let the hook block lost updates. Required for new entries (the PostToolUse hook enforces it for the IDs a write adds); entries older than 1.4.0 are accepted without them and never rewritten. `assets/new_entry_id.py --stamp` prints both.
 - `Title` fields are at most 80 characters.
 - Memo-like fields (any free-prose field that can run long or span lines) MUST use the literal block scalar `|-` so content is preserved verbatim and stays foldable; short single-line fields remain inline; the block body must be indented consistently under its key (4 spaces for fields, 6 for block bodies, as in the examples).
@@ -29,7 +30,7 @@ validator **and** add a fixture under `tests/fixtures/` (see `SKILL.md § Tests`
 
 - File Format: YAML
 - Update Type: Append-only
-- Location: `.agents/workarea/changes.yaml`
+- Location: `.agents/workarea/changes.<session-token>.yaml` (one shard per session; legacy `changes.yaml` read-only)
 - File Schema:
 	- ChangeID: random base62 string of 8 characters.
 		- AuthorAgent: Agent name
@@ -80,7 +81,7 @@ validator **and** add a fixture under `tests/fixtures/` (see `SKILL.md § Tests`
 
 - File Format: YAML
 - Update Type: Mutable log (NOT append-only)
-- Location: `.agents/workarea/decisions.yaml`
+- Location: `.agents/workarea/decisions.<session-token>.yaml` (one shard per session; legacy `decisions.yaml` read-only). Append-only since 1.7.0: status transitions are DECISION events with `DecisionID`.
 - File Schema:
 	- DecisionID: random base62 string of 8 characters.
 		- AuthorAgent: Agent name
@@ -184,7 +185,7 @@ validator **and** add a fixture under `tests/fixtures/` (see `SKILL.md § Tests`
 
 - File Format: YAML
 - Update Type: Append-only
-- Location: `.agents/workarea/lessons.yaml`
+- Location: `.agents/workarea/lessons.<session-token>.yaml` (one shard per session; legacy `lessons.yaml` read-only)
 - File Schema:
 	- LessonID: random base62 string of 8 characters.
 		- AuthorAgent: Agent name
@@ -221,7 +222,7 @@ validator **and** add a fixture under `tests/fixtures/` (see `SKILL.md § Tests`
 
 - File Format: YAML
 - Update Type: Append-only
-- Location: `.agents/workarea/handoffs.yaml`
+- Location: `.agents/workarea/handoffs.<session-token>.yaml` (one shard per session; legacy `handoffs.yaml` read-only)
 - File Schema:
 	- HandoffID: <random base62 string of 8 characters>-< HandoffState >.
 		- EventID: reference to the corresponding `events.yaml` entry.
@@ -308,7 +309,7 @@ validator **and** add a fixture under `tests/fixtures/` (see `SKILL.md § Tests`
 
 - File Format: YAML
 - Update Type: Append-only
-- Location: `.agents/workarea/events.yaml`
+- Location: `.agents/workarea/events.<session-token>.yaml` (one shard per session; legacy `events.yaml` read-only)
 - File Schema:
 	- EventID: random base62 string of 8 characters.
 		- TaskID: reference to the corresponding `tasks.md` entry.
@@ -317,6 +318,7 @@ validator **and** add a fixture under `tests/fixtures/` (see `SKILL.md § Tests`
 		- OwnerSessionUserName: operator name — see Ownership
 		- Model: Model name used
 		- Timestamp: with format "YYYY-MM-DD hh:mm:ss"
+		- DecisionID: optional, only with EventType DECISION — the decision whose status this event transitions (base62-8)
 		- EventType: < TASK | HANDOFF | ISSUE | CHANGE | DECISION | REVIEW | AUDIT | APPROVAL | TEST >
 		- Title: Summarize to a maximum of 80 characters
 		- Remarks: Memo-like field

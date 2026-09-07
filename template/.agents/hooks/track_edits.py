@@ -56,6 +56,25 @@ def validate(rel_paths, added=None):
     return "\n".join(reports)
 
 
+def foreign_shard_writes(changed, payload, token):
+    """Writes by THIS session's tool call to a ledger file it does not own (1.7.0 partitioning):
+    another session's shard or the legacy unsuffixed ledger. Only tool-call-named paths and, when no
+    other session is active, any unnamed change count — an external change is not a violation."""
+    named = H.paths_from_tool_input(payload)
+    others = bool(H.other_active_sessions(payload))
+    out = []
+    for c in changed:
+        st = H.shard_token(c["path"])
+        if st is None or st == token or not token:
+            continue
+        mine = c["path"] in named or (not others and not c.get("synthetic"))
+        if not mine:
+            continue
+        what = "legacy ledger (read-only since 1.7.0 — `ks ledger archive` moves it to the archive)" if st == "" else f"shard of session {st}"
+        out.append(f"[{c['path']}] {what}")
+    return "\n".join(out)
+
+
 def lost_updates(changed, token):
     """Entries/tasks that disappeared in this write and must not have (lost-update guard):
       append-only ledgers   any removed EntryID — unless it now lives in archive/<same ledger>.yaml
@@ -112,6 +131,22 @@ def prompt_notice(payload, changed):
     # At prompt time nothing in the diff can be this session's own tool call (PostToolUse already
     # journaled those), so every change is "outside": ks, an editor, another session.
     ext = [c for c in changed if not (lines and c["path"] == H.MODELS_TOML_REL)]
+    shard_news = [c for c in ext if H.shard_token(c["path"]) not in (None, "") and H.shard_token(c["path"]) != H.session_token(payload)]
+    for c in shard_news:
+        ids = list((c.get("new_for_session") or c.get("added_ids") or {}).keys())
+        kind = (c.get("class") or "ledger:?").split(":", 1)[1]
+        titles = []
+        try:
+            for eid, f in H.load_entries(os.path.join(H.PROJECT_ROOT, c["path"])):
+                if eid in ids and isinstance(f, dict):
+                    titles.append(f"{eid} “{str(f.get('Title', ''))[:50]}”")
+        except Exception:
+            pass
+        who = H.shard_token(c["path"])
+        rec = next((d for d in H.list_sessions() if d.get("token") == who), {})
+        lines.append(f"Session {who}" + (f" ({rec.get('operator')})" if rec.get("operator") else "")
+                     + f" added {len(ids)} {kind} entr{'y' if len(ids) == 1 else 'ies'}: " + "; ".join(titles[:4]) + (" …" if len(titles) > 4 else ""))
+    ext = [c for c in ext if c not in shard_news]
     if ext:
         names = sorted({c["path"] for c in ext})
         owners = sorted({o for c in ext for o in (c.get("new_for_session") or {}).values() if o})
@@ -231,10 +266,16 @@ def main():
         prune_mirrors(deleted_agents)
     plans = [c["path"] for c in changed if c.get("class") == "plan" and c["kind"] != "deleted"]
     token = H.session_token(payload)
+    foreign = foreign_shard_writes(changed, payload, token)
     lost = lost_updates(changed, token)
-    if not ledgers and not agents and not plans and not lost:
+    if not ledgers and not agents and not plans and not lost and not foreign:
         sys.exit(0)
     messages = []
+    if foreign:
+        messages.append(
+            "READ-ONLY LEDGER — this session may write only its own shards "
+            f"(`<ledger>.{token or '<token>'}.yaml`); other sessions' shards and the legacy unsuffixed files are read-only. "
+            "Restore the file you touched and put your entry in your shard:\n" + foreign)
     if lost:
         messages.append(
             "LOST UPDATE — this write removed entries that another session (or an earlier turn) recorded. "
