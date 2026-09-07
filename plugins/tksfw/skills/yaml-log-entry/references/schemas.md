@@ -19,6 +19,12 @@ validator **and** add a fixture under `tests/fixtures/` (see `SKILL.md § Tests`
 - Ensure YAML integrity of each entry before adding it, and of the whole file after adding it (`assets/validate_yaml_log.py`).
 - If a log file predates this specification, normalize it deliberately to the schema below before appending; do not run a blind converter that could downgrade an already-conformant ledger.
 
+## Archives (`.agents/workarea/archive/`)
+
+- One cumulative, **append-only** archive per ledger type — `archive/changes.yaml`, `archive/lessons.yaml`, `archive/handoffs.yaml`, `archive/events.yaml`, `archive/decisions.yaml` — plus `archive/tasks.md` for the plan. Same schema as the live file; entries move verbatim (owner fields preserved); the validator infers the kind from the filename.
+- Move protocol: append to the archive first, then remove from the live file. The PostToolUse hook accepts an ID leaving a live ledger only when it is already present in `archive/<same ledger>`; an archive never loses an ID.
+- Only closed history moves (events with `Status ≠ OPEN`, complete handoff pairs, `SUPERSEDED`/`DEPRECATED` decisions, dated changes/lessons, fully COMPLETED superseded plan blocks): `assets/archive_ledger.py <ledger|all> --before YYYY-MM-DD` / `archive_ledger.py plan` (or `ks ledger archive …`). `cross_check.py` resolves foreign keys into archives; `find_entry.py <ID> --refs` searches both.
+
 ## Change Log
 
 - File Format: YAML

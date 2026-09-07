@@ -118,6 +118,8 @@ STATE_MD = os.path.join(WORKAREA, "STATE.md")
 LEDGER_FILES = ("changes.yaml", "lessons.yaml", "handoffs.yaml", "events.yaml",
                 "decisions.yaml", "deliverables.yaml")
 PLAN_FILES = ("tasks.md", "tasks-archive.md")
+ARCHIVE_REL = "archive"                                             # .agents/workarea/archive/<ledger>.yaml, archive/tasks.md
+ARCHIVE_LEDGERS = ("changes.yaml", "lessons.yaml", "handoffs.yaml", "events.yaml", "decisions.yaml")
 APPEND_ONLY_LEDGERS = ("changes", "lessons", "handoffs", "events")   # removing an entry is always a lost update
 MUTABLE_LEDGERS = ("decisions", "deliverables")                       # own entries may be removed/rewritten
 SESSION_ACTIVE_SEC = 30 * 60                                          # heartbeat window for "another session is active"
@@ -514,10 +516,19 @@ def classify(rel, globs=None):
         return None
     if rel.startswith(WORKAREA_REL + "/"):
         base = rel[len(WORKAREA_REL) + 1:]
+        if base.startswith(ARCHIVE_REL + "/"):
+            name = base[len(ARCHIVE_REL) + 1:]
+            if name in ARCHIVE_LEDGERS:
+                return "archive:" + name[:-5]  # cumulative archive of a ledger (append-only, never a covering entry)
+            if name == "tasks.md":
+                return "plan-archive"
+            return None
         if "/" in base:
             return None                       # agent work areas: not tracked
         if base in LEDGER_FILES:
             return "ledger:" + base[:-5]
+        if base == "tasks-archive.md":
+            return "plan-archive"             # legacy location (pre-1.5.0) of archive/tasks.md
         if base in PLAN_FILES:
             return "plan"
         return None                           # STATE.md, scratch
@@ -559,6 +570,10 @@ def watched_files():
     # workarea ledgers + plan
     for name in LEDGER_FILES + PLAN_FILES:
         p = os.path.join(WORKAREA, name)
+        if os.path.isfile(p):
+            files.add(_rel(p))
+    for name in ARCHIVE_LEDGERS + ("tasks.md",):
+        p = os.path.join(WORKAREA, ARCHIVE_REL, name)
         if os.path.isfile(p):
             files.add(_rel(p))
     # framework
@@ -669,7 +684,7 @@ def paths_from_tool_input(payload):
 
 def _is_indexed(rel):
     cls = classify(rel) or ""
-    return cls.startswith("ledger:") or cls == "plan"
+    return cls.startswith("ledger:") or cls.startswith("archive:") or cls in ("plan", "plan-archive")
 
 
 def _index_entry(index, rel):
@@ -713,7 +728,7 @@ def track_ids(changed, after, payload, token):
     view = load_json(session_ids_path(token), {}) if token else {}
     for c in changed:
         rel = c["path"]
-        if (c.get("class") or "").startswith("ledger:"):
+        if (c.get("class") or "").startswith(("ledger:", "archive:")):
             cur = _index_entry(index, rel)
             now = cur["ids"] if cur else {}
             seen = view.get(rel)
@@ -731,7 +746,7 @@ def track_ids(changed, after, payload, token):
     for c in changed:
         cls = c.get("class") or ""
         added = c.get("new_for_session") or c.get("added_ids") or {}
-        if cls.startswith("ledger:") and added:
+        if cls.startswith(("ledger:", "archive:")) and added:
             owners = set(added.values())
             if token and all(o and o != token for o in owners):
                 c["attrib"] = "external"
@@ -836,6 +851,17 @@ def external_changes(entries):
                 owners = {o for o in (c.get("new_for_session") or c.get("added_ids") or {}).values() if o}
                 out.append((c["path"], ",".join(sorted(owners)) or "?"))
     return out
+
+
+def archive_path_for(rel):
+    """Project-relative archive file that may legitimately receive IDs leaving `rel` (or None)."""
+    cls = classify(rel) or ""
+    if cls.startswith("ledger:"):
+        name = cls.split(":", 1)[1] + ".yaml"
+        return f"{WORKAREA_REL}/{ARCHIVE_REL}/{name}" if name in ARCHIVE_LEDGERS else None
+    if cls == "plan":
+        return f"{WORKAREA_REL}/{ARCHIVE_REL}/tasks.md"
+    return None
 
 
 def unlogged(entries):

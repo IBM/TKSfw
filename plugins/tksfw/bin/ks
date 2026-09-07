@@ -1,0 +1,506 @@
+#!/usr/bin/env python3
+"""ks — the TKSfw command line (one front door for every framework operation).
+
+    ks self install | version | home              put ks on PATH; show version / framework home
+    ks operator set <name> | show                 per-user ~/.config/tksfw/user.toml
+    ks project init [dir] [--full] | update [dir] | enable | disable | status | drift [--json]
+    ks routing show | check | resolve <agent> | use <table> | use --clear
+    ks ledger check | find <id> [--refs] [--json] | archive-plan [--dry-run]
+              | archive <ledger|all> --before YYYY-MM-DD [--dry-run]
+    ks harness sync [--check] | retrust [--ack]
+    ks doctor                                     installation integrity (user-level + project)
+    ks dev build | test | release <version>       repository checkout only
+
+ks is a thin dispatcher: every operation is an existing framework script (hooks, skill assets,
+tools/new_project.py); ks only resolves WHERE they are and adds status/doctor/retrust/drift views.
+Standard library only, Python ≥ 3.11 (the same dependency as the hooks).
+
+Framework home resolution: $TKSFW_HOME → `home = "…"` in ~/.config/tksfw/user.toml → this script's
+own location (tools/ks in a checkout, bin/ks in the plugin) → harness plugin directories.
+Project resolution: $TKSFW_PROJECT_ROOT → nearest ancestor of cwd with .agents/.tksfw.json.
+"""
+import sys
+sys.dont_write_bytecode = True
+import os
+import re
+import json
+import shutil
+import hashlib
+import platform
+import subprocess
+import signal
+
+try:
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)      # `ks … | head` must not trace
+except Exception:
+    pass
+
+PY = sys.executable
+HERE = os.path.dirname(os.path.realpath(__file__))
+CONFIG_DIR = os.environ.get("TKSFW_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".config", "tksfw")
+USER_TOML = os.path.join(CONFIG_DIR, "user.toml")
+TRUST_JSON = os.path.join(CONFIG_DIR, "trust.json")
+
+
+# ----------------------------------------------------------------------------- output
+def die(msg, rc=1):
+    sys.stderr.write(msg.rstrip("\n") + "\n")
+    sys.exit(rc)
+
+
+def run(cmd, cwd=None, env=None, check=False, capture=False):
+    r = subprocess.run(cmd, cwd=cwd, env=env, text=True, capture_output=capture)
+    if check and r.returncode:
+        sys.exit(r.returncode)
+    return r
+
+
+# ----------------------------------------------------------------------------- home
+def user_toml():
+    out = {}
+    try:
+        for line in open(USER_TOML, encoding="utf-8"):
+            m = re.match(r'^\s*(\w+)\s*=\s*"([^"]*)"\s*(#.*)?$', line)
+            if m:
+                out[m.group(1)] = m.group(2)
+    except OSError:
+        pass
+    return out
+
+
+def home_kind(path):
+    """'repo' (checkout: tools/ + template/), 'plugin' (bundle: hooks/ + skills/tksfw-init/assets/template) or None."""
+    if not path or not os.path.isdir(path):
+        return None
+    if os.path.isdir(os.path.join(path, "template")) and os.path.isfile(os.path.join(path, "tools", "new_project.py")):
+        return "repo"
+    if os.path.isdir(os.path.join(path, "hooks")) and os.path.isdir(os.path.join(path, "skills", "tksfw-init", "assets", "template")):
+        return "plugin"
+    return None
+
+
+def candidate_homes():
+    yield os.environ.get("TKSFW_HOME"), "TKSFW_HOME"
+    yield user_toml().get("home"), "user.toml"
+    yield os.path.dirname(HERE), "script location"
+    codex_home = os.environ.get("CODEX_HOME") or os.path.join(os.path.expanduser("~"), ".codex")
+    for base in (os.path.join(codex_home, "plugins"), os.path.join(os.path.expanduser("~"), ".claude", "plugins")):
+        if os.path.isdir(base):
+            for root, dirs, _files in os.walk(base):
+                if os.path.basename(root) == "tksfw" and home_kind(root) == "plugin":
+                    yield root, base
+                if root.count(os.sep) - base.count(os.sep) > 4:
+                    dirs[:] = []
+
+
+class Home:
+    def __init__(self):
+        self.path, self.how, self.kind = None, None, None
+        for p, how in candidate_homes():
+            k = home_kind(p)
+            if k:
+                self.path, self.how, self.kind = os.path.abspath(p), how, k
+                break
+        if not self.path:
+            die("TKSfw home not found — set TKSFW_HOME, or `ks self install` from a checkout / plugin bundle")
+        if self.kind == "repo":
+            self.template = os.path.join(self.path, "template")
+            self.new_project = os.path.join(self.path, "tools", "new_project.py")
+            self.hooks = os.path.join(self.template, ".agents", "hooks")
+            self.skills = os.path.join(self.template, ".agents", "skills")
+            self.version = open(os.path.join(self.path, "VERSION")).read().strip()
+        else:
+            assets = os.path.join(self.path, "skills", "tksfw-init", "assets")
+            self.template = os.path.join(assets, "template")
+            self.new_project = os.path.join(assets, "new_project.py")
+            self.hooks = os.path.join(self.path, "hooks")
+            self.skills = os.path.join(self.path, "skills")
+            self.version = open(os.path.join(assets, "VERSION")).read().strip()
+
+    def asset(self, skill, name):
+        return os.path.join(self.skills, skill, "assets", name)
+
+
+# ----------------------------------------------------------------------------- project
+class Project:
+    def __init__(self, home, path=None, required=True):
+        p = path or os.environ.get("TKSFW_PROJECT_ROOT")
+        if not p:
+            cur = os.getcwd()
+            while True:
+                if os.path.isfile(os.path.join(cur, ".agents", ".tksfw.json")):
+                    p = cur
+                    break
+                parent = os.path.dirname(cur)
+                if parent == cur:
+                    break
+                cur = parent
+        self.root = os.path.abspath(p) if p else None
+        if not self.root and required:
+            die("not inside a TKSfw project (no .agents/.tksfw.json upward from cwd; set TKSFW_PROJECT_ROOT)")
+        self.manifest = {}
+        if self.root:
+            try:
+                self.manifest = json.load(open(os.path.join(self.root, ".agents", ".tksfw.json")))
+            except Exception:
+                self.manifest = {}
+        # in-project tooling (full mode) is the pinned version and wins over the home copy
+        self.hooks = os.path.join(self.root, ".agents", "hooks") if self.root and os.path.isfile(os.path.join(self.root, ".agents", "hooks", "hooks.json")) else home.hooks
+        self.skills = os.path.join(self.root, ".agents", "skills") if self.root and os.path.isdir(os.path.join(self.root, ".agents", "skills", "yaml-log-entry")) else home.skills
+        self.workarea = os.path.join(self.root, ".agents", "workarea") if self.root else None
+
+    def env(self):
+        e = dict(os.environ)
+        if self.root:
+            e["TKSFW_PROJECT_ROOT"] = self.root
+        return e
+
+    def asset(self, skill, name):
+        return os.path.join(self.skills, skill, "assets", name)
+
+
+# ----------------------------------------------------------------------------- commands
+def cmd_self(home, args):
+    sub = args[0] if args else "version"
+    if sub == "version":
+        print(f"ks / TKSfw {home.version}  ({home.kind} at {home.path}, via {home.how})")
+    elif sub == "home":
+        print(home.path)
+    elif sub == "install":
+        bin_dir = args[args.index("--bin-dir") + 1] if "--bin-dir" in args else os.path.join(os.path.expanduser("~"), ".local", "bin")
+        os.makedirs(bin_dir, exist_ok=True)
+        link = os.path.join(bin_dir, "ks")
+        target = os.path.realpath(__file__)
+        if os.path.islink(link) or os.path.exists(link):
+            os.remove(link)
+        os.symlink(target, link)
+        os.chmod(target, 0o755)
+        # record home in user.toml (keep other keys)
+        cfg = user_toml()
+        cfg["home"] = home.path
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        lines = ["# TKSfw per-user configuration (read by the hooks, new_entry_id.py and ks)", "schema = 1"]
+        for k in ("name", "home"):
+            if k in cfg:
+                lines.append(f'{k} = "{cfg[k]}"')
+        open(USER_TOML, "w", encoding="utf-8").write("\n".join(lines) + "\n")
+        comp = os.path.join(os.path.dirname(target), "ks-completion.sh")
+        print(f"installed: {link} → {target}\nhome recorded: {home.path} ({USER_TOML})")
+        if os.path.isfile(comp):
+            print(f"completion: add `source {comp}` to ~/.zshrc or ~/.bashrc")
+        if bin_dir not in os.environ.get("PATH", "").split(os.pathsep):
+            print(f"note: {bin_dir} is not on PATH")
+    else:
+        die("usage: ks self install [--bin-dir DIR] | version | home")
+
+
+def cmd_operator(home, args):
+    if not args or args[0] not in ("set", "show"):
+        die("usage: ks operator set <name> | show")
+    if args[0] == "set":
+        if len(args) < 2:
+            die("usage: ks operator set <name>")
+        sys.exit(run([PY, home.new_project, "--set-operator", " ".join(args[1:])]).returncode)
+    sys.exit(run([PY, home.new_project, "--show-operator"]).returncode)
+
+
+def cmd_project(home, args):
+    sub = args[0] if args else "status"
+    rest = args[1:]
+    if sub == "init":
+        target = next((a for a in rest if not a.startswith("--")), os.getcwd())
+        cmd = [PY, home.new_project, target] + ([] if "--full" in rest else ["--plugin-mode"])
+        sys.exit(run(cmd).returncode)
+    if sub in ("update", "enable", "disable", "drift"):
+        target = next((a for a in rest if not a.startswith("--")), None)
+        proj = Project(home, target)
+        cmd = [PY, home.new_project, proj.root, "--" + sub] + (["--json"] if "--json" in rest else [])
+        sys.exit(run(cmd).returncode)
+    if sub == "status":
+        proj = Project(home)
+        m = proj.manifest
+        drift = run([PY, home.new_project, proj.root, "--drift", "--json"], capture=True)
+        try:
+            d = json.loads(drift.stdout)
+        except Exception:
+            d = {}
+        print(f"project : {proj.root}")
+        print(f"version : {m.get('version', '?')} (installed {home.version}, {home.kind} home)  ·  mode: {'plugin' if m.get('plugin_mode') else 'full'}  ·  {'ARMED' if m.get('enabled', True) is not False else 'DISARMED'}")
+        if d:
+            print(f"drift   : outdated {len(d.get('outdated', []))} · edited {len(d.get('edited', []))} · missing {len(d.get('missing', []))} · unchanged {len(d.get('unchanged', []))}"
+                  + ("" if not d.get("drift") else "   → `ks project drift` / `ks project update`"))
+        sess = active_sessions(proj)
+        print(f"sessions: {len(sess)} active" + (" (" + ", ".join(f"{s['token']}/{s.get('operator') or '?'}" for s in sess) + ")" if sess else ""))
+        state = os.path.join(proj.workarea, "STATE.md")
+        if os.path.isfile(state):
+            for line in open(state, encoding="utf-8"):
+                if line.startswith("- Next action:") or line.startswith("- Active plan block:"):
+                    print("plan    :", line.strip()[2:])
+        wt = run([PY, proj.asset("delegate-work", "workarea.py"), "status", "--json"], cwd=proj.root, env=proj.env(), capture=True)
+        try:
+            w = json.loads(wt.stdout)
+            print(f"isolation: {w['total']} work area(s)/worktree(s), {len(w['stale'])} stale")
+        except Exception:
+            pass
+        return
+    die("usage: ks project init [dir] [--full] | update [dir] | enable | disable | status | drift [--json]")
+
+
+def active_sessions(proj, within=1800):
+    import time
+    d = os.path.join(proj.workarea or "", ".hook-state", "sessions")
+    out = []
+    try:
+        for f in os.listdir(d):
+            if f.endswith(".json"):
+                rec = json.load(open(os.path.join(d, f)))
+                if time.time() - float(rec.get("last_seen", 0)) <= within:
+                    out.append(rec)
+    except Exception:
+        pass
+    return out
+
+
+def cmd_routing(home, args):
+    sub = args[0] if args else "show"
+    proj = Project(home)
+    rm = os.path.join(proj.hooks, "route_model.py")
+    if sub == "show":
+        sys.exit(run([PY, rm, "--print"], cwd=proj.root, env=proj.env()).returncode)
+    if sub == "check":
+        sys.exit(run([PY, rm, "--check"], cwd=proj.root, env=proj.env()).returncode)
+    if sub == "resolve":
+        if len(args) < 2:
+            die("usage: ks routing resolve <agent-name>")
+        sys.exit(run([PY, rm, "--resolve", args[1]], cwd=proj.root, env=proj.env()).returncode)
+    if sub == "use":
+        path = os.path.join(proj.root, ".agents", "models.toml")
+        text = open(path, encoding="utf-8").read()
+        lines = [l for l in text.splitlines(keepends=True) if not re.match(r'^\s*selected\s*=', l)]
+        if "--clear" in args:
+            open(path, "w", encoding="utf-8").write("".join(lines))
+            print("routing selection cleared (automatic: TKSFW_ROUTING → provider match → [routing.default])")
+        else:
+            if len(args) < 2:
+                die("usage: ks routing use <table> | use --clear")
+            table = args[1]
+            if not re.search(rf'^\[routing\.{re.escape(table)}\]', text, re.M):
+                die(f"no [routing.{table}] table in {path}")
+            ins = f'selected = "{table}"                # pinned by `ks routing use` (`ks routing use --clear` to unpin)\n'
+            for i, l in enumerate(lines):
+                if re.match(r'^\s*schema\s*=', l):
+                    lines.insert(i + 1, ins)
+                    break
+            else:
+                lines.insert(0, ins)
+            open(path, "w", encoding="utf-8").write("".join(lines))
+            print(f"routing pinned to [routing.{table}] — log it in changes.yaml (Layer: METHOD)")
+        sys.exit(run([PY, rm, "--check"], cwd=proj.root, env=proj.env()).returncode)
+    die("usage: ks routing show | check | resolve <agent> | use <table> | use --clear")
+
+
+def cmd_ledger(home, args):
+    sub = args[0] if args else "check"
+    proj = Project(home)
+    a = proj.asset
+    if sub == "check":
+        rc = 0
+        for name in ("changes", "lessons", "handoffs", "events", "decisions", "deliverables"):
+            for p in (os.path.join(proj.workarea, name + ".yaml"), os.path.join(proj.workarea, "archive", name + ".yaml")):
+                if os.path.isfile(p):
+                    rc |= run([PY, a("yaml-log-entry", "validate_yaml_log.py"), p], env=proj.env()).returncode
+        if os.path.isfile(os.path.join(proj.workarea, "tasks.md")):
+            r = run([PY, a("yaml-log-entry", "tasks_lint.py"), os.path.join(proj.workarea, "tasks.md")], env=proj.env())
+            rc |= 1 if r.returncode == 2 else 0
+        rc |= run([PY, a("yaml-log-entry", "cross_check.py"), "--workarea", proj.workarea], env=proj.env()).returncode
+        sys.exit(1 if rc else 0)
+    if sub == "find":
+        sys.exit(run([PY, a("yaml-log-entry", "find_entry.py"), *args[1:]], cwd=proj.root, env=proj.env()).returncode)
+    if sub == "archive-plan":
+        sys.exit(run([PY, a("yaml-log-entry", "archive_ledger.py"), "plan", *args[1:]], cwd=proj.root, env=proj.env()).returncode)
+    if sub == "archive":
+        sys.exit(run([PY, a("yaml-log-entry", "archive_ledger.py"), *args[1:]], cwd=proj.root, env=proj.env()).returncode)
+    die("usage: ks ledger check | find <id> [--refs] [--json] | archive-plan [--dry-run] | archive <ledger|all> --before YYYY-MM-DD [--dry-run]")
+
+
+def hook_hashes(hooks_dir):
+    out = {}
+    for f in sorted(os.listdir(hooks_dir)):
+        if f.endswith((".py", ".json")):
+            out[f] = hashlib.sha256(open(os.path.join(hooks_dir, f), "rb").read()).hexdigest()
+    return out
+
+
+def cmd_harness(home, args):
+    sub = args[0] if args else "retrust"
+    proj = Project(home, required=(sub == "sync"))
+    if sub == "sync":
+        sync = os.path.join(proj.hooks, "sync_harness.py")
+        if not os.path.isfile(sync):
+            die("plugin-mode project: nothing to sync (hooks and skills come from the plugin)")
+        sys.exit(run([PY, sync, *args[1:]], cwd=proj.root, env=proj.env()).returncode)
+    if sub == "retrust":
+        hooks_dir = proj.hooks if proj.root else home.hooks
+        cur = hook_hashes(hooks_dir)
+        trust = {}
+        try:
+            trust = json.load(open(TRUST_JSON))
+        except Exception:
+            pass
+        prev = trust.get(hooks_dir, {})
+        changed = sorted(f for f in cur if prev.get(f) != cur[f])
+        if "--ack" in args:
+            trust[hooks_dir] = cur
+            os.makedirs(CONFIG_DIR, exist_ok=True)
+            json.dump(trust, open(TRUST_JSON, "w"), indent=1)
+            print(f"recorded {len(cur)} hook file hashes for {hooks_dir}")
+            return
+        print(f"hooks: {hooks_dir}")
+        if not prev:
+            print("no trust record yet — after trusting the hooks in Codex (/hooks → trust), run `ks harness retrust --ack`")
+            sys.exit(1)
+        if changed:
+            print("RE-TRUST NEEDED — hook files changed since the last acknowledgement:")
+            for f in changed:
+                print("  -", f)
+            print("Codex: open the project, run /hooks, review and trust; then `ks harness retrust --ack`.\n"
+                  "Claude Code: no trust step (hooks load from settings/plugin).")
+            sys.exit(1)
+        print("no change since last acknowledgement")
+        return
+    die("usage: ks harness sync [--check] | retrust [--ack]")
+
+
+def cmd_doctor(home, args):
+    fails, warns = 0, 0
+
+    def ok(msg):
+        print("  ok   ", msg)
+
+    def warn(msg):
+        nonlocal warns
+        warns += 1
+        print("  WARN ", msg)
+
+    def fail(msg):
+        nonlocal fails
+        fails += 1
+        print("  FAIL ", msg)
+
+    print("== runtime")
+    v = sys.version_info
+    (ok if v >= (3, 11) else fail)(f"python {platform.python_version()} at {PY}" + ("" if v >= (3, 11) else " — 3.11+ required (tomllib)"))
+    (ok if shutil.which("git") else warn)("git " + (run(["git", "--version"], capture=True).stdout.strip() if shutil.which("git") else "not found (worktrees unavailable)"))
+    print("== framework home")
+    ok(f"{home.kind} {home.version} at {home.path} (via {home.how})")
+    cfg = user_toml()
+    (ok if cfg.get("home") else warn)(f"user.toml home = {cfg.get('home') or 'not recorded — `ks self install`'}")
+    r = run([PY, home.new_project, "--show-operator"], capture=True)
+    if r.returncode:
+        fail("operator not configured — `ks operator set \"<name>\"`")
+    elif "source: git" in r.stdout:
+        warn(r.stdout.strip() + " — set the item: `ks operator set`")
+    else:
+        ok(r.stdout.strip())
+    print("== harnesses (user level)")
+    codex_home = os.environ.get("CODEX_HOME") or os.path.join(os.path.expanduser("~"), ".codex")
+    mk = os.path.join(os.path.expanduser("~"), ".agents", "plugins", "marketplace.json")
+    (ok if os.path.isfile(mk) else warn)(f"Codex personal marketplace: {mk if os.path.isfile(mk) else 'absent'}")
+    ccfg = os.path.join(codex_home, "config.toml")
+    if os.path.isfile(ccfg):
+        t = open(ccfg, encoding="utf-8").read()
+        (ok if "hooks" in t else warn)(f"Codex config {ccfg}: " + ("mentions hooks" if "hooks" in t else "no hooks feature flag found — hooks may be disabled"))
+    else:
+        warn(f"Codex config not found at {ccfg}")
+    cl = os.path.join(os.path.expanduser("~"), ".claude", "settings.json")
+    if os.path.isfile(cl):
+        try:
+            cs = json.load(open(cl))
+            ep = (cs.get("enabledPlugins") or {})
+            state = ep.get("tksfw@tksfw")
+            (ok if state is not False else fail)(f"Claude Code user settings: tksfw@tksfw = {state if state is not None else 'not listed'}")
+            if cs.get("disableAllHooks"):
+                fail("Claude Code user settings: disableAllHooks = true")
+        except Exception:
+            warn(f"Claude Code settings unreadable: {cl}")
+    else:
+        warn("Claude Code user settings not found (~/.claude/settings.json)")
+    proj = Project(home, required=False)
+    if proj.root:
+        print(f"== project {proj.root}")
+        m = proj.manifest
+        (ok if m.get("enabled", True) is not False else warn)(f"armed: {m.get('enabled', True) is not False}")
+        pv, iv = str(m.get("version", "?")), home.version
+        (ok if pv.split(".")[:2] == iv.split(".")[:2] else warn)(f"version project {pv} / installed {iv}" + ("" if pv == iv else " — `ks project update`"))
+        d = run([PY, home.new_project, proj.root, "--drift", "--json"], capture=True)
+        try:
+            dj = json.loads(d.stdout)
+            (ok if not dj.get("drift") else warn)(f"drift: outdated {len(dj['outdated'])}, edited {len(dj['edited'])}, missing {len(dj['missing'])}")
+        except Exception:
+            warn("drift report unavailable")
+        if "/Library/CloudStorage/" in proj.root or "/Box/" in proj.root or "/Dropbox/" in proj.root:
+            warn("project lives in a cloud-synced folder — mtimes are unreliable (hooks hash content) and git worktrees are not recommended")
+        for sf in (".claude/settings.json", ".claude/settings.local.json"):
+            p = os.path.join(proj.root, sf)
+            if os.path.isfile(p):
+                try:
+                    cs = json.load(open(p))
+                    if (cs.get("enabledPlugins") or {}).get("tksfw@tksfw") is False:
+                        warn(f"{sf}: tksfw@tksfw disabled here (hard off)")
+                    if cs.get("disableAllHooks"):
+                        fail(f"{sf}: disableAllHooks = true")
+                except Exception:
+                    warn(f"{sf} unreadable")
+        full = os.path.isfile(os.path.join(proj.root, ".agents", "hooks", "hooks.json"))
+        ok(f"mode: {'full (in-project hooks; the plugin yields)' if full else 'plugin (hooks from the plugin)'}")
+        if full:
+            for mirror in (".codex/hooks.json", ".claude/settings.json"):
+                (ok if os.path.isfile(os.path.join(proj.root, mirror)) else warn)(f"harness mirror {mirror}" + ("" if os.path.isfile(os.path.join(proj.root, mirror)) else " missing — `ks harness sync`"))
+        rc = run([PY, os.path.join(proj.hooks, "route_model.py"), "--check"], cwd=proj.root, env=proj.env(), capture=True)
+        (ok if rc.returncode == 0 else fail)("routing: " + rc.stdout.strip().splitlines()[0] if rc.stdout.strip() else "routing: no output")
+        sess = active_sessions(proj)
+        (ok if len(sess) <= 1 else warn)(f"active sessions: {len(sess)}" + ("" if len(sess) <= 1 else " — parallel sessions are tolerated, not a design target"))
+        cur = hook_hashes(proj.hooks)
+        try:
+            prev = json.load(open(TRUST_JSON)).get(proj.hooks, {})
+        except Exception:
+            prev = {}
+        ch = [f for f in cur if prev.get(f) != cur[f]]
+        (ok if prev and not ch else warn)("hook trust: " + ("acknowledged" if prev and not ch else f"{len(ch)} hook file(s) not acknowledged — Codex /hooks then `ks harness retrust --ack`"))
+    else:
+        print("== project: not inside a TKSfw project")
+    print(f"\n{fails} FAIL · {warns} WARN")
+    sys.exit(1 if fails else 0)
+
+
+def cmd_dev(home, args):
+    if home.kind != "repo":
+        die("ks dev needs a repository checkout (TKSFW_HOME pointing at it)")
+    sub = args[0] if args else "test"
+    if sub == "build":
+        sys.exit(run([PY, os.path.join(home.path, "tools", "build_plugin.py"), *args[1:]], cwd=home.path).returncode)
+    if sub == "test":
+        sys.exit(run([PY, os.path.join(home.path, "tests", "run_tests.py")], cwd=home.path).returncode)
+    if sub == "release":
+        sys.exit(run(["bash", os.path.join(home.path, "tools", "release.sh"), *args[1:]], cwd=home.path).returncode)
+    die("usage: ks dev build | test | release <version>")
+
+
+COMMANDS = {"self": cmd_self, "operator": cmd_operator, "project": cmd_project, "routing": cmd_routing,
+            "ledger": cmd_ledger, "harness": cmd_harness, "doctor": cmd_doctor, "dev": cmd_dev}
+
+
+def main():
+    a = sys.argv[1:]
+    if not a or a[0] in ("-h", "--help", "help"):
+        print(__doc__)
+        sys.exit(0)
+    if a[0] in ("--version", "version"):
+        a = ["self", "version"]
+    if a[0] not in COMMANDS:
+        die(f"unknown command {a[0]!r}\n" + __doc__)
+    COMMANDS[a[0]](Home(), a[1:])
+
+
+if __name__ == "__main__":
+    main()

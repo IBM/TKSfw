@@ -57,31 +57,44 @@ def validate(rel_paths, added=None):
 
 
 def lost_updates(changed, token):
-    """Entries/tasks that disappeared in this write and must not have (1.4.0 lost-update guard):
-      append-only ledgers  any removed EntryID
-      mutable ledgers      removed entries owned by ANOTHER session (own ones may be rewritten)
-      tasks.md             removed TaskIDs not present in tasks-archive.md (the archive move is the exemption)
+    """Entries/tasks that disappeared in this write and must not have (lost-update guard):
+      append-only ledgers   any removed EntryID — unless it now lives in archive/<same ledger>.yaml
+      mutable ledgers       removed entries owned by ANOTHER session (own ones may be rewritten) — same exemption
+      tasks.md              removed TaskIDs not present in archive/tasks.md (or legacy tasks-archive.md)
+      archives              never lose an ID
     Returns a report string ('' when clean)."""
     out = []
-    archive_ids = None
+    cache = {}
+
+    def ids_in(rel):
+        if rel not in cache:
+            cache[rel] = H.ledger_ids(rel)
+        return cache[rel]
+
     for c in changed:
         removed = c.get("removed_ids") or {}
         if not removed:
             continue
         cls = c.get("class") or ""
         rel = c["path"]
+        if cls.startswith("archive:") or cls == "plan-archive":
+            out.append(f"[{rel}] archive lost: " + ", ".join(sorted(removed)) + " (archives are append-only)")
+            continue
+        arch = H.archive_path_for(rel)
+        archived = ids_in(arch) if arch else {}
+        if cls == "plan":
+            archived = dict(archived, **ids_in(f"{H.WORKAREA_REL}/tasks-archive.md"))
         if cls.startswith("ledger:"):
             kind = cls.split(":", 1)[1]
             if kind in H.APPEND_ONLY_LEDGERS:
-                bad = removed
+                bad = {i: o for i, o in removed.items() if i not in archived}
             else:
-                bad = {i: o for i, o in removed.items() if o and o != token}
+                bad = {i: o for i, o in removed.items() if o and o != token and i not in archived}
             if bad:
-                out.append(f"[{rel}] removed: " + ", ".join(f"{i} (session {o or 'legacy'})" for i, o in sorted(bad.items())))
-        elif cls == "plan" and os.path.basename(rel) == "tasks.md":
-            if archive_ids is None:
-                archive_ids = H.ledger_ids(os.path.join(H.WORKAREA_REL, "tasks-archive.md"))
-            bad = [i for i in removed if i not in archive_ids]
+                out.append(f"[{rel}] removed: " + ", ".join(f"{i} (session {o or 'legacy'})" for i, o in sorted(bad.items()))
+                           + (f" — move them to {arch} first if archiving" if arch else ""))
+        elif cls == "plan":
+            bad = [i for i in removed if i not in archived]
             if bad:
                 out.append(f"[{rel}] TaskIDs removed without archiving: " + ", ".join(sorted(bad)))
     return "\n".join(out)
@@ -95,8 +108,8 @@ def lint_plan(rel_paths):
         return "", ""
     errs, warns = [], []
     for rel in rel_paths:
-        if os.path.basename(rel) != "tasks.md":
-            continue
+        if rel != f"{H.WORKAREA_REL}/tasks.md":
+            continue                                   # archives are frozen history
         path = os.path.join(H.PROJECT_ROOT, rel)
         if not os.path.exists(path):
             continue
@@ -180,7 +193,7 @@ def main():
         sys.exit(0)
 
     ledgers = [c["path"] for c in changed
-               if (c.get("class") or "").startswith("ledger:") and c["kind"] != "deleted"]
+               if (c.get("class") or "").startswith(("ledger:", "archive:")) and c["kind"] != "deleted"]
     agents = [c["path"] for c in changed
               if H.AGENT_FILE_RE.match(c["path"]) and c["kind"] != "deleted"]
     deleted_agents = [c["path"] for c in changed
@@ -198,7 +211,8 @@ def main():
             "LOST UPDATE — this write removed entries that another session (or an earlier turn) recorded. "
             "Re-read the file and restore them; append-only ledgers never lose entries, tasks.md items move "
             "only to tasks-archive.md:\n" + lost)
-    added = {c["path"]: list((c.get("added_ids") or {}).keys()) for c in changed if (c.get("class") or "").startswith("ledger:")}
+    added = {c["path"]: list((c.get("added_ids") or {}).keys()) for c in changed
+             if (c.get("class") or "").startswith("ledger:")}          # archive appends carry entries verbatim (legacy ok)
     plan_errors, plan_warnings = lint_plan(plans) if plans else ("", "")
     if plan_errors:
         messages.append(

@@ -8,8 +8,8 @@ file (ERROR = syntactic, blocks the write via the PostToolUse hook; WARN = evide
 
 ## File
 
-- Format: Markdown. Location: `.agents/workarea/tasks.md` (live plan); `.agents/workarea/tasks-archive.md`
-  (frozen history, never linted).
+- Format: Markdown. Location: `.agents/workarea/tasks.md` (live plan); `.agents/workarea/archive/tasks.md`
+  (frozen history, never linted; legacy name `tasks-archive.md` is migrated by `archive_ledger.py plan`).
 
 ## Line grammar
 
@@ -51,8 +51,9 @@ file (ERROR = syntactic, blocks the write via the PostToolUse hook; WARN = evide
 
 ## Archive procedure (keep the live plan lean)
 
-1. When a plan block (heading + its tasks) is fully `COMPLETED` and superseded by a newer block, cut
-   it from `tasks.md` and append it to `tasks-archive.md`, preserving its order and heading.
+1. When a plan block (heading + its tasks) is fully `COMPLETED` and superseded by a newer block, move it
+   to `archive/tasks.md` preserving order and heading — `python3 assets/archive_ledger.py plan`
+   (or `ks ledger archive-plan`) does this and the hook accepts the move (append first, then remove).
 2. Leave `tasks.md` holding the current / most recent block(s) only.
 3. Integrity checks (`verify-integrity`, the hook) lint the LIVE file; the archive is frozen history
    but stays resolvable by `cross_check.py` for audits.

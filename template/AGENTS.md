@@ -115,7 +115,7 @@
 - **Ordering:** TaskIDs are random base62 and carry NO order. Sequence and dependency come from document order — top-to-bottom, sub-tasks nested under their parent; the "next" task is the first non-`COMPLETED` item read top-down. Never infer order from IDs or timestamps.
 - **Source of truth:** `tasks.md` is the SoT for tracking, resume and audit. Harness task tools (Codex `update_plan`, Claude Code `TaskCreate`) are an ephemeral in-session aid only — outside `.agents/workarea/` and the audit trail, never a substitute.
 - **Evidence of closing:** a COMPLETED leaf task carries `[ev:<EventID>]` citing the `events.yaml` entry that proves it (terminal-positive pairs in the skill) — "never mark complete without proof" is a checkable link; the hook and STATE.md report missing evidence.
-- **Keep it lean:** a fully COMPLETED, superseded plan block moves to `.agents/workarea/tasks-archive.md` (procedure in the skill); only the live file is linted.
+- **Keep it lean:** a fully COMPLETED, superseded plan block moves to `.agents/workarea/archive/tasks.md` (`archive_ledger.py plan` / `ks ledger archive-plan`); closed ledger history moves to `archive/<ledger>.yaml` the same way (archive first, then remove — the hook enforces it); only live files are linted.
 
 #### State Snapshot (Resume Entrypoint)
 

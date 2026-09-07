@@ -2,6 +2,21 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [1.5.0] — 2026-09-07
+
+`ks` command line (P0) and cumulative ledger archives.
+
+### Added
+- `tools/ks` (stdlib Python, self-locating; shipped as `plugins/tksfw/bin/ks` with `ks-completion.sh`): `self install|version|home`, `operator set|show`, `project init|update|enable|disable|status|drift`, `routing show|check|resolve|use [--clear]`, `ledger check|find|archive-plan|archive`, `harness sync|retrust [--ack]`, `doctor`, `dev build|test|release`. `docs/ks.md`.
+- `new_project.py --drift [--json]` (report-only), `route_model.py`: `selected = "<table>"` pin in `models.toml` (after `TKSFW_ROUTING`, before the provider match; validated).
+- Archives: `.agents/workarea/archive/<ledger>.yaml` + `archive/tasks.md` (one cumulative, append-only archive per type); classes `archive:<kind>`/`plan-archive`; guard exemption generalised (archive-first move), archives never lose an ID; `cross_check` resolves into archives; `archive_ledger.py` (eligibility: closed history only; migrates `tasks-archive.md`).
+- `find_entry.py <ID> [--refs|--prefix|--json]` — entries/tasks across live, archive and plan with reverse references.
+- `~/.config/tksfw/trust.json` (hook-hash acknowledgement for `ks harness retrust`); `user.toml` gains `home`.
+- ADR 0009; 26 new tests (154 total).
+
+### Changed
+- AGENTS.md § Activity Plan "keep it lean" line points to `archive/`; schemas.md § Archives; hooks README; README; user-level.md.
+
 ## [1.4.1] — 2026-09-06
 
 The operator name becomes a defined configuration item.

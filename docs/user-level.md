@@ -18,6 +18,10 @@ and `~/.claude/CLAUDE.md` is concatenated before every project file ([Claude Cod
 It says three things: the method applies only where `.agents/.tksfw.json` is enabled; elsewhere do
 nothing; use `tksfw-init` when asked to set up a project.
 
+## The `ks` command
+
+`python3 <plugin root>/bin/ks self install` puts `ks` on PATH and records the framework home; from then on every operation below is a `ks` verb (`ks operator set`, `ks project init|update|status|drift|enable|disable`, `ks routing use`, `ks ledger …`, `ks harness retrust`, `ks doctor`). Reference: `docs/ks.md`.
+
 ## Operator name (required for ledger entries)
 
 Every ledger entry records `OwnerSessionUserName`. The configuration item is per user, not per project

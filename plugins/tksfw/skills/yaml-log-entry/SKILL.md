@@ -129,3 +129,13 @@ prints the entry head with both. The PostToolUse hook requires them on the IDs a
 that disappears from `decisions.yaml`/`deliverables.yaml`, or a TaskID that leaves `tasks.md` without
 appearing in `tasks-archive.md`. On that block: re-read the file, restore the named entries, re-apply your
 change. Parallel sessions on one project are tolerated (guarded, attributed), not a design target.
+
+## Finding and archiving
+
+| Command | Purpose |
+|---|---|
+| `python3 assets/find_entry.py <ID> [--refs]` | locate an entry/task in live ledgers, archives and plan; `--refs` lists everything that references it (TaskID, EventID, RelatedTo, `[ev:…]`) — use it before citing or resolving a cross-reference |
+| `python3 assets/archive_ledger.py plan` | move fully COMPLETED, superseded plan blocks to `archive/tasks.md` (STATE.md shows when blocks are archivable) |
+| `python3 assets/archive_ledger.py <ledger|all> --before YYYY-MM-DD [--dry-run]` | move closed history to `archive/<ledger>.yaml` (`references/schemas.md § Archives`) — archive first, then remove; the hook enforces that order |
+
+All of these are also reachable as `ks ledger find | archive-plan | archive` (`docs/ks.md`).

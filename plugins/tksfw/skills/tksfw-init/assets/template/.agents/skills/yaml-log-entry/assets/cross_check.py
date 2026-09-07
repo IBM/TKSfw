@@ -5,7 +5,9 @@ Per-file validation (validate_yaml_log.py, run by the PostToolUse hook) proves e
 well-formed; it does NOT prove the GRAPH is consistent. This checker resolves the foreign keys
 ACROSS files and flags orphans / dangling references / unpaired handoffs:
 
-  * events.yaml     — each `TaskID` resolves to a task in tasks.md or tasks-archive.md
+  * events.yaml     — each `TaskID` resolves to a task in tasks.md or archive/tasks.md (legacy tasks-archive.md)
+  Archives (`archive/<ledger>.yaml`) are read together with the live ledgers: an evidence link into an
+  archived event stays valid.
   * handoffs.yaml   — each `EventID` resolves in events.yaml; each `TaskID` resolves to a task;
                       every `<stem>-BEGIN` has a matching `<stem>-END` (BEGIN-only = open = WARN;
                       END-only = ERROR)
@@ -40,15 +42,18 @@ CLOSING = {
 }
 
 
-def _load(name, workarea):
-    p = os.path.join(workarea, name)
-    if not os.path.exists(p):
-        return []
-    try:
-        entries, _ = load_entries(p)
-        return entries
-    except Exception:
-        return []
+def _load(name, workarea, with_archive=True):
+    """Live entries + (by default) the cumulative archive `archive/<name>` — FKs may point into it."""
+    out = []
+    for p in ([os.path.join(workarea, name)] + ([os.path.join(workarea, "archive", name)] if with_archive else [])):
+        if not os.path.exists(p):
+            continue
+        try:
+            entries, _ = load_entries(p)
+            out.extend(entries)
+        except Exception:
+            pass
+    return out
 
 
 def _parse_tasks_file(name, workarea):
@@ -66,7 +71,7 @@ def check(workarea=DEFAULT_WORKAREA):
     """Return (errors, warns)."""
     errors, warns = [], []
 
-    task_ids = {t["id"] for fn in ("tasks.md", "tasks-archive.md")
+    task_ids = {t["id"] for fn in ("tasks.md", "tasks-archive.md", os.path.join("archive", "tasks.md"))
                 for t in _parse_tasks_file(fn, workarea)}
 
     events = _load("events.yaml", workarea)

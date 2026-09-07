@@ -11,6 +11,7 @@ tksfw (method tooling — assembled from the template)
                                         `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/X.py"`
   plugin/tksfw/**                       plugins/tksfw/**                  manifests, README, bootstrap/ stanzas,
                                                                            plugin-only skills (tksfw-init), version injected
+  tools/ks, tools/ks-completion.sh      plugins/tksfw/bin/                 the ks command line (self-locating)
   template/** + tools/new_project.py    plugins/tksfw/skills/tksfw-init/assets/{template,new_project.py,VERSION}
                                                                            so a project can be instantiated from the
                                                                            installed plugin (skill tests dropped)
@@ -156,6 +157,18 @@ def build_static(name, out, ver):
                     json.load(fh)
 
 
+def copy_cli(out):
+    """tools/ks + completion → <plugin>/bin/ (ks resolves the plugin root from its own location)."""
+    bin_dir = os.path.join(out, "bin")
+    os.makedirs(bin_dir, exist_ok=True)
+    for name in ("ks", "ks-completion.sh"):
+        src = os.path.join(REPO, "tools", name)
+        if os.path.isfile(src):
+            dst = os.path.join(bin_dir, name)
+            shutil.copy2(src, dst)
+            os.chmod(dst, 0o755)
+
+
 def copy_plugin_extras(out, ver):
     """Plugin-only content from plugin/tksfw: skills/ (e.g. tksfw-init), bootstrap/ stanzas.
     tksfw-init gets the template + installer as assets so projects can be created from the plugin."""
@@ -180,6 +193,7 @@ def build(out, ver):
     skills = copy_skills(out)
     n = copy_hooks(out)
     copy_plugin_extras(out, ver)
+    copy_cli(out)
     write_manifests(out, ver)
     # sanity: every hook script referenced exists in the bundle
     with open(os.path.join(out, "hooks", "hooks.json"), encoding="utf-8") as fh:

@@ -6,6 +6,7 @@
                                                                   # the installed tksfw plugin
     python3 tools/new_project.py /path/to/project --update        # refresh unmodified framework files,
                                                                   # report locally edited ones, never overwrite them
+    python3 tools/new_project.py /path/to/project --drift         # report only: unchanged / outdated / edited / missing
     python3 tools/new_project.py /path/to/project --disable       # disarm: hooks/routing become inert here
     python3 tools/new_project.py /path/to/project --enable        # re-arm
     python3 tools/new_project.py --set-operator "Carlos Veira"    # write ~/.config/tksfw/user.toml (per user, once)
@@ -83,6 +84,8 @@ def main():
     ap.add_argument("--no-sync", action="store_true", help="skip sync_harness.py after copying")
     ap.add_argument("--disable", action="store_true", help="set enabled=false in .agents/.tksfw.json (disarm)")
     ap.add_argument("--enable", action="store_true", help="set enabled=true in .agents/.tksfw.json (re-arm)")
+    ap.add_argument("--drift", action="store_true", help="report the project's framework files against this version; exit 1 on drift; writes nothing")
+    ap.add_argument("--json", action="store_true", help="with --drift: machine-readable output")
     ap.add_argument("--set-operator", metavar="NAME", help="write the per-user config ~/.config/tksfw/user.toml (OwnerSessionUserName)")
     ap.add_argument("--show-operator", action="store_true", help="print the resolved operator name and its source; exit 1 when unset")
     a = ap.parse_args()
@@ -112,6 +115,39 @@ def main():
             fh.write("\n")
         print(f"TKSfw {'ARMED' if prev['enabled'] else 'DISARMED'} in {target} (.agents/.tksfw.json enabled={str(prev['enabled']).lower()})")
         return
+    if a.drift:
+        if prev is None:
+            sys.exit(f"{target} carries no .agents/.tksfw.json — not a TKSfw project")
+        pm = prev.get("plugin_mode", False)
+        rep = {"version_project": prev.get("version"), "version_installed": version(), "plugin_mode": pm,
+               "enabled": prev.get("enabled", True) is not False, "unchanged": [], "outdated": [], "edited": [], "missing": []}
+        ph = prev.get("files", {})
+        for rel in template_files(pm):
+            dst = os.path.join(target, rel)
+            h = sha256(os.path.join(TEMPLATE, rel))
+            if not os.path.exists(dst):
+                rep["missing"].append(rel)
+            elif sha256(dst) == h:
+                rep["unchanged"].append(rel)
+            elif ph.get(rel) == sha256(dst):
+                rep["outdated"].append(rel)            # untouched locally, newer in this version
+            else:
+                rep["edited"].append(rel)              # edited locally (merge by hand)
+        drift = bool(rep["outdated"] or rep["edited"] or rep["missing"]) or rep["version_project"] != rep["version_installed"]
+        rep["drift"] = drift
+        if a.json:
+            print(json.dumps(rep, indent=2))
+        else:
+            print(f"project v{rep['version_project']} · installed v{rep['version_installed']} · "
+                  f"{'plugin' if pm else 'full'} mode · {'armed' if rep['enabled'] else 'DISARMED'}")
+            for k in ("outdated", "edited", "missing"):
+                if rep[k]:
+                    print(f"  {k}: {len(rep[k])}")
+                    for r in rep[k][:40]:
+                        print(f"    {r}")
+            print(f"  unchanged: {len(rep['unchanged'])}")
+            print("no drift" if not drift else "DRIFT — `--update` refreshes outdated files; edited ones need a manual merge")
+        sys.exit(1 if drift else 0)
     if prev and not a.update:
         sys.exit(f"{target} already carries TKSfw v{prev.get('version')} — use --update to refresh it")
     if a.update and prev:

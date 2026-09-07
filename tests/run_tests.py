@@ -38,12 +38,17 @@
      work areas keyed <session>.<task>.<n>
  15. Operator configuration item: ~/.config/tksfw/user.toml via --set-operator / --show-operator;
      resolution order env > file > git, reported source; SessionStart names the source
+ 16. ks + archives (1.5.0): ks bundled in plugins/tksfw/bin and self-locating; self/operator/project/
+     routing/ledger/harness/doctor/dev sub-commands; `routing use` pins `selected`; cumulative archives
+     under workarea/archive/ — archive_ledger.py moves closed history, the guard exempts the move and
+     protects archives, cross_check resolves into archives, find_entry finds and cross-references
 """
 import sys
 sys.dont_write_bytecode = True
 import os
 import json
 import shutil
+import re
 import subprocess
 import tempfile
 
@@ -619,6 +624,102 @@ def main():
         check("SessionStart shows the configured operator", "Operator: Carlos Veira" in json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"], r.stdout[:300])
         stamp = run([PY, os.path.join(plug, "skills", "yaml-log-entry", "assets", "new_entry_id.py"), ch, "--stamp", "--session", tA], cwd=sproj, env=oenv)
         check("new_entry_id --stamp reads the same config item", "OwnerSessionUserName: Carlos Veira" in stamp.stdout, stamp.stdout)
+
+        # 16 — ks + archives
+        ks = os.path.join(plug, "bin", "ks")
+        check("ks bundled in the plugin with completion", os.path.isfile(ks) and os.access(ks, os.X_OK) and os.path.isfile(os.path.join(plug, "bin", "ks-completion.sh")))
+        khome = os.path.join(tmp, "kshome")
+        kenv = penv | {"TKSFW_CONFIG_DIR": os.path.join(tmp, "kscfg"), "HOME": khome, "TKSFW_USER": "carlos"}
+        os.makedirs(khome, exist_ok=True)
+        r = run([PY, ks, "self", "version"], env=kenv)
+        check("ks self version (plugin home via script location)", r.returncode == 0 and "plugin at" in r.stdout and open(os.path.join(REPO, "VERSION")).read().strip() in r.stdout, r.stdout + r.stderr)
+        r = run([PY, ks, "self", "install", "--bin-dir", os.path.join(tmp, "ksbin")], env=kenv)
+        check("ks self install: symlink + home recorded", r.returncode == 0 and os.path.islink(os.path.join(tmp, "ksbin", "ks"))
+              and 'home = "' in open(os.path.join(tmp, "kscfg", "user.toml")).read(), r.stdout + r.stderr)
+        r = run([PY, ks, "operator", "set", "Carlos Veira"], env=kenv)
+        r2 = run([PY, ks, "operator", "show"], env={k: v for k, v in kenv.items() if k != "TKSFW_USER"})
+        check("ks operator set/show", r.returncode == 0 and "Carlos Veira" in r2.stdout and "source: file" in r2.stdout, r2.stdout + r2.stderr)
+        kproj = os.path.join(tmp, "ksproj")
+        os.makedirs(kproj)
+        r = run([PY, ks, "project", "init"], cwd=kproj, env=kenv)
+        check("ks project init (plugin mode by default)", r.returncode == 0 and os.path.isfile(os.path.join(kproj, ".agents", ".tksfw.json")) and not os.path.exists(os.path.join(kproj, ".agents", "hooks")), r.stdout + r.stderr)
+        r = run([PY, ks, "project", "status"], cwd=kproj, env=kenv)
+        check("ks project status", r.returncode == 0 and "ARMED" in r.stdout and "mode: plugin" in r.stdout and "drift" in r.stdout, r.stdout + r.stderr)
+        r = run([PY, ks, "project", "drift"], cwd=kproj, env=kenv)
+        check("ks project drift: fresh project has none", r.returncode == 0 and "no drift" in r.stdout, r.stdout + r.stderr)
+        open(os.path.join(kproj, "AGENTS.md"), "a").write("\n# local\n")
+        r = run([PY, ks, "project", "drift", "--json"], cwd=kproj, env=kenv)
+        check("ks project drift --json reports the edited file", r.returncode == 1 and "AGENTS.md" in json.loads(r.stdout)["edited"], r.stdout[:200] + r.stderr)
+        r = run([PY, ks, "project", "disable"], cwd=kproj, env=kenv)
+        r2 = run([PY, ks, "project", "enable"], cwd=kproj, env=kenv)
+        check("ks project disable/enable", "DISARMED" in r.stdout and "ARMED" in r2.stdout, r.stdout + r2.stdout)
+        r = run([PY, ks, "routing", "use", "ibm"], cwd=kproj, env=kenv)
+        mt = open(os.path.join(kproj, ".agents", "models.toml")).read()
+        r2 = run([PY, ks, "routing", "show"], cwd=kproj, env=kenv | {"CODEX_HOME": os.path.join(tmp, "nocodex")})
+        check("ks routing use pins `selected` and the hook honours it", r.returncode == 0 and 'selected = "ibm"' in mt and "selected_by=selected" in r2.stdout, r.stdout + r2.stdout + r2.stderr)
+        r = run([PY, ks, "routing", "use", "nope"], cwd=kproj, env=kenv)
+        check("ks routing use refuses an unknown table", r.returncode != 0 and "no [routing.nope]" in r.stderr, r.stderr)
+        r = run([PY, ks, "routing", "use", "--clear"], cwd=kproj, env=kenv)
+        check("ks routing use --clear", r.returncode == 0 and not re.search(r"^selected\s*=", open(os.path.join(kproj, ".agents", "models.toml")).read(), re.M), r.stdout)
+        r = run([PY, ks, "routing", "check"], cwd=kproj, env=kenv)
+        r2 = run([PY, ks, "routing", "resolve", "sources-researcher"], cwd=kproj, env=kenv)
+        check("ks routing check/resolve", r.returncode == 0 and '"model": "gpt-5.6-luna"' in r2.stdout, r.stdout + r2.stdout)
+        # archives
+        kwa = os.path.join(kproj, ".agents", "workarea")
+        def ev(eid, task, ts, status):
+            return (f"- {eid}:\n    TaskID: {task}\n    AuthorAgent: main\n    Model: m\n    Timestamp: \"{ts}\"\n    OwnerSessionId: Xk9Qm2Ab\n"
+                    f"    OwnerSessionUserName: carlos\n    EventType: TASK\n    Title: \"ev {eid}\"\n    Remarks: |-\n      x\n    Status: {status}\n")
+        open(os.path.join(kwa, "events.yaml"), "w").write(ev("Evnt0001", "T001", "2026-01-05 10:00:00", "COMPLETED") + ev("Evnt0002", "T002", "2026-01-06 10:00:00", "OPEN") + ev("Evnt0003", "T002", "2026-09-01 10:00:00", "COMPLETED"))
+        open(os.path.join(kwa, "tasks.md"), "w").write("# Block A\n- [x] T001 a - main : COMPLETED 2026-01-05 10:00:00 [ev:Evnt0001]\n# Block B\n- [ ] T002 b - main : OPEN 2026-01-06 10:00:00\n")
+        open(os.path.join(kwa, "tasks-archive.md"), "w").write("# Old\n- [x] T000 z - main : COMPLETED 2025-12-01 10:00:00 [ev:Evnt0000]\n")
+        r = run([PY, ks, "ledger", "archive-plan", "--dry-run"], cwd=kproj, env=kenv)
+        check("ks ledger archive-plan --dry-run changes nothing", r.returncode == 0 and "Block A" in r.stdout and not os.path.exists(os.path.join(kwa, "archive", "tasks.md")), r.stdout)
+        r = run([PY, ks, "ledger", "archive-plan"], cwd=kproj, env=kenv)
+        at = open(os.path.join(kwa, "archive", "tasks.md")).read()
+        check("archive-plan migrates tasks-archive.md and moves the superseded block",
+              r.returncode == 0 and "T000" in at and "T001" in at and not os.path.exists(os.path.join(kwa, "tasks-archive.md"))
+              and "T001" not in open(os.path.join(kwa, "tasks.md")).read() and "T002" in open(os.path.join(kwa, "tasks.md")).read(), r.stdout + r.stderr)
+        r = run([PY, ks, "ledger", "archive", "events", "--before", "2026-06-01"], cwd=kproj, env=kenv)
+        live = open(os.path.join(kwa, "events.yaml")).read(); arch = open(os.path.join(kwa, "archive", "events.yaml")).read()
+        check("ks ledger archive moves only closed, old events", r.returncode == 0 and "Evnt0001" in arch and "Evnt0001" not in live
+              and "Evnt0002" in live and "Evnt0003" in live and "OwnerSessionId: Xk9Qm2Ab" in arch, r.stdout + r.stderr)
+        r = run([PY, ks, "ledger", "check"], cwd=kproj, env=kenv)
+        check("ks ledger check passes with the archived evidence link", r.returncode == 0 and "PASS" in r.stdout, r.stdout[-300:] + r.stderr)
+        r = run([PY, ks, "ledger", "find", "T001", "--refs"], cwd=kproj, env=kenv)
+        check("ks ledger find locates the archived task and its referencing event",
+              r.returncode == 0 and "archive/tasks.md" in r.stdout and "Evnt0001" in r.stdout and "archive/events.yaml" in r.stdout, r.stdout)
+        r = run([PY, ks, "ledger", "find", "Nope0000"], cwd=kproj, env=kenv)
+        check("ks ledger find: not found → exit 1", r.returncode == 1)
+        # hook guard vs archives
+        kpost = lambda path, turn="k1": run([PY, os.path.join(plug, "hooks", "track_edits.py")], cwd=kproj, env=kenv,
+                                             inp=json.dumps({"session_id": "SK", "turn_id": turn, "hook_event_name": "PostToolUse", "tool_name": "Write",
+                                                             "tool_use_id": f"u{abs(hash(path + open(os.path.join(kproj, path)).read())) % 99991}", "cwd": kproj,
+                                                             "tool_input": {"file_path": os.path.join(kproj, path)}}))
+        run([PY, os.path.join(plug, "hooks", "inject_state.py")], cwd=kproj, env=kenv, inp=json.dumps({"session_id": "SK", "turn_id": "k1", "source": "startup", "cwd": kproj}))
+        # move Evnt0003 by hand the right way: archive first, then remove
+        open(os.path.join(kwa, "archive", "events.yaml"), "a").write(ev("Evnt0003", "T002", "2026-09-01 10:00:00", "COMPLETED"))
+        r1 = kpost(".agents/workarea/archive/events.yaml")
+        open(os.path.join(kwa, "events.yaml"), "w").write(ev("Evnt0002", "T002", "2026-01-06 10:00:00", "OPEN"))
+        r2 = kpost(".agents/workarea/events.yaml")
+        check("guard: archive-first move of a ledger entry is accepted", r1.returncode == 0 and r2.returncode == 0, r1.stderr[:200] + r2.stderr[:200])
+        open(os.path.join(kwa, "events.yaml"), "w").write("[]\n")
+        r = kpost(".agents/workarea/events.yaml")
+        check("guard: removing an unarchived entry is still blocked", r.returncode == 2 and "Evnt0002" in r.stderr and "archive/events.yaml" in r.stderr, r.stderr[:300])
+        open(os.path.join(kwa, "events.yaml"), "w").write(ev("Evnt0002", "T002", "2026-01-06 10:00:00", "OPEN"))
+        kpost(".agents/workarea/events.yaml")
+        open(os.path.join(kwa, "archive", "events.yaml"), "w").write(ev("Evnt0001", "T001", "2026-01-05 10:00:00", "COMPLETED"))
+        r = kpost(".agents/workarea/archive/events.yaml")
+        check("guard: archives never lose an ID", r.returncode == 2 and "archive lost" in r.stderr and "Evnt0003" in r.stderr, r.stderr[:300])
+        r = run([PY, ks, "harness", "retrust"], cwd=kproj, env=kenv)
+        r2 = run([PY, ks, "harness", "retrust", "--ack"], cwd=kproj, env=kenv)
+        r3 = run([PY, ks, "harness", "retrust"], cwd=kproj, env=kenv)
+        check("ks harness retrust: unknown → ack → clean", r.returncode == 1 and r2.returncode == 0 and r3.returncode == 0 and "no change" in r3.stdout, r.stdout + r3.stdout)
+        r = run([PY, ks, "doctor"], cwd=kproj, env=kenv)
+        check("ks doctor runs end to end", r.returncode == 0 and "== project" in r.stdout and "FAIL ·" in r.stdout, r.stdout[-300:] + r.stderr)
+        r = run([PY, ks, "dev", "test"], cwd=kproj, env=kenv)
+        check("ks dev refuses to run from a plugin home", r.returncode != 0 and "checkout" in r.stderr, r.stderr)
+        r = run([PY, os.path.join(REPO, "tools", "ks"), "self", "version"], env=kenv | {"TKSFW_HOME": REPO})
+        check("ks from the checkout reports repo home", "repo at" in r.stdout, r.stdout)
 
         agents_md = open(os.path.join(full, "AGENTS.md"), encoding="utf-8").read()
         check("AGENTS.md keeps the naming kernel and points to define-agent",

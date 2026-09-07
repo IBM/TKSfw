@@ -1,6 +1,6 @@
 {
   "name": "tksfw-tools",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "description": "MCP servers the TKS framework method relies on: Perplexity (search, ask, research, reason) and Playwright (browser automation, artifacts confined to <project>/.playwright). Optional companion of the tksfw plugin — skip it if you already run these servers user-level.",
   "author": {
     "name": "Carlos Veira (IBM)"

@@ -8,8 +8,9 @@ At every spawn the hook
   1. loads `.agents/models.toml` fresh from disk (so edits apply to the next spawn: no restart,
      no hook re-trust — the script itself does not change),
   2. selects the routing table for the provider this session is connected to
-     ($TKSFW_ROUTING → Codex `model_provider` in $CODEX_HOME/config.toml → Claude Code
-     $ANTHROPIC_BASE_URL prefix match → [routing.default] → DENY),
+     ($TKSFW_ROUTING → `selected = "<table>"` in models.toml (`ks routing use`) → Codex
+     `model_provider` in $CODEX_HOME/config.toml → Claude Code $ANTHROPIC_BASE_URL prefix match →
+     [routing.default] → DENY),
   3. resolves the agent's role (full name in [roles], else the -<role> suffix) → tier → model,
   4. returns `permissionDecision: "allow"` + `updatedInput` = the original arguments plus
         Codex:        model, reasoning_effort
@@ -78,6 +79,9 @@ def validate(table, harness=None):
     routing = table.get("routing") or {}
     if not routing:
         problems.append("no [routing.<provider>] table")
+    sel = table.get("selected")
+    if sel and str(sel) not in routing:
+        problems.append(f"selected = {sel!r} names no [routing.{sel}] table")
     allowed = set(EFFORTS[harness]) if harness in EFFORTS else set(EFFORTS["codex"]) | set(EFFORTS["claude"])
     for key, tab in routing.items():
         for tier in tiers:
@@ -135,6 +139,9 @@ def select_routing(table, harness):
     forced = os.environ.get("TKSFW_ROUTING")
     if forced:
         return forced, routing.get(forced), "TKSFW_ROUTING"
+    selected = table.get("selected")                     # `ks routing use <table>` — persisted choice
+    if selected:
+        return str(selected), routing.get(str(selected)), "selected (models.toml)"
     if harness == "codex":
         prov = codex_model_provider()
         if prov and prov in routing:

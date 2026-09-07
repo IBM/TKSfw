@@ -35,6 +35,10 @@ twice). `inject_state.py` warns when the project manifest and the installed plug
 - **ID index** (`ids.json`): project-wide `{file: {hash, ids→owner}}` for ledgers and plans, refreshed whenever a file's hash differs from the last indexed one — independent of any session's diff, so an A-B-A rewrite that restores a byte-identical older file is still caught. `track_edits.py` blocks (exit 2, "LOST UPDATE") when an EntryID disappears from an append-only ledger, an entry owned by another session disappears from `decisions.yaml`/`deliverables.yaml`, or a TaskID leaves `tasks.md` without appearing in `tasks-archive.md`. New entries must carry `OwnerSessionId`/`OwnerSessionUserName` (validator `--require-owner`).
 - Limits: the write has happened when PostToolUse runs — the block names what to restore, it cannot roll back. Shell edits under concurrency stay `ambiguous`. Sessions without the plugin are unattributed.
 
+## Archives
+
+`.agents/workarea/archive/<ledger>.yaml` and `archive/tasks.md` are watched as `archive:<kind>` / `plan-archive`: validated on write, never a covering `changes.yaml` entry, and the lost-update guard treats them as strictly append-only. An ID may leave a live ledger only when it already exists in the matching archive (archive-first move — `archive_ledger.py` / `ks ledger archive`).
+
 ## Watched set (what hashing covers)
 
 | Class | Paths | Rule |

@@ -30,6 +30,9 @@ on_unknown_role = "deny"
 #                        files must stay model-free, e.g. shared across providers).
 codex_agent_files = "inline"
 
+# selected = "ibm"                # optional: pin the routing table (`ks routing use ibm`; `ks routing use --clear`
+                                 # removes it). Order: TKSFW_ROUTING → selected → provider match → [routing.default]
+
 [delegation]                     # enforced by route_model.py (PreToolUse on spawn) — AGENTS.md § Subagents
 max_parallel_agents = 4          # the (N+1)th live subagent of a turn is refused; SubagentStart/Stop hooks track liveness
 deny_nested_spawn = true         # a spawn issued from inside a subagent is refused (decomposition happens in main only)
