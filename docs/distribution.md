@@ -7,6 +7,7 @@ system ships instruction files or project-root configuration:
 |---|---|---|
 | Method tooling | `skills/`, `hooks/` (this is exactly what Codex and Claude Code plugins carry) | **Plugin** `plugins/tksfw/` — one directory, two manifests |
 | Method instance | `AGENTS.md`, `CLAUDE.local.md`, `.agents/workarea/`, `.codex/config.toml`, `.codex/prompts/` (+ hooks/skills in *full* mode) | **Template** `template/` via `tools/new_project.py` |
+| Project layers (L3/L4) | `KS_PROJECT.md` (archetype), `KS_SPEC.md` (project spec) — or paths pinned in `.agents/.tksfw.json` `layers` | **Not distributed**: user content, written per project, never touched by `--update`; remote archetype libraries are roadmap (ADR 0013) |
 
 ## Source vs generated (why `plugin-src/` and `plugins/` both exist)
 

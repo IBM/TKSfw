@@ -30,8 +30,11 @@ Everything it writes is plain files inside the project; the plugin directory its
    | Update to the installed version (keeps locally edited files, lists them) | `… <project> --update` |
    | Disarm / re-arm the framework here | `… <project> --disable` / `--enable` |
    | Set / show the operator name (per user, once; `~/.config/tksfw/user.toml`) | `… --set-operator "<name>"` / `… --show-operator` |
-3. Report what was installed / refreshed / kept. Locally edited files (typically `AGENTS.md` with L3/L4
-   additions) must be merged by hand — show the user the list.
+3. Report what was installed / refreshed / kept. Locally edited framework files must be merged by hand —
+   show the user the list. The project layers (`KS_PROJECT.md` L3, `KS_SPEC.md` L4, or paths pinned under
+   `layers` in `.agents/.tksfw.json`) are the user's content: `--update` never touches them and preserves
+   the `layers` stanza. On a new project, suggest writing `KS_SPEC.md` (and `KS_PROJECT.md` when an archetype
+   applies); the first session then lists them at start and `/ks-start` begins execution.
 4. Ask the user to re-trust hooks in Codex `/hooks` if the project is self-contained (in-project hooks);
    plugin-mode projects need nothing (the plugin's hooks are already trusted).
 5. Log the initialisation or update in `.agents/workarea/changes.yaml` (Layer METHOD) via the

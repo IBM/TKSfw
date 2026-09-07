@@ -2,6 +2,13 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [2.2.1] — 2026-09-07
+
+Documentation pass for the project layers; no code changes.
+
+### Fixed
+- Documentation still describing the pre-2.2.0 model: `README.md` (repo tree names `KS_PROJECT.md` / `KS_SPEC.md` and `ks-start`; everyday-commands row for describing and starting a project), `docs/distribution.md` (project layers are user content, not distributed, untouched by `--update`), `template/.agents/hooks/README.md` (`inject_state.py` sections and markers, new `layers.py` row, watched class `layer:l3` / `layer:l4`, Stop-hook row), `plugin-src/tksfw/README.md` (complete skills list), `tksfw-init` skill (no more "AGENTS.md with L3/L4 additions"; `--update` preserves the `layers` stanza; suggest `KS_SPEC.md` on a new project), `register-deliverables` skill (source modes point at L3 `KS_PROJECT.md` / L4 `KS_SPEC.md`).
+
 ## [2.2.0] — 2026-09-07
 
 Project layers. L3 (archetype) and L4 (project spec) get a home in the AGENTS.md architecture: a convention, one resolver, a pointer block at session start and an explicit `/ks-start`.
