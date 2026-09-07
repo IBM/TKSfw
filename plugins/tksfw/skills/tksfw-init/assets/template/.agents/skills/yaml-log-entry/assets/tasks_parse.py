@@ -49,16 +49,20 @@ def parse_tasks(text):
             continue
         indent, box, tid, rest = tm.groups()
         status = date = ev = None
+        agent = None
         title = rest
         well = False
         tl = TAIL_RE.search(rest)
         if tl:
             well = True
             status, date, ev = tl.group(1), tl.group(2), tl.group(3)
-            title = AGENT_TAIL_RE.sub("", rest[:tl.start()]).strip()
+            head = rest[:tl.start()]
+            am = AGENT_TAIL_RE.search(head)
+            agent = am.group(1).strip() if am and am.groups() else (head.rsplit(" - ", 1)[1].strip() if " - " in head else None)
+            title = AGENT_TAIL_RE.sub("", head).strip()
             dates.append(date)
         tasks.append({
-            "id": tid, "title": title, "status": status, "date": date, "ev": ev,
+            "id": tid, "title": title, "agent": agent, "status": status, "date": date, "ev": ev,
             "heading": h1 or last_any, "done_box": box.lower() == "x",
             "indent": len(indent.replace("\t", "    ")), "lineno": i, "well_formed": well,
         })

@@ -33,6 +33,7 @@ In a full-mode project the in-project hooks and skills (the pinned version) are 
 | `ks routing use <table>` / `use --clear` | pin a routing table (`selected = "<table>"` in `models.toml`, read after `TKSFW_ROUTING`, before the provider match) | edits `models.toml`, then `--check` |
 | `ks ledger check` | validate every live ledger and archive, lint `tasks.md`, cross-check FKs | `validate_yaml_log.py`, `tasks_lint.py`, `cross_check.py` |
 | `ks ledger find <id> [--refs] [--json]` / `find --prefix <chars>` | locate an entry or task across live files, archives and plan; `--refs` lists everything that references it | `find_entry.py` |
+| `ks ledger export all \| <kind>[,<kind>…] [--out FILE] [--archive] [--session TOKEN] [--csv DIR]` | formatted Excel workbook (Summary + one sheet per kind: shards merged, header frozen, autofilter, wrapped memos, real datetimes; `--archive` adds archived entries, `--session` one session's shards, `--csv` writes CSV files instead). Default `.agents/workarea/exports/ledgers-<stamp>.xlsx` | `export_ledgers.py` + `xlsx_lite.py` (std lib) |
 | `ks ledger archive-plan [--dry-run]` | move fully COMPLETED, superseded plan blocks to `archive/tasks.md`; migrates legacy `tasks-archive.md` | `archive_ledger.py plan` |
 | `ks ledger archive <ledger|all> --before YYYY-MM-DD [--dry-run]` | move closed history to `archive/<ledger>.yaml` (see eligibility) | `archive_ledger.py` |
 | `ks harness sync [--check]` | render harness mirrors in a full-mode project | `sync_harness.py` |

@@ -2,6 +2,15 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [1.8.0] — 2026-09-07
+
+Excel export of the ledgers.
+
+### Added
+- `yaml-log-entry/assets/xlsx_lite.py`: std-lib .xlsx writer (several sheets, bold filled header, frozen header row, autofilter, column widths, wrapped/top-aligned memo cells, real datetimes with number format, IDs as text).
+- `yaml-log-entry/assets/export_ledgers.py` and `ks ledger export all | <kind>[,<kind>…] [--out FILE] [--archive] [--session TOKEN] [--csv DIR]`: Summary sheet + one sheet per kind (changes, lessons, handoffs, events, decisions, deliverables, tasks); shards merged, archive optional, extra columns (handoffs Stem/Half, decisions EffectiveStatus, deliverables Present, tasks Agent/Block/Level/Parent, Session/Source/Archived). Default `.agents/workarea/exports/ledgers-<stamp>.xlsx`; CSV fallback.
+- `tasks_parse.py` exposes `agent`. Docs (ks.md, operations.md, SKILL.md). 9 new tests (180 total; validated with openpyxl and LibreOffice in the sandbox).
+
 ## [1.7.1] — 2026-09-07
 
 ### Fixed

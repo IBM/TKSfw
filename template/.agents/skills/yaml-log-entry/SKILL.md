@@ -147,4 +147,6 @@ change. Parallel sessions on one project are tolerated (guarded, attributed), no
 | `python3 assets/archive_ledger.py plan` | move fully COMPLETED, superseded plan blocks to `archive/tasks.md` (STATE.md shows when blocks are archivable) |
 | `python3 assets/archive_ledger.py <ledger|all> --before YYYY-MM-DD [--dry-run]` | move closed history to `archive/<ledger>.yaml` (`references/schemas.md § Archives`) — archive first, then remove; the hook enforces that order |
 
-All of these are also reachable as `ks ledger find | archive-plan | archive` (`docs/ks.md`).
+| `python3 assets/export_ledgers.py all|<kinds> [--out F] [--archive] [--session T] [--csv DIR]` | formatted Excel workbook (or CSV) of the ledgers — Summary + one sheet per kind, shards merged; std-lib writer `assets/xlsx_lite.py`. Output under `.agents/workarea/exports/` (not a deliverable; log an `events` entry if it leaves the project) |
+
+All of these are also reachable as `ks ledger find | export | archive-plan | archive` (`docs/ks.md`).

@@ -49,6 +49,8 @@
      legacy writes rejected, own append-only drop = lost update, decisions append-only with DECISION
      events, STATE.md sessions section, prompt notice with titles, sync conflict copies reported,
      archive refuses while sessions are active, per-host hook state
+ 19. Excel export (1.8.0): xlsx_lite produces a valid workbook (zip + XML parsed; openpyxl when
+     available), ks ledger export all / by kind / --csv / --archive / --session
 """
 import sys
 sys.dont_write_bytecode = True
@@ -825,6 +827,54 @@ def main():
               all(os.path.isfile(os.path.join(REPO, "docs", f)) for f in ("getting-started.md", "operations.md", "ks.md"))
               and "getting-started.md" in open(os.path.join(REPO, "README.md")).read()
               and "ks self setup" in open(os.path.join(REPO, "docs", "getting-started.md")).read())
+
+        # 19 — Excel export
+        import zipfile, xml.etree.ElementTree as ET
+        xout = os.path.join(tmp, "ledgers.xlsx")
+        r = run([PY, ks, "ledger", "export", "all", "--out", xout, "--archive"], cwd=sproj, env=senv)
+        check("ks ledger export all writes a workbook", r.returncode == 0 and os.path.isfile(xout) and "changes" in r.stdout, r.stdout + r.stderr)
+        with zipfile.ZipFile(xout) as z:
+            names = z.namelist()
+            wbx = ET.fromstring(z.read("xl/workbook.xml"))
+            ns = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+            sheet_names = [e.get("name") for e in wbx.findall(".//m:sheet", ns)]
+            s1 = ET.fromstring(z.read("xl/worksheets/sheet2.xml"))
+            ET.fromstring(z.read("xl/styles.xml")); ET.fromstring(z.read("[Content_Types].xml"))
+        check("workbook parts parse and sheets are Summary + every kind",
+              sheet_names == ["Summary", "changes", "lessons", "handoffs", "events", "decisions", "deliverables", "tasks"]
+              and "xl/styles.xml" in names, str(sheet_names))
+        rows = s1.findall(".//m:sheetData/m:row", ns)
+        header = [t.text for t in rows[0].findall(".//m:t", ns)]
+        check("changes sheet: header from schema + Session/Source/Archived, frozen pane, autofilter, one row per shard entry",
+              header[:2] == ["EntryID", "AuthorAgent"] and header[-3:] == ["Session", "Source", "Archived"]
+              and s1.find(".//m:pane", ns) is not None and s1.find(".//m:autoFilter", ns) is not None and len(rows) >= 5, str(header) + str(len(rows)))
+        try:
+            import openpyxl
+            wbo = openpyxl.load_workbook(xout)
+            ws = wbo["changes"]
+            hdr = [c.value for c in ws[1]]
+            ts_col = hdr.index("Timestamp") + 1
+            import datetime as _dt
+            check("openpyxl: timestamps are real datetimes, IDs text, memo wrap set",
+                  isinstance(ws.cell(row=2, column=ts_col).value, _dt.datetime) and isinstance(ws.cell(row=2, column=1).value, str)
+                  and ws.cell(row=2, column=hdr.index("Description") + 1).alignment.wrap_text is True, str(ws.cell(row=2, column=ts_col).value))
+            wst = wbo["tasks"]
+            th = [c.value for c in wst[1]]
+            check("openpyxl: tasks sheet has Agent/Block/Level/Parent", all(x in th for x in ("Agent", "Block", "Level", "Parent")) and wst.max_row >= 2, str(th))
+        except ImportError:
+            print("[SKIP] openpyxl not available")
+        r = run([PY, ks, "ledger", "export", "changes,events", "--out", os.path.join(tmp, "two.xlsx")], cwd=sproj, env=senv)
+        with zipfile.ZipFile(os.path.join(tmp, "two.xlsx")) as z:
+            wbx = ET.fromstring(z.read("xl/workbook.xml"))
+            two = [e.get("name") for e in wbx.findall(".//m:sheet", ns)]
+        check("export by category", r.returncode == 0 and two == ["Summary", "changes", "events"], str(two) + r.stderr)
+        r = run([PY, ks, "ledger", "export", "changes", "--session", tA, "--csv", os.path.join(tmp, "csvout")], cwd=sproj, env=senv)
+        csvtxt = open(os.path.join(tmp, "csvout", "changes.csv")).read()
+        check("export --session --csv: only that session's entries, CSV written", r.returncode == 0 and "Aaaa1111" in csvtxt and "Bbbb2222" not in csvtxt, r.stdout + r.stderr)
+        r = run([PY, ks, "ledger", "export", "bogus"], cwd=sproj, env=senv)
+        check("export rejects an unknown kind", r.returncode != 0 and "unknown kind" in r.stderr, r.stderr)
+        r = run([PY, ks, "ledger", "export", "all"], cwd=sproj, env=senv)
+        check("default output lands under workarea/exports", r.returncode == 0 and os.path.isdir(os.path.join(wa, "exports")) and any(f.endswith(".xlsx") for f in os.listdir(os.path.join(wa, "exports"))), r.stdout + r.stderr)
 
         agents_md = open(os.path.join(full, "AGENTS.md"), encoding="utf-8").read()
         check("AGENTS.md keeps the naming kernel and points to define-agent",

@@ -13,7 +13,7 @@ _ks_complete() {
       operator) words="set show" ;;
       project)  words="init update enable disable status drift --full --json" ;;
       routing)  words="show check resolve use --clear" ;;
-      ledger)   words="check find archive-plan archive --refs --json --prefix --before --dry-run changes lessons events handoffs decisions all" ;;
+      ledger)   words="check find export archive-plan archive --refs --json --prefix --before --dry-run --out --archive --session --csv changes lessons events handoffs decisions deliverables tasks all" ;;
       harness)  words="sync retrust --check --ack" ;;
       dev)      words="build test release" ;;
       *)        words="" ;;
