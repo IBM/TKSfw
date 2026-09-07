@@ -22,6 +22,7 @@ In a full-mode project the in-project hooks and skills (the pinned version) are 
 | Command | Does | Backed by |
 |---|---|---|
 | `ks self install [--bin-dir D]` / `version` / `home` | PATH symlink + home record; versions | — |
+| `ks self setup [--operator NAME] [--no-stanza]` | one-shot, idempotent user setup: operator, bootstrap stanzas appended to `~/.codex/AGENTS.md` and `~/.claude/CLAUDE.md`, completion hint | — |
 | `ks operator set "<name>"` / `show` | per-user `~/.config/tksfw/user.toml` (`OwnerSessionUserName`) | `new_project.py --set/--show-operator` |
 | `ks project init [dir] [--full]` | instantiate the method (plugin mode by default) | `new_project.py [--plugin-mode]` |
 | `ks project update [dir]` | refresh unmodified framework files, list edited ones | `new_project.py --update` |
@@ -38,6 +39,10 @@ In a full-mode project the in-project hooks and skills (the pinned version) are 
 | `ks harness retrust [--ack]` | compare hook-file hashes with the last acknowledgement; exit 1 and instructions when Codex `/hooks` re-trust is needed; `--ack` records | `~/.config/tksfw/trust.json` |
 | `ks doctor` | runtime, home, operator, harness settings, project state, cloud-sync warning, routing, sessions, trust; exit 1 on FAIL | — |
 | `ks dev build` / `test` / `release <v>` | repository checkout only | `build_plugin.py`, `tests/run_tests.py`, `release.sh` |
+
+## Effects and safety
+
+Every mutating verb ends with an effect line: **next spawn** (`routing use`), **next prompt** (`operator set`, `project enable`), **next session** (`project update`, `harness sync` — restart, Codex `/hooks` re-trust, then `ks harness retrust --ack`), **files** (`ledger archive*`, `project disable`). `routing use` refuses while subagents are running and `project update` while sessions are active (`--force` overrides). The UserPromptSubmit hook tells the model what changed at its next prompt, so `ks` can be used while a session is open (`docs/operations.md`).
 
 ## Ledger archives
 

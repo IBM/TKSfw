@@ -97,6 +97,7 @@
 	- Keep the main folder clean: Playwright temporary files, screenshots and other related artifacts MUST be stored inside the `.playwright` folder.
 - Use the Perplexity MCP tools to search and verify data over the internet.
 - Consider using the skills found in the project folder.
+- `ks` (the framework command line) may be run through the shell tool when the operator asks for an operational change — e.g. `ks routing use <table>`, `ks ledger archive-plan`; such changes are METHOD-layer and logged in `changes.yaml`. The next prompt confirms what took effect.
 
 ### Skill Layering
 

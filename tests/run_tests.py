@@ -42,6 +42,9 @@
      routing/ledger/harness/doctor/dev sub-commands; `routing use` pins `selected`; cumulative archives
      under workarea/archive/ — archive_ledger.py moves closed history, the guard exempts the move and
      protects archives, cross_check resolves into archives, find_entry finds and cross-references
+ 17. Live reconfiguration (1.6.0): UserPromptSubmit notice for routing/operator/armed changes and
+     external file changes; ks effect lines; `routing use` refuses while subagents run; `ks self setup`
+     idempotent stanzas; docs present
 """
 import sys
 sys.dont_write_bytecode = True
@@ -720,6 +723,58 @@ def main():
         check("ks dev refuses to run from a plugin home", r.returncode != 0 and "checkout" in r.stderr, r.stderr)
         r = run([PY, os.path.join(REPO, "tools", "ks"), "self", "version"], env=kenv | {"TKSFW_HOME": REPO})
         check("ks from the checkout reports repo home", "repo at" in r.stdout, r.stdout)
+
+        # 17 — live reconfiguration
+        lproj = os.path.join(tmp, "live")
+        run([PY, ks, "project", "init", lproj], cwd=tmp, env=kenv)
+        lenv = kenv | {"TKSFW_USER": "carlos"}
+        lhook = lambda script, extra, args=(): run([PY, os.path.join(plug, "hooks", script), *args], cwd=lproj, env=lenv,
+                                                   inp=json.dumps({"session_id": "SL", "turn_id": "l1", "cwd": lproj, **extra}))
+        lhook("inject_state.py", {"source": "startup"})
+        r = lhook("track_edits.py", {"prompt": "hi"}, ["--phase", "prompt"])
+        check("prompt notice silent when nothing changed", r.returncode == 0 and r.stdout.strip() == "", r.stdout)
+        r = run([PY, ks, "routing", "use", "openrouter"], cwd=lproj, env=lenv)
+        check("ks routing use prints the effect line", r.returncode == 0 and "next subagent spawn" in r.stdout, r.stdout + r.stderr)
+        r = lhook("track_edits.py", {"prompt": "hi"}, ["--phase", "prompt"])
+        ctx = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"] if r.stdout.strip() else ""
+        check("prompt notice reports the routing switch", "routing.openrouter" in ctx and "was [routing.ibm]" in ctx, r.stdout[:300])
+        r = lhook("track_edits.py", {"prompt": "hi"}, ["--phase", "prompt"])
+        check("prompt notice reported once", r.stdout.strip() == "", r.stdout)
+        r = lhook("track_edits.py", {"prompt": "hi"}, ["--phase", "prompt"])   # operator change via env
+        r = run([PY, os.path.join(plug, "hooks", "track_edits.py"), "--phase", "prompt"], cwd=lproj, env=lenv | {"TKSFW_USER": "bob"},
+                inp=json.dumps({"session_id": "SL", "turn_id": "l2", "cwd": lproj, "prompt": "hi"}))
+        check("prompt notice reports the operator change", "Operator now `bob`" in r.stdout, r.stdout[:300])
+        # busy check
+        lhook("subagent_track.py", {"hook_event_name": "SubagentStart", "agent_id": "z1", "agent_type": "x-builder"}, ["--start"])
+        r = run([PY, ks, "routing", "use", "ibm"], cwd=lproj, env=lenv)
+        r2 = run([PY, ks, "routing", "use", "ibm", "--force"], cwd=lproj, env=lenv)
+        check("ks routing use refuses while a subagent runs, --force overrides", r.returncode != 0 and "subagent" in r.stderr and r2.returncode == 0, r.stderr + r2.stderr)
+        r = run([PY, ks, "project", "update"], cwd=lproj, env=lenv)
+        check("ks project update refuses while the project is busy", r.returncode != 0 and ("session" in r.stderr or "subagent" in r.stderr), r.stderr)
+        # external change notice (archive by ks)
+        lwa = os.path.join(lproj, ".agents", "workarea")
+        open(os.path.join(lwa, "tasks.md"), "w").write("# A\n- [x] T001 a - main : COMPLETED 2026-01-05 10:00:00 [ev:Evnt0001]\n# B\n- [ ] T002 b - main : OPEN 2026-01-06 10:00:00\n")
+        lhook("track_edits.py", {"hook_event_name": "PostToolUse", "tool_name": "Write", "tool_use_id": "lw1", "tool_input": {"file_path": os.path.join(lwa, "tasks.md")}})
+        r = run([PY, ks, "ledger", "archive-plan"], cwd=lproj, env=lenv)
+        check("ks ledger archive-plan prints the files effect", r.returncode == 0 and "files changed now" in r.stdout, r.stdout + r.stderr)
+        r = run([PY, os.path.join(plug, "hooks", "track_edits.py"), "--phase", "prompt"], cwd=lproj, env=lenv | {"TKSFW_USER": "bob"},
+                inp=json.dumps({"session_id": "SL", "turn_id": "l3", "cwd": lproj, "prompt": "hi"}))
+        check("prompt notice lists files changed outside the session", "changed outside this session" in r.stdout and "tasks.md" in r.stdout, r.stdout[:400])
+        # self setup
+        shome = os.path.join(tmp, "setuphome")
+        senv2 = kenv | {"HOME": shome, "CODEX_HOME": os.path.join(shome, ".codex")}
+        os.makedirs(shome)
+        r = run([PY, ks, "self", "setup", "--operator", "Carlos Veira"], env=senv2)
+        r2 = run([PY, ks, "self", "setup", "--operator", "Carlos Veira"], env=senv2)
+        ag = open(os.path.join(shome, ".codex", "AGENTS.md")).read()
+        check("ks self setup appends both stanzas once", r.returncode == 0 and ag.count("TKSfw bootstrap stanza") == 1
+              and os.path.isfile(os.path.join(shome, ".claude", "CLAUDE.md")) and "already present" in r2.stdout, r.stdout + r2.stdout + r.stderr)
+        r = run([PY, ks, "doctor"], env=senv2, cwd=tmp)
+        check("ks doctor sees the stanzas", "bootstrap stanza" in r.stdout and "present" in r.stdout, r.stdout[-400:])
+        check("docs: getting-started, operations, ks present and cross-linked",
+              all(os.path.isfile(os.path.join(REPO, "docs", f)) for f in ("getting-started.md", "operations.md", "ks.md"))
+              and "getting-started.md" in open(os.path.join(REPO, "README.md")).read()
+              and "ks self setup" in open(os.path.join(REPO, "docs", "getting-started.md")).read())
 
         agents_md = open(os.path.join(full, "AGENTS.md"), encoding="utf-8").read()
         check("AGENTS.md keeps the naming kernel and points to define-agent",

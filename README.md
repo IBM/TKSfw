@@ -1,4 +1,15 @@
 # TKSfw — TKS agent method framework
+## Start here
+
+| You want to… | Read |
+|---|---|
+| Install the framework and arm a first project | `docs/getting-started.md` (10 steps, both harnesses) |
+| Run everyday operations: switch routing, update, archive, second session, upgrade | `docs/operations.md` |
+| Every `ks` command | `docs/ks.md` |
+| Understand a design decision | `docs/decisions/` (ADRs 0001–0009) |
+
+The rest of this file is for maintainers of the framework repository.
+
 
 Harness-neutral method framework for Codex CLI and Claude Code: an `AGENTS.md`-driven method
 (L1/L2 text, YAML ledgers, state snapshot, deliverables registry) plus the tooling that enforces

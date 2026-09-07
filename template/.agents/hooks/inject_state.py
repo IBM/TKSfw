@@ -78,6 +78,7 @@ def main():
             H.prune_sessions()
             token = H.seed_snapshot(payload)             # per-session baseline + ID index
             H.record_changes(payload, "session")
+            H.config_changes(payload)                    # store the configuration view the model is shown
             others = H.other_active_sessions(payload)
     except Exception as e:
         H.log(f"inject_state: baseline: {type(e).__name__}: {e}")

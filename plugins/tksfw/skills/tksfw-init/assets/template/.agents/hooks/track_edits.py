@@ -100,6 +100,30 @@ def lost_updates(changed, token):
     return "\n".join(out)
 
 
+def prompt_notice(payload, changed):
+    """UserPromptSubmit: tell the model what changed since it last looked — configuration switched with
+    `ks` (routing, operator, armed flag, models.toml) and files changed outside this session's tool
+    calls (another session, `ks ledger archive`, an editor). '' when nothing happened."""
+    lines = []
+    try:
+        lines += H.config_changes(payload)
+    except Exception as e:
+        H.log(f"prompt_notice: {type(e).__name__}: {e}")
+    # At prompt time nothing in the diff can be this session's own tool call (PostToolUse already
+    # journaled those), so every change is "outside": ks, an editor, another session.
+    ext = [c for c in changed if not (lines and c["path"] == H.MODELS_TOML_REL)]
+    if ext:
+        names = sorted({c["path"] for c in ext})
+        owners = sorted({o for c in ext for o in (c.get("new_for_session") or {}).values() if o})
+        lines.append(f"{len(names)} file(s) changed outside this session's tool calls: " + ", ".join(names[:6])
+                     + (" …" if len(names) > 6 else "")
+                     + (f" (session {', '.join(owners)})" if owners else "")
+                     + " — re-read before editing them; STATE.md refreshes at the next turn end.")
+    if not lines:
+        return ""
+    return "TKSfw — changed since your last prompt:\n" + "\n".join("• " + l for l in lines)
+
+
 def lint_plan(rel_paths):
     """tasks_lint on changed plan files: (errors_report, warnings_report). Only the LIVE tasks.md is
     linted; tasks-archive.md is frozen history."""
@@ -189,6 +213,11 @@ def main():
         H.log(f"track_edits({phase}): {type(e).__name__}: {e}")
         sys.exit(0)
 
+    if phase == "prompt":
+        notice = prompt_notice(payload, changed)
+        if notice:
+            H.emit(H.additional_context("UserPromptSubmit", notice))
+        sys.exit(0)
     if phase != "tool" or first_run:
         sys.exit(0)
 

@@ -2,6 +2,15 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [1.6.0] — 2026-09-07
+
+Live reconfiguration and a usable installation path.
+
+### Added
+- UserPromptSubmit notice (`track_edits.py --phase prompt`): "changed since your last prompt" — routing table/pin, operator, armed flag, `models.toml` edits, and files changed outside the session's tool calls (`ks`, another session, an editor). `hooklib.config_view/config_changes`; the SessionStart hook stores the view the model was shown. Both harnesses accept `additionalContext` on this event.
+- `ks`: effect line after every mutating verb (next spawn / next prompt / next session / files); `routing use` refuses while subagents run and `project update` while sessions are active (`--force`); `ks self setup [--operator] [--no-stanza]` — one-shot idempotent user setup (operator, bootstrap stanzas appended to `~/.codex/AGENTS.md` and `~/.claude/CLAUDE.md`, completion hint); `doctor` checks the stanzas and names the getting-started step for each WARN/FAIL.
+- Docs: `docs/getting-started.md` (10 steps, both harnesses, uninstall), `docs/operations.md` (effect timing + procedures: switch routing, update, upgrade, archive, second session, re-trust, running `ks` from inside a session); README "Start here"; AGENTS.md § Tools line on `ks`; hooks README; ks.md "Effects and safety". 12 new tests (166 total).
+
 ## [1.5.1] — 2026-09-07
 
 ### Changed

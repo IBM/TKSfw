@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """ks — the TKSfw command line (one front door for every framework operation).
 
-    ks self install | version | home              put ks on PATH; show version / framework home
+    ks self install | setup | version | home      put ks on PATH; one-shot user setup; version / home
     ks operator set <name> | show                 per-user ~/.config/tksfw/user.toml
     ks project init [dir] [--full] | update [dir] | enable | disable | status | drift [--json]
     ks routing show | check | resolve <agent> | use <table> | use --clear
@@ -159,6 +159,43 @@ class Project:
         return os.path.join(self.skills, skill, "assets", name)
 
 
+# ----------------------------------------------------------------------------- effects / safety
+EFFECT = {
+    "spawn": "takes effect at the next subagent spawn (no restart); the model is told at its next prompt",
+    "prompt": "takes effect immediately; the model is told at its next prompt",
+    "session": "takes effect at the next session: restart the harness; Codex → /hooks re-trust, then `ks harness retrust --ack`",
+    "files": "files changed now; the session sees them at its next prompt, STATE.md at its next turn end",
+}
+
+
+def effect(kind):
+    print(f"→ {EFFECT[kind]}")
+
+
+def live_subagents(proj):
+    """Live subagents in this project (all sessions) from .hook-state/subagents.json."""
+    import time
+    p = os.path.join(proj.workarea or "", ".hook-state", "subagents.json")
+    try:
+        live = json.load(open(p)).get("live", {})
+        return [e for e in live.values() if time.time() - float(e.get("ts", 0)) < 4 * 3600]
+    except Exception:
+        return []
+
+
+def refuse_if_busy(proj, what, args, sessions=False):
+    if "--force" in args:
+        return
+    live = live_subagents(proj)
+    if live:
+        die(f"{what}: {len(live)} subagent(s) are running in this project — wait for them to return, or --force")
+    if sessions:
+        act = active_sessions(proj)
+        if act:
+            die(f"{what}: {len(act)} session(s) active on this project (" + ", ".join(a['token'] for a in act)
+                + ") — finish them first, or --force")
+
+
 # ----------------------------------------------------------------------------- commands
 def cmd_self(home, args):
     sub = args[0] if args else "version"
@@ -190,8 +227,53 @@ def cmd_self(home, args):
             print(f"completion: add `source {comp}` to ~/.zshrc or ~/.bashrc")
         if bin_dir not in os.environ.get("PATH", "").split(os.pathsep):
             print(f"note: {bin_dir} is not on PATH")
+    elif sub == "setup":
+        cmd_setup(home, args[1:])
     else:
-        die("usage: ks self install [--bin-dir DIR] | version | home")
+        die("usage: ks self install [--bin-dir DIR] | setup [--operator NAME] [--no-stanza] | version | home")
+
+
+STANZA_MARK = "TKSfw bootstrap stanza"
+
+
+def append_stanza(target, stanza_path):
+    """Append the bootstrap stanza to a user-level instruction file once (idempotent by marker)."""
+    if not os.path.isfile(stanza_path):
+        return "stanza source missing"
+    cur = open(target, encoding="utf-8").read() if os.path.isfile(target) else ""
+    if STANZA_MARK in cur:
+        return "already present"
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    with open(target, "a", encoding="utf-8") as fh:
+        fh.write(("\n" if cur and not cur.endswith("\n") else "") + ("\n" if cur else "") + open(stanza_path, encoding="utf-8").read())
+    return "appended"
+
+
+def cmd_setup(home, args):
+    """One-shot, idempotent user-level setup: operator, bootstrap stanzas, completion hint, doctor."""
+    op = args[args.index("--operator") + 1] if "--operator" in args else None
+    r = run([PY, home.new_project, "--show-operator"], capture=True)
+    if op:
+        run([PY, home.new_project, "--set-operator", op], check=True)
+    elif r.returncode != 0 or "source: git" in r.stdout:
+        if sys.stdin.isatty():
+            name = input("Operator name for ledger entries (OwnerSessionUserName): ").strip()
+            if name:
+                run([PY, home.new_project, "--set-operator", name], check=True)
+        else:
+            print("operator not configured — pass --operator \"<name>\" (non-interactive)")
+    else:
+        print(r.stdout.strip())
+    if "--no-stanza" not in args:
+        boot = os.path.join(home.path, "plugin-src", "tksfw", "bootstrap") if home.kind == "repo" else os.path.join(home.path, "bootstrap")
+        codex_home = os.environ.get("CODEX_HOME") or os.path.join(os.path.expanduser("~"), ".codex")
+        for target, src in ((os.path.join(codex_home, "AGENTS.md"), "AGENTS.global.md"),
+                            (os.path.join(os.path.expanduser("~"), ".claude", "CLAUDE.md"), "CLAUDE.global.md")):
+            print(f"bootstrap stanza → {target}: {append_stanza(target, os.path.join(boot, src))}")
+    comp = os.path.join(os.path.dirname(os.path.realpath(__file__)), "ks-completion.sh")
+    if os.path.isfile(comp):
+        print(f"completion: add `source {comp}` to ~/.zshrc or ~/.bashrc")
+    print("\nnext: install the plugin in each harness if not done (docs/getting-started.md), then `ks doctor`")
 
 
 def cmd_operator(home, args):
@@ -200,7 +282,10 @@ def cmd_operator(home, args):
     if args[0] == "set":
         if len(args) < 2:
             die("usage: ks operator set <name>")
-        sys.exit(run([PY, home.new_project, "--set-operator", " ".join(args[1:])]).returncode)
+        rc = run([PY, home.new_project, "--set-operator", " ".join(a for a in args[1:] if a != "--force")]).returncode
+        if rc == 0:
+            effect("prompt")
+        sys.exit(rc)
     sys.exit(run([PY, home.new_project, "--show-operator"]).returncode)
 
 
@@ -214,8 +299,17 @@ def cmd_project(home, args):
     if sub in ("update", "enable", "disable", "drift"):
         target = next((a for a in rest if not a.startswith("--")), None)
         proj = Project(home, target)
+        if sub == "update":
+            refuse_if_busy(proj, "project update", rest, sessions=True)
         cmd = [PY, home.new_project, proj.root, "--" + sub] + (["--json"] if "--json" in rest else [])
-        sys.exit(run(cmd).returncode)
+        rc = run(cmd).returncode
+        if rc == 0 and sub == "update":
+            effect("session")
+        elif rc == 0 and sub in ("enable", "disable"):
+            effect("prompt" if sub == "enable" else "files")
+            if sub == "disable":
+                print("→ hooks are inert here from now on (the model is not told — it has no hook to tell it); `ks project enable` re-arms")
+        sys.exit(rc)
     if sub == "status":
         proj = Project(home)
         m = proj.manifest
@@ -274,6 +368,7 @@ def cmd_routing(home, args):
             die("usage: ks routing resolve <agent-name>")
         sys.exit(run([PY, rm, "--resolve", args[1]], cwd=proj.root, env=proj.env()).returncode)
     if sub == "use":
+        refuse_if_busy(proj, "routing use", args)
         path = os.path.join(proj.root, ".agents", "models.toml")
         text = open(path, encoding="utf-8").read()
         lines = [l for l in text.splitlines(keepends=True) if not re.match(r'^\s*selected\s*=', l)]
@@ -283,7 +378,7 @@ def cmd_routing(home, args):
         else:
             if len(args) < 2:
                 die("usage: ks routing use <table> | use --clear")
-            table = args[1]
+            table = next(a for a in args[1:] if not a.startswith("--"))
             if not re.search(rf'^\[routing\.{re.escape(table)}\]', text, re.M):
                 die(f"no [routing.{table}] table in {path}")
             ins = f'selected = "{table}"                # pinned by `ks routing use` (`ks routing use --clear` to unpin)\n'
@@ -295,7 +390,10 @@ def cmd_routing(home, args):
                 lines.insert(0, ins)
             open(path, "w", encoding="utf-8").write("".join(lines))
             print(f"routing pinned to [routing.{table}] — log it in changes.yaml (Layer: METHOD)")
-        sys.exit(run([PY, rm, "--check"], cwd=proj.root, env=proj.env()).returncode)
+        rc = run([PY, rm, "--check"], cwd=proj.root, env=proj.env()).returncode
+        if rc == 0:
+            effect("spawn")
+        sys.exit(rc)
     die("usage: ks routing show | check | resolve <agent> | use <table> | use --clear")
 
 
@@ -316,10 +414,13 @@ def cmd_ledger(home, args):
         sys.exit(1 if rc else 0)
     if sub == "find":
         sys.exit(run([PY, a("yaml-log-entry", "find_entry.py"), *args[1:]], cwd=proj.root, env=proj.env()).returncode)
-    if sub == "archive-plan":
-        sys.exit(run([PY, a("yaml-log-entry", "archive_ledger.py"), "plan", *args[1:]], cwd=proj.root, env=proj.env()).returncode)
-    if sub == "archive":
-        sys.exit(run([PY, a("yaml-log-entry", "archive_ledger.py"), *args[1:]], cwd=proj.root, env=proj.env()).returncode)
+    if sub in ("archive-plan", "archive"):
+        extra = ["plan"] if sub == "archive-plan" else []
+        rc = run([PY, a("yaml-log-entry", "archive_ledger.py"), *extra, *args[1:]], cwd=proj.root, env=proj.env()).returncode
+        if rc == 0 and "--dry-run" not in args:
+            effect("files")
+            print("→ log the archive run in changes.yaml (Layer: PROJECT)")
+        sys.exit(rc)
     die("usage: ks ledger check | find <id> [--refs] [--json] | archive-plan [--dry-run] | archive <ledger|all> --before YYYY-MM-DD [--dry-run]")
 
 
@@ -338,7 +439,10 @@ def cmd_harness(home, args):
         sync = os.path.join(proj.hooks, "sync_harness.py")
         if not os.path.isfile(sync):
             die("plugin-mode project: nothing to sync (hooks and skills come from the plugin)")
-        sys.exit(run([PY, sync, *args[1:]], cwd=proj.root, env=proj.env()).returncode)
+        rc = run([PY, sync, *args[1:]], cwd=proj.root, env=proj.env()).returncode
+        if rc == 0 and "--check" not in args:
+            effect("session")
+        sys.exit(rc)
     if sub == "retrust":
         hooks_dir = proj.hooks if proj.root else home.hooks
         cur = hook_hashes(hooks_dir)
@@ -397,7 +501,7 @@ def cmd_doctor(home, args):
     (ok if cfg.get("home") else warn)(f"user.toml home = {cfg.get('home') or 'not recorded — `ks self install`'}")
     r = run([PY, home.new_project, "--show-operator"], capture=True)
     if r.returncode:
-        fail("operator not configured — `ks operator set \"<name>\"`")
+        fail("operator not configured — `ks operator set \"<name>\"` (getting-started step 5)")
     elif "source: git" in r.stdout:
         warn(r.stdout.strip() + " — set the item: `ks operator set`")
     else:
@@ -405,7 +509,7 @@ def cmd_doctor(home, args):
     print("== harnesses (user level)")
     codex_home = os.environ.get("CODEX_HOME") or os.path.join(os.path.expanduser("~"), ".codex")
     mk = os.path.join(os.path.expanduser("~"), ".agents", "plugins", "marketplace.json")
-    (ok if os.path.isfile(mk) else warn)(f"Codex personal marketplace: {mk if os.path.isfile(mk) else 'absent'}")
+    (ok if os.path.isfile(mk) else warn)(f"Codex personal marketplace: {mk if os.path.isfile(mk) else 'absent — `codex plugin marketplace add <home>` (getting-started step 3)'}")
     ccfg = os.path.join(codex_home, "config.toml")
     if os.path.isfile(ccfg):
         t = open(ccfg, encoding="utf-8").read()
@@ -424,7 +528,10 @@ def cmd_doctor(home, args):
         except Exception:
             warn(f"Claude Code settings unreadable: {cl}")
     else:
-        warn("Claude Code user settings not found (~/.claude/settings.json)")
+        warn("Claude Code user settings not found (~/.claude/settings.json) — `claude plugin install tksfw@tksfw --scope user` (getting-started step 3)")
+    for target in (os.path.join(codex_home, "AGENTS.md"), os.path.join(os.path.expanduser("~"), ".claude", "CLAUDE.md")):
+        present = os.path.isfile(target) and STANZA_MARK in open(target, encoding="utf-8", errors="replace").read()
+        (ok if present else warn)(f"bootstrap stanza in {target}: {'present' if present else 'absent — `ks self setup` (getting-started step 4)'}")
     proj = Project(home, required=False)
     if proj.root:
         print(f"== project {proj.root}")
