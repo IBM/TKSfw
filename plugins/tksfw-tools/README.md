@@ -16,4 +16,4 @@ key. The `check_tools.py` SessionStart hook reports what is missing.
 
 Claude Code tool names are scoped: `mcp__plugin_tksfw-tools_perplexity__perplexity_search`.
 
-GENERATED copy — edit `plugin/tksfw-tools/` in the TKSfw repository and rebuild.
+GENERATED copy — edit `plugin-src/tksfw-tools/` in the TKSfw repository and rebuild.

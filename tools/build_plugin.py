@@ -9,15 +9,15 @@ tksfw (method tooling — assembled from the template)
   template/.agents/hooks/hooks.json     plugins/tksfw/hooks/hooks.json    commands rewritten from
                                         `python3 .agents/hooks/X.py` to
                                         `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/X.py"`
-  plugin/tksfw/**                       plugins/tksfw/**                  manifests, README, bootstrap/ stanzas,
+  plugin-src/tksfw/**                    plugins/tksfw/**                  manifests, README, bootstrap/ stanzas,
                                                                            plugin-only skills (tksfw-init), version injected
   tools/ks, tools/ks-completion.sh      plugins/tksfw/bin/                 the ks command line (self-locating)
   template/** + tools/new_project.py    plugins/tksfw/skills/tksfw-init/assets/{template,new_project.py,VERSION}
                                                                            so a project can be instantiated from the
                                                                            installed plugin (skill tests dropped)
 
-tksfw-tools (MCP servers — copied verbatim from plugin/tksfw-tools, version injected)
-  plugin/tksfw-tools/**                 plugins/tksfw-tools/**            manifests, mcp/*.json, hooks/
+tksfw-tools (MCP servers — copied verbatim from plugin-src/tksfw-tools, version injected)
+  plugin-src/tksfw-tools/**              plugins/tksfw-tools/**            manifests, mcp/*.json, hooks/
 
 Why ${CLAUDE_PLUGIN_ROOT} in a shared hooks.json: Claude Code exports it to hook processes, and
 Codex sets both PLUGIN_ROOT and (for compatibility) CLAUDE_PLUGIN_ROOT, so one file serves both.
@@ -45,12 +45,12 @@ import filecmp
 
 REPO = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 TEMPLATE = os.path.join(REPO, "template")
-PLUGIN_SRC = os.path.join(REPO, "plugin", "tksfw")
+PLUGIN_SRC = os.path.join(REPO, "plugin-src", "tksfw")
 PLUGINS_OUT = os.path.join(REPO, "plugins")
 PLUGIN_OUT = os.path.join(PLUGINS_OUT, "tksfw")
 DIST = os.path.join(REPO, "dist")
 NAME = "tksfw"
-STATIC_PLUGINS = ("tksfw-tools",)          # copied verbatim from plugin/<name>, version injected
+STATIC_PLUGINS = ("tksfw-tools",)          # copied verbatim from plugin-src/<name>, version injected
 IGNORE = shutil.ignore_patterns("__pycache__", ".DS_Store", "._*", ".mirror.json", "*.pyc")
 SKILL_DROP_DIRS = {"tests"}
 HOOK_DROP_FILES = {"sync_harness.py"}
@@ -135,7 +135,7 @@ def write_manifests(out, ver, src=PLUGIN_SRC, name=NAME):
 def build_static(name, out, ver):
     """plugin/<name> → plugins/<name>: verbatim copy, version injected, manifests validated,
     every hook script referenced by hooks/hooks.json present, mcp JSON parseable."""
-    src = os.path.join(REPO, "plugin", name)
+    src = os.path.join(REPO, "plugin-src", name)
     if os.path.exists(out):
         shutil.rmtree(out)
     shutil.copytree(src, out, ignore=IGNORE)
@@ -170,7 +170,7 @@ def copy_cli(out):
 
 
 def copy_plugin_extras(out, ver):
-    """Plugin-only content from plugin/tksfw: skills/ (e.g. tksfw-init), bootstrap/ stanzas.
+    """Plugin-only content from plugin-src/tksfw: skills/ (e.g. tksfw-init), bootstrap/ stanzas.
     tksfw-init gets the template + installer as assets so projects can be created from the plugin."""
     for sub in ("skills", "bootstrap"):
         src = os.path.join(PLUGIN_SRC, sub)

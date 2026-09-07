@@ -2,6 +2,11 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [1.5.1] — 2026-09-07
+
+### Changed
+- `plugin/` renamed to `plugin-src/` (hand-maintained plugin sources) to stop the one-letter confusion with the generated `plugins/`; `plugins/README.md` added ("GENERATED — do not edit here", with the source → output table); `build_plugin.py`, README, `docs/distribution.md` updated. No functional change.
+
 ## [1.5.0] — 2026-09-07
 
 `ks` command line (P0) and cumulative ledger archives.
