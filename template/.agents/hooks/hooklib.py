@@ -366,10 +366,16 @@ def config_view(payload):
     """The configuration the model was told about (or should be): routing table, pin, armed flag,
     operator, models.toml hash. Compared at every prompt against the session record → change notice."""
     view = {"enabled": armed()[0], "operator": operator() or "", "models_hash": None,
-            "routing": None, "routing_how": None, "selected": None}
+            "routing": None, "routing_how": None, "selected": None, "hil": None}
     try:
         if os.path.isfile(MODELS_TOML):
             view["models_hash"] = sha256_file(MODELS_TOML)
+            try:
+                sys.path.insert(0, VALIDATOR_DIR)
+                import validate_yaml_log as V
+                view["hil"] = V.hil_describe(V.hil_policy(os.path.join(WORKAREA, "decisions.yaml")))
+            except Exception as e:
+                log(f"config_view: hil: {e}")
             import route_model as RM
             table = RM.load_table()
             if table:
@@ -394,7 +400,9 @@ def config_changes(payload, update=True):
             lines.append(f"Model routing now [routing.{now['routing']}] via {now['routing_how']}"
                          + (f" (pinned: selected = \"{now['selected']}\")" if now.get("selected") else "")
                          + f" — was [routing.{old.get('routing')}]. Applies to the next spawn; record the model the hook reports.")
-        elif now["models_hash"] != old.get("models_hash"):
+        if now.get("hil") != old.get("hil") and old.get("hil") is not None:
+            lines.append(f"HIL threshold now {now['hil']} — was {old.get('hil')}. Applies to the next decision entry; pending decisions are re-marked in STATE.md.")
+        elif now["models_hash"] != old.get("models_hash") and now["routing"] == old.get("routing") and now["selected"] == old.get("selected"):
             lines.append("`.agents/models.toml` changed (tiers/roles/limits) — applies to the next spawn.")
         if now["operator"] != old.get("operator"):
             lines.append(f"Operator now `{now['operator'] or 'UNKNOWN'}` (was `{old.get('operator') or 'UNKNOWN'}`) — use it as OwnerSessionUserName from here on.")

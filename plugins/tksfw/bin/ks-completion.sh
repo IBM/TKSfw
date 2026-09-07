@@ -6,13 +6,14 @@ _ks_complete() {
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
   if [ "$COMP_CWORD" -eq 1 ]; then
-    words="self operator project routing ledger harness doctor dev help version"
+    words="self operator project routing hil ledger harness doctor dev help version"
   else
     case "${COMP_WORDS[1]}" in
       self)     words="install version home" ;;
       operator) words="set show" ;;
       project)  words="init update enable disable status drift reset --full --json --archive --label --keep-agents --registry --dry-run --yes --force" ;;
       routing)  words="show check resolve use --clear" ;;
+      hil)      words="show set --impact --reversibility --logic --mode" ;;
       ledger)   words="check find digest export archive-plan archive --refs --json --prefix --task --agent --before --dry-run --out --archive --session --csv changes lessons events handoffs decisions deliverables tasks all" ;;
       harness)  words="sync retrust --check --ack" ;;
       dev)      words="build test release" ;;

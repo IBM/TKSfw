@@ -35,6 +35,11 @@ twice). `inject_state.py` warns when the project manifest and the installed plug
 - **ID index** (`ids.json`): project-wide `{file: {hash, ids→owner}}` for ledgers and plans, refreshed whenever a file's hash differs from the last indexed one — independent of any session's diff, so an A-B-A rewrite that restores a byte-identical older file is still caught. `track_edits.py` blocks (exit 2, "LOST UPDATE") when an EntryID disappears from an append-only ledger, an entry owned by another session disappears from `decisions.yaml`/`deliverables.yaml`, or a TaskID leaves `tasks.md` without appearing in `tasks-archive.md`. New entries must carry `OwnerSessionId`/`OwnerSessionUserName` (validator `--require-owner`).
 - Limits: the write has happened when PostToolUse runs — the block names what to restore, it cannot roll back. Shell edits under concurrency stay `ambiguous`. Sessions without the plugin are unattributed.
 
+## Human in the Loop (2.1.0)
+
+- `track_edits.py` passes `--hil-ids <new decision IDs>` to the validator: a new decision at or above the `[hil]` threshold (default `Impact ≥ HIGH` and `Reversibility ≥ HARD`) is rejected (exit 2) when `ConfirmationType ≠ OPERATOR`, or when a non-`main` author sets `Status ≠ OPEN`; `mode = "advisory"` warns instead. Existing entries only warn in `ks ledger check`.
+- The configuration view includes the threshold; the prompt notice reports "HIL threshold now … — was …" after `ks hil set`.
+
 ## Ledgers as context (2.0.0)
 
 - `refresh_state.py` embeds the ledger digest (`digest.py`) in STATE.md: blocked gates, decisions in force, pending decisions, open issues, work in flight, recent lessons and changes — within `[state].budget_chars`; the whole SessionStart injection stays under the harnesses' 10,000-character hook-output cap.

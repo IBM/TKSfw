@@ -125,6 +125,66 @@ CHANGE_LAYER = {"METHOD", "ARCHETYPE", "PROJECT"}
 DECISION_IMPACT = {"VERY LOW", "LOW", "MEDIUM", "HIGH", "VERY HIGH"}
 DECISION_REVERSIBILITY = {"TRIVIAL", "EASY", "MEDIUM", "HARD", "VERY HARD"}
 DECISION_CONFIRMATION = {"OPERATOR", "AUTO-MODE"}
+IMPACT_ORDER = ["VERY LOW", "LOW", "MEDIUM", "HIGH", "VERY HIGH"]
+REVERSIBILITY_ORDER = ["TRIVIAL", "EASY", "MEDIUM", "HARD", "VERY HARD"]
+HIL_DEFAULT = {"impact": "HIGH", "reversibility": "HARD", "logic": "and", "mode": "enforce"}
+
+
+def hil_policy(ledger_path=None):
+    """[hil] from .agents/models.toml next to the workarea (2.1.0): the Human-in-the-Loop threshold.
+    Defaults: Impact >= HIGH AND Reversibility >= HARD, enforce. Bad values fall back per key."""
+    pol = dict(HIL_DEFAULT)
+    cands = []
+    if ledger_path:
+        cands.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(ledger_path))), "models.toml"))
+    root = os.environ.get("TKSFW_PROJECT_ROOT")
+    if root:
+        cands.append(os.path.join(root, ".agents", "models.toml"))
+    for mp in cands:
+        if os.path.isfile(mp):
+            try:
+                import tomllib
+                with open(mp, "rb") as fh:
+                    t = tomllib.load(fh).get("hil") or {}
+                if str(t.get("impact", "")).upper() in IMPACT_ORDER:
+                    pol["impact"] = str(t["impact"]).upper()
+                if str(t.get("reversibility", "")).upper() in REVERSIBILITY_ORDER:
+                    pol["reversibility"] = str(t["reversibility"]).upper()
+                if str(t.get("logic", "")).lower() in ("and", "or"):
+                    pol["logic"] = str(t["logic"]).lower()
+                if str(t.get("mode", "")).lower() in ("enforce", "advisory"):
+                    pol["mode"] = str(t["mode"]).lower()
+            except Exception:
+                pass
+            break
+    return pol
+
+
+def hil_required(fields, pol):
+    """True when a decision is at or above the HIL threshold (operator confirmation required)."""
+    try:
+        hi = IMPACT_ORDER.index(str(fields.get("Impact"))) >= IMPACT_ORDER.index(pol["impact"])
+        hr = REVERSIBILITY_ORDER.index(str(fields.get("Reversibility"))) >= REVERSIBILITY_ORDER.index(pol["reversibility"])
+    except ValueError:
+        return False
+    return (hi and hr) if pol["logic"] == "and" else (hi or hr)
+
+
+def hil_describe(pol):
+    return f"Impact >= {pol['impact']} {pol['logic'].upper()} Reversibility >= {pol['reversibility']} ({pol['mode']})"
+
+
+def hil_problems(fields, pol):
+    """Violations of the HIL rule for one decision entry (AGENTS.md § Human in the Loop)."""
+    out = []
+    if not hil_required(fields, pol):
+        return out
+    thr = hil_describe(pol)
+    if str(fields.get("ConfirmationType")) != "OPERATOR":
+        out.append(f"HIL: Impact {fields.get('Impact')} / Reversibility {fields.get('Reversibility')} is at or above the threshold [{thr}] — ConfirmationType must be OPERATOR (ask the operator before it takes effect)")
+    if str(fields.get("AuthorAgent", "main")) != "main" and str(fields.get("Status")) != "OPEN":
+        out.append(f"HIL: above-threshold decision authored by `{fields.get('AuthorAgent')}` must stay OPEN — escalate; `main` asks the operator and logs the ACCEPTED transition (DECISION event)")
+    return out
 DECISION_STATUS = {"OPEN", "ACCEPTED", "SUPERSEDED", "DEPRECATED"}
 RELATED_SUBKEYS = {"Tasks", "Decisions", "Changes", "Lessons", "Events"}
 
@@ -328,8 +388,12 @@ def load_entries(path):
 
 
 # --------------------------------------------------------------------- validation
-def validate(path, kind, require_owner=()):
+def validate(path, kind, require_owner=(), hil_ids=None):
+    """`hil_ids`: decision IDs subject to the HIL rule as hard failures (new entries in a hook write);
+    None → the rule is reported for every decision as warnings (see main). `advisory` mode never fails."""
     problems = []
+    warnings = []
+    pol = hil_policy(path) if kind == "decisions" else None
     try:
         entries, engine = load_entries(path)
     except ParseError as e:
@@ -362,6 +426,11 @@ def validate(path, kind, require_owner=()):
 
         if "OwnerSessionId" in fields and not re.fullmatch(BASE62, str(fields["OwnerSessionId"])):
             problems.append(f"{tag}: bad OwnerSessionId {fields['OwnerSessionId']!r} (base62, 8 chars — the session token)")
+        if pol:
+            hp = [f"{tag}: {m}" for m in hil_problems(fields, pol)]
+            if hp:
+                hard = hil_ids is not None and eid in hil_ids and pol["mode"] == "enforce"
+                (problems if hard else warnings).extend(hp)
         if "OwnerSessionUserName" in fields and not str(fields["OwnerSessionUserName"]).strip():
             problems.append(f"{tag}: empty OwnerSessionUserName")
         if "Timestamp" in fields and not TS.fullmatch(str(fields["Timestamp"])):
@@ -383,6 +452,7 @@ def validate(path, kind, require_owner=()):
     for eid, positions in seen_ids.items():
         if len(positions) > 1 and not (kind == "handoffs"):
             problems.append(f"duplicate ID {eid} in entries {positions}")
+    validate.warnings = warnings
     return problems, engine
 
 
@@ -522,8 +592,14 @@ def main():
         val = argv[i + 1] if i + 1 < len(argv) else "all"
         require_owner = "all" if val == "all" else set(x for x in val.split(",") if x)
         del argv[i:i + 2]
+    hil_ids = None
+    if "--hil-ids" in argv:
+        i = argv.index("--hil-ids")
+        val = argv[i + 1] if i + 1 < len(argv) else ""
+        hil_ids = set(x for x in val.split(",") if x)
+        del argv[i:i + 2]
     if not argv:
-        print("usage: validate_yaml_log.py <file> [changes|lessons|handoffs|events|deliverables|decisions] [--require-owner all|ID,ID]")
+        print("usage: validate_yaml_log.py <file> [changes|lessons|handoffs|events|deliverables|decisions] [--require-owner all|ID,ID] [--hil-ids ID,ID]")
         sys.exit(2)
     path = argv[0]
     kind = argv[1] if len(argv) > 1 else infer_kind(path)
@@ -535,7 +611,9 @@ def main():
         print(f"FAIL: {path} not found")
         sys.exit(1)
 
-    problems, engine = validate(path, kind, require_owner)
+    problems, engine = validate(path, kind, require_owner, hil_ids)
+    for w in getattr(validate, "warnings", []):
+        print(f"WARN ({path}): {w}")
     if problems:
         print(f"FAIL ({path}, kind='{kind}', parser={engine}):")
         for p in problems:

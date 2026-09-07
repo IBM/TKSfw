@@ -2,6 +2,16 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [2.1.0] — 2026-09-07
+
+### Added
+- AGENTS.md § Human in the Loop: decisions at or above the HIL threshold are confirmed by the operator before taking effect (`ConfirmationType: OPERATOR`); Workers never accept them (leave `OPEN`, `main` asks and logs the transition). Default threshold `Impact ≥ HIGH` **and** `Reversibility ≥ HARD`.
+- `[hil]` in `models.toml` (`impact`, `reversibility`, `logic`, `mode`); validator `hil_policy/hil_required/hil_problems`, `--hil-ids` (hard failure for new entries in `enforce` mode, WARN otherwise); the PostToolUse hook passes the new decision IDs.
+- `ks hil show | set [--impact L] [--reversibility L] [--logic and|or] [--mode enforce|advisory]` — live, validated, with effect line; prompt notice "HIL threshold now … — was …"; `ks doctor` line; digest marks pending HIL decisions "NEEDS OPERATOR CONFIRMATION (HIL)". ADR 0012. 14 new tests (213 total).
+
+### Changed
+- AGENTS.md § Task Management 7: the confirmation policy line (previously `HIGH` **or** `HARD`, SHOULD) is now a pointer to § Human in the Loop. 18,959 B.
+
 ## [2.0.0] — 2026-09-07
 
 Ledgers as context. Major version: the 2.x line consolidates the project-format changes accumulated since 1.0 (see "Upgrading from 1.x").

@@ -59,6 +59,10 @@
      in STATE.md within budget; task view with evidence chain; SubagentStart briefing with the open
      handoff, global in-force decisions and lessons; prompt notice for new issues and failed gates;
      ks ledger digest; AGENTS.md consult rule; [state] limits honoured
+ 22. Human in the Loop (2.1.0): default threshold HIGH and HARD; hook rejects a new above-threshold
+     AUTO-MODE decision and a Worker-accepted one; compliant OPEN/OPERATOR passes; legacy entries warn
+     only; advisory mode warns; ks hil show/set (validation, effect line, live prompt notice); digest
+     marks pending HIL decisions; doctor line; AGENTS.md section
 """
 import sys
 sys.dont_write_bytecode = True
@@ -1007,6 +1011,72 @@ def main():
         check("[state] limits honoured (issues = 1 → '… 1 more')", "… 1 more" in r.stdout.split("Open issues")[1].split("###")[0], r.stdout)
         agents_md = open(os.path.join(REPO, "template", "AGENTS.md"), encoding="utf-8").read()
         check("AGENTS.md carries the consult-before-deciding rule", "Consult before deciding" in agents_md and "SUPERSEDED" in agents_md)
+
+        # 22 — Human in the Loop
+        hp = os.path.join(tmp, "hilp")
+        run([PY, ks, "project", "init", hp], cwd=tmp, env=kenv)
+        hwa = os.path.join(hp, ".agents", "workarea")
+        run([PY, os.path.join(plug, "hooks", "inject_state.py")], cwd=hp, env=kenv, inp=json.dumps({"session_id": "SH", "turn_id": "h1", "source": "startup", "cwd": hp}))
+        tH = next(json.load(open(os.path.join(hwa, ".hook-state", "sessions", f)))["token"] for f in os.listdir(os.path.join(hwa, ".hook-state", "sessions")))
+        ownH = f"    OwnerSessionId: {tH}\n    OwnerSessionUserName: carlos\n"
+        def dech(i, title, status, imp, rev, conf, author="main"):
+            return (good_dec.replace("Tstdec01", i).replace('"Fixture decision (valid)"', f'"{title}"').replace("Status: ACCEPTED", f"Status: {status}")
+                    .replace("Impact: LOW", f"Impact: {imp}").replace("Reversibility: EASY", f"Reversibility: {rev}").replace("ConfirmationType: AUTO-MODE", f"ConfirmationType: {conf}")
+                    .replace("AuthorAgent: main", f"AuthorAgent: {author}").replace('    LastUpdate: "2026-07-21 10:00:00"\n', '    LastUpdate: "2026-09-07 09:00:00"\n' + ownH))
+        hshard = os.path.join(hwa, f"decisions.{tH}.yaml")
+        def hook_write(content, ids):
+            open(hshard, "w").write(content)
+            return run([PY, os.path.join(plug, "hooks", "track_edits.py")], cwd=hp, env=kenv,
+                       inp=json.dumps({"session_id": "SH", "turn_id": "h2", "hook_event_name": "PostToolUse", "tool_name": "Write", "cwd": hp,
+                                       "tool_input": {"file_path": hshard, "content": content}}))
+        r = run([PY, ks, "hil", "show"], cwd=hp, env=kenv)
+        check("ks hil show: default HIGH and HARD, enforce", "Impact >= HIGH AND Reversibility >= HARD (enforce)" in r.stdout, r.stdout)
+        e101_bad = dech("Dcsn0101", "ZFS everywhere", "OPEN", "VERY HIGH", "VERY HARD", "AUTO-MODE")
+        e101 = dech("Dcsn0101", "ZFS everywhere", "OPEN", "VERY HIGH", "VERY HARD", "OPERATOR")
+        e102_bad = dech("Dcsn0102", "Worker accepted", "ACCEPTED", "HIGH", "HARD", "OPERATOR", "x-builder")
+        e102 = dech("Dcsn0102", "Worker accepted", "OPEN", "HIGH", "HARD", "OPERATOR", "x-builder")
+        e103 = dech("Dcsn0103", "Escalated", "OPEN", "HIGH", "HARD", "OPERATOR", "x-builder")
+        e104 = dech("Dcsn0104", "Small call", "ACCEPTED", "HIGH", "EASY", "AUTO-MODE")
+        r = hook_write(e101_bad, ["Dcsn0101"])
+        check("hook rejects a new above-threshold AUTO-MODE decision", r.returncode == 2 and "ConfirmationType must be OPERATOR" in r.stderr, r.stderr[:300])
+        r = hook_write(e101 + e102_bad, ["Dcsn0102"])
+        check("hook rejects an above-threshold decision accepted by a Worker (fixed entry in place passes)", r.returncode == 2 and "must stay OPEN" in r.stderr and "Dcsn0101" not in r.stderr, r.stderr[:300])
+        r = hook_write(e101 + e102 + e103 + e104, ["Dcsn0103", "Dcsn0104"])
+        check("compliant entries pass: Worker OPEN/OPERATOR above threshold; HIGH/EASY AUTO-MODE below (AND logic)", r.returncode == 0, r.stderr[:300])
+        base = e101 + e102 + e103 + e104
+        # legacy (not new) entries only warn
+        base += dech("Dcsn0105", "Old big call", "ACCEPTED", "VERY HIGH", "VERY HARD", "AUTO-MODE")
+        open(hshard, "w").write(base)
+        r = run([PY, os.path.join(plug, "skills", "yaml-log-entry", "assets", "validate_yaml_log.py"), hshard], cwd=hp, env=kenv)
+        check("validator without --hil-ids: existing entries warn, file still OK", r.returncode == 0 and "WARN" in r.stdout and "Dcsn0105" in r.stdout, r.stdout[:300])
+        # advisory mode + OR logic via ks hil set; prompt notice reports the change
+        run([PY, os.path.join(plug, "hooks", "track_edits.py"), "--phase", "prompt"], cwd=hp, env=kenv, inp=json.dumps({"session_id": "SH", "turn_id": "h3", "cwd": hp, "prompt": "x"}))
+        r = run([PY, ks, "hil", "set", "--mode", "advisory", "--logic", "or", "--impact", "medium"], cwd=hp, env=kenv)
+        check("ks hil set validates, rewrites [hil] and prints the effect line", r.returncode == 0 and "Impact >= MEDIUM OR Reversibility >= HARD (advisory)" in r.stdout and "→ applies to the next decision entry" in r.stdout, r.stdout)
+        import tomllib as _tl
+        hil_tbl = _tl.load(open(os.path.join(hp, ".agents", "models.toml"), "rb"))["hil"]
+        check("[hil] table rewritten in place and models.toml still parses", hil_tbl == {"impact": "MEDIUM", "reversibility": "HARD", "logic": "or", "mode": "advisory"}, str(hil_tbl))
+        r = run([PY, ks, "hil", "set", "--impact", "bogus"], cwd=hp, env=kenv)
+        check("ks hil set rejects a bad level", r.returncode != 0 and "not in" in r.stderr + r.stdout, r.stderr)
+        r = run([PY, os.path.join(plug, "hooks", "track_edits.py"), "--phase", "prompt"], cwd=hp, env=kenv, inp=json.dumps({"session_id": "SH", "turn_id": "h4", "cwd": hp, "prompt": "x"}))
+        check("prompt notice announces the HIL change", "HIL threshold now Impact >= MEDIUM OR Reversibility >= HARD (advisory)" in r.stdout and "was Impact >= HIGH AND" in r.stdout, r.stdout[:400])
+        base += dech("Dcsn0106", "Medium call", "ACCEPTED", "MEDIUM", "EASY", "AUTO-MODE")
+        r = hook_write(base, ["Dcsn0106"])
+        check("advisory mode: above-threshold (OR, MEDIUM) AUTO-MODE decision is warned, not rejected", r.returncode == 0, r.stderr[:300])
+        r = run([PY, ks, "hil", "set", "--mode", "enforce"], cwd=hp, env=kenv)
+        base += dech("Dcsn0107", "Medium call 2", "ACCEPTED", "MEDIUM", "EASY", "AUTO-MODE")
+        r = hook_write(base, ["Dcsn0107"])
+        check("back to enforce with OR/MEDIUM: rejected", r.returncode == 2, r.stderr[:200])
+        base += dech("Dcsn0108", "Needs the operator", "OPEN", "VERY HIGH", "VERY HARD", "OPERATOR") + dech("Dcsn0109", "Fine", "OPEN", "LOW", "EASY", "AUTO-MODE")
+        open(hshard, "w").write(base)
+        r = run([PY, ks, "ledger", "digest"], cwd=hp, env=kenv)
+        pend = r.stdout.split("Pending decisions")[1].split("###")[0]
+        check("digest marks the pending HIL decision and not the small one", "Dcsn0108" in pend and "NEEDS OPERATOR CONFIRMATION (HIL)" in pend.split("Dcsn0108")[1].split("\n")[0] and "NEEDS OPERATOR" not in pend.split("Dcsn0109")[1].split("\n")[0], pend)
+        r = run([PY, ks, "doctor"], cwd=hp, env=kenv)
+        check("ks doctor shows the HIL threshold", "HIL threshold: Impact >= MEDIUM OR Reversibility >= HARD (enforce)" in r.stdout, r.stdout[-600:])
+        agents_md = open(os.path.join(REPO, "template", "AGENTS.md"), encoding="utf-8").read()
+        check("AGENTS.md has the Human in the Loop section with the default and the Worker rule",
+              "### Human in the Loop" in agents_md and "`Impact ≥ HIGH` **and** `Reversibility ≥ HARD`" in agents_md and "Workers never accept" in agents_md and "§ Human in the Loop" in agents_md)
 
         agents_md = open(os.path.join(full, "AGENTS.md"), encoding="utf-8").read()
         check("AGENTS.md keeps the naming kernel and points to define-agent",

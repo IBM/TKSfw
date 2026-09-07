@@ -31,6 +31,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from validate_yaml_log import load_entries   # noqa: E402
 from tasks_parse import parse_tasks          # noqa: E402
+from validate_yaml_log import hil_policy, hil_required, hil_describe   # noqa: E402
 
 SHARD_RE = re.compile(r"^(changes|lessons|handoffs|events|decisions)\.([0-9A-Za-z]{8})\.yaml$")
 NEGATIVE = {("REVIEW", "FAIL"), ("TEST", "KO"), ("AUDIT", "NON-CONFORMANT"), ("APPROVAL", "NO-GO")}
@@ -149,12 +150,16 @@ def build(wa, task=None, agent=None, archive_evidence=True):
         return (not task) or task in [str(x) for x in tasks] or mentions(f)
 
     briefing = bool(agent)
+    pol = hil_policy(os.path.join(wa, "decisions.yaml"))
+    d["hil"] = hil_describe(pol)
     for i, f in sorted(dec, key=lambda x: ts_of(x[1]), reverse=True):
         if not dec_related(f) and not (briefing and eff.get(i) == "ACCEPTED"):
             continue                                        # in-force decisions are global constraints for a Worker
         item = {"id": i, "title": str(f.get("Title", "")), "impact": str(f.get("Impact", "")),
                 "rev": str(f.get("Reversibility", "")), "scope": first_line(f.get("Scope"), 70), "status": eff.get(i, "")}
-        item["line"] = f"{i} “{item['title']}” · {item['impact']}/{item['rev']}" + (f" · {item['scope']}" if item["scope"] else "")
+        item["hil"] = hil_required(f, pol)
+        item["line"] = f"{i} “{item['title']}” · {item['impact']}/{item['rev']}" + (f" · {item['scope']}" if item["scope"] else "") \
+            + (" · NEEDS OPERATOR CONFIRMATION (HIL)" if item["hil"] and eff.get(i) == "OPEN" else "")
         if eff.get(i) == "ACCEPTED":
             d["in_force"].append(item)
         elif eff.get(i) == "OPEN":
@@ -218,7 +223,7 @@ def build(wa, task=None, agent=None, archive_evidence=True):
 SECTIONS = [  # (key, heading, limit key)
     ("blocked", "Blocked gates (latest gate negative, no later positive)", "blocked"),
     ("in_force", "Decisions in force (ACCEPTED — respect them; contradicting one requires a SUPERSEDED transition first)", "decisions"),
-    ("pending", "Pending decisions (OPEN — need judgement)", "decisions"),
+    ("pending", "Pending decisions (OPEN — need judgement; HIL-marked ones only the operator may accept)", "decisions"),
     ("issues", "Open issues", "issues"),
     ("in_flight", "Work in flight (handoff BEGIN without END)", "handoffs"),
     ("lessons", "Recent lessons", "lessons"),

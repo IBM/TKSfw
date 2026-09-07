@@ -46,6 +46,8 @@ def validate(rel_paths, added=None):
         ids = sorted((added or {}).get(rel) or [])
         if ids:
             cmd += ["--require-owner", ",".join(ids)]
+            if os.path.basename(rel).startswith("decisions"):
+                cmd += ["--hil-ids", ",".join(ids)]        # 2.1.0: HIL rule enforced on new decisions
         try:
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         except Exception as e:                         # never wedge on a tooling error

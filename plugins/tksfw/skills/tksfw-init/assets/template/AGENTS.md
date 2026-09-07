@@ -88,8 +88,13 @@
 6. **Capture Lessons**: Update `lessons.yaml` after corrections
 7. **Record Decisions**: Log a `decisions.yaml` entry whenever you make a non-trivial, hard-to-reverse, or architecture-shaping choice — anything a reviewer would later ask "why was it done this way?" about.
 	- This is a semantic trigger (like lessons): no hook can detect a missing decision, so it is on you to record it when the choice is made, not reconstruct it later.
-	- Policy: a decision with `Impact` ≥ HIGH **or** `Reversibility` ≥ HARD SHOULD be `OPERATOR`-confirmed (`ConfirmationType: OPERATOR`); lower-stakes calls delegated to an agent or the main session are `AUTO-MODE`.
-8. **Consult before deciding**: STATE.md carries a ledger digest (decisions in force, pending decisions, open issues, blocked gates, work in flight, recent lessons/changes) — read it before planning a phase or recording a decision; `ks ledger digest --task <TaskID>` before working a task. Never contradict an ACCEPTED decision silently: log a `DECISION` event (`DecisionID`, `Status: SUPERSEDED`) first. Subagents get the digest for their handoff at start; a handoff BEGIN lists the decision and lesson IDs the Worker must respect in `Inputs`.
+	- Confirmation: see § Human in the Loop.
+8. **Consult before deciding**: read STATE.md's ledger digest (decisions in force, pending decisions, open issues, blocked gates, work in flight, recent lessons) before planning a phase or recording a decision; `ks ledger digest --task <TaskID>` before working a task. Never contradict an ACCEPTED decision silently: log a `DECISION` event (`Status: SUPERSEDED`) first. A handoff BEGIN lists the decision/lesson IDs the Worker must respect in `Inputs`.
+
+### Human in the Loop
+- A decision at or above the **HIL threshold** is confirmed by the operator **before it takes effect** (ask, then `ConfirmationType: OPERATOR`); below it `AUTO-MODE` is allowed and still logged.
+- Threshold = configuration: `[hil]` in `.agents/models.toml`, default `Impact ≥ HIGH` **and** `Reversibility ≥ HARD`, `mode = enforce` (a non-compliant new entry is rejected). `ks hil set …` changes it live.
+- Workers never accept above-threshold decisions: leave `Status: OPEN` and return; `main` asks the operator and logs the `ACCEPTED` transition. STATE.md marks them "NEEDS OPERATOR CONFIRMATION".
 
 ### Tools
 
@@ -122,8 +127,8 @@
 
 #### State Snapshot (Resume Entrypoint)
 
-- File: `.agents/workarea/STATE.md` — a compact, **generated** projection of current state (active block, next action, the ledger digest — decisions in force, pending decisions, open issues, blocked gates, work in flight, recent lessons/changes —, deliverables built vs pending, last recorded activity, and pointers). **Read it first** on resume or after a compaction.
-- It is **generated, not hand-edited** (do not author content into it): `.agents/hooks/refresh_state.py` rebuilds it at every turn-end (`Stop` hook) and `inject_state.py` injects it into context on every session start, resume and compaction (`SessionStart` hook) from `tasks.md` + the `.agents/workarea/` ledgers + the deliverables registry. It is a **view, not a Source of Truth** — it copies no rule content, so it cannot drift; the listed files remain authoritative.
+- File: `.agents/workarea/STATE.md` — a compact, **generated** projection of current state (active block, next action, the ledger digest, deliverables built vs pending, last activity, pointers). **Read it first** on resume or after a compaction.
+- It is **generated, not hand-edited** (do not author content into it): `.agents/hooks/refresh_state.py` rebuilds it at every turn-end (`Stop` hook) and `inject_state.py` injects it into context on every session start, resume and compaction (`SessionStart` hook) from `tasks.md` + the `.agents/workarea/` ledgers + the deliverables registry. It is a **view, not a Source of Truth**; the listed files remain authoritative.
 - `STATE.md` and `tasks-archive.md` are internal working files, **not deliverables** (do not register them). Its fidelity tracks `tasks.md`: keep the plan's statuses current and the snapshot is correct.
 
 #### YAML-based Logs
@@ -142,7 +147,7 @@
 
 - `Layer` (Change Log) reuses the L1–L4 / Group A–B taxonomy, so classification is mechanical: `METHOD` = `AGENTS.md`, Group-A skills, `.agents/hooks/**`, harness config (`.codex/config.toml`, `.claude/settings.json`) — reusable across all projects · `ARCHETYPE` = the archetype spec, Group-B skills, reusable scaffolding — reusable across instances of this archetype · `PROJECT` = the project spec, the deliverables, instance-specific data — this instance only.
 - Enforcement is harness-level, not memory: a `PostToolUse` hook detects writes to the ledgers by content hashing (any tool, shell or script) and blocks a malformed entry, feeding back the validator's report; a `Stop` hook advises when a deliverable/framework edit or a delegation looks un-logged (from the hash journal, never the transcript).
-- **Partitioning and ownership:** each session writes only its own ledger shards `.agents/workarea/<ledger>.<session-token>.yaml` (changes, lessons, handoffs, events, decisions — the token is shown at session start); every other shard and the unsuffixed legacy files are read-only, and the hook rejects writes to them. Every new entry carries `OwnerSessionId` and `OwnerSessionUserName` (`new_entry_id.py --stamp` prints both and the target file). Readers (STATE.md, checks, `find`) merge all shards; decisions are append-only — a status change is an `events` entry of `EventType: DECISION` with `DecisionID`. Parallel sessions on one project are tolerated and guarded, not a design target.
+- **Partitioning and ownership:** each session writes only its own ledger shards `.agents/workarea/<ledger>.<session-token>.yaml` (changes, lessons, handoffs, events, decisions — the token is shown at session start); every other shard and the unsuffixed legacy files are read-only, and the hook rejects writes to them. Every new entry carries `OwnerSessionId` and `OwnerSessionUserName` (`new_entry_id.py --stamp` prints both and the target file). Readers (STATE.md, checks, `find`) merge all shards; decisions are append-only — a status change is an `events` entry of `EventType: DECISION` with `DecisionID`.
 
 #### Deliverables Registry
 

@@ -98,7 +98,7 @@ validator **and** add a fixture under `tests/fixtures/` (see `SKILL.md § Tests`
 		- Implications: Memo-like field
 		- Alternatives: Memo-like field
 		- Remarks: Memo-like field
-		- ConfirmationType: < OPERATOR | AUTO-MODE >
+		- ConfirmationType (HIL: at/above the `[hil]` threshold — default Impact ≥ HIGH and Reversibility ≥ HARD — it must be `OPERATOR`, and a non-`main` author must leave `Status: OPEN`; the hook rejects new entries otherwise): < OPERATOR | AUTO-MODE >
 		- Status: < OPEN | ACCEPTED | SUPERSEDED | DEPRECATED >
 		- RelatedTo: OPTIONAL mapping of cross-references — omit the whole field for a decision that stands alone (do not fabricate a link). When present, each sub-key below is itself optional and MUST be a **block list** of IDs (never flow style `[a, b]`); omit a sub-key entirely when there is nothing to relate — do not write an empty list.
 			- Tasks: block list of `tasks.md` TaskIDs

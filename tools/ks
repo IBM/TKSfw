@@ -6,6 +6,7 @@
     ks project init [dir] [--full] | update [dir] | enable | disable | status | drift [--json]
     ks project reset [--archive [--label L]] [--keep-agents] [--registry] [--dry-run] [--yes] [--force]
     ks routing show | check | resolve <agent> | use <table> | use --clear
+    ks hil show | set [--impact L] [--reversibility L] [--logic and|or] [--mode enforce|advisory]
     ks ledger check | find <id> [--refs] [--json] | digest [--task T] [--agent A] [--json]
               | export all|<kinds> [--out F] [--archive] [--csv DIR]
               | archive-plan [--dry-run] | archive <ledger|all> --before YYYY-MM-DD [--dry-run]
@@ -167,6 +168,7 @@ EFFECT = {
     "prompt": "takes effect immediately; the model is told at its next prompt",
     "session": "takes effect at the next session: restart the harness; Codex → /hooks re-trust, then `ks harness retrust --ack`",
     "files": "files changed now; the session sees them at its next prompt, STATE.md at its next turn end",
+    "decision": "applies to the next decision entry (no restart); the model is told at its next prompt; STATE.md re-marks pending decisions at its next turn end",
 }
 
 
@@ -537,6 +539,67 @@ def cmd_routing(home, args):
     die("usage: ks routing show | check | resolve <agent> | use <table> | use --clear")
 
 
+HIL_KEYS = {"impact": ["VERY LOW", "LOW", "MEDIUM", "HIGH", "VERY HIGH"],
+            "reversibility": ["TRIVIAL", "EASY", "MEDIUM", "HARD", "VERY HARD"],
+            "logic": ["and", "or"], "mode": ["enforce", "advisory"]}
+
+
+def hil_read(proj):
+    sys.path.insert(0, os.path.dirname(proj.asset("yaml-log-entry", "validate_yaml_log.py")))
+    import validate_yaml_log as V
+    return V.hil_policy(os.path.join(proj.root, ".agents", "workarea", "decisions.yaml")), V
+
+
+def cmd_hil(home, args):
+    """ks hil show | set [--impact L] [--reversibility L] [--logic and|or] [--mode enforce|advisory]"""
+    sub = args[0] if args else "show"
+    proj = Project(home)
+    pol, V = hil_read(proj)
+    if sub == "show":
+        print(f"HIL threshold: {V.hil_describe(pol)}")
+        for k in ("impact", "reversibility", "logic", "mode"):
+            print(f"  {k} = {pol[k]}")
+        print("  rule: AGENTS.md § Human in the Loop — at/above threshold: ConfirmationType OPERATOR; Workers leave it OPEN")
+        sys.exit(0)
+    if sub == "set":
+        new = dict(pol)
+        it = iter(args[1:])
+        for a in it:
+            key = a[2:]
+            if key not in HIL_KEYS:
+                die(f"usage: {cmd_hil.__doc__}")
+            val = next(it, None)
+            if val is None:
+                die(f"--{key} needs a value: {HIL_KEYS[key]}")
+            val = val.upper() if key in ("impact", "reversibility") else val.lower()
+            if val not in HIL_KEYS[key]:
+                die(f"--{key}: {val!r} not in {HIL_KEYS[key]}")
+            new[key] = val
+        if new == pol:
+            print(f"HIL threshold unchanged: {V.hil_describe(pol)}")
+            sys.exit(0)
+        path = os.path.join(proj.root, ".agents", "models.toml")
+        text = open(path, encoding="utf-8").read()
+        block = ('[hil]                            # Human in the Loop threshold (AGENTS.md § Human in the Loop) — `ks hil show|set`\n'
+                 f'impact = "{new["impact"]}"\n'
+                 f'reversibility = "{new["reversibility"]}"\n'
+                 f'logic = "{new["logic"]}"\n'
+                 f'mode = "{new["mode"]}"\n')
+        m = re.search(r'^\[hil\][^\n]*\n(?:(?!\[)[^\n]*\n?)*', text, re.M)
+        if m:
+            text = text[:m.start()] + block + ("\n" if not text[m.end():].startswith("\n") and text[m.end():] else "") + text[m.end():]
+        else:
+            text = text.rstrip("\n") + "\n\n" + block
+        open(path, "w", encoding="utf-8").write(text)
+        import tomllib
+        with open(path, "rb") as fh:
+            tomllib.load(fh)                                # must still parse
+        print(f"HIL threshold: {V.hil_describe(new)} (was {V.hil_describe(pol)})")
+        effect("decision")
+        sys.exit(0)
+    die(f"usage: {cmd_hil.__doc__}")
+
+
 def cmd_ledger(home, args):
     sub = args[0] if args else "check"
     proj = Project(home)
@@ -716,6 +779,11 @@ def cmd_doctor(home, args):
             (ok if not dj.get("drift") else warn)(f"drift: outdated {len(dj['outdated'])}, edited {len(dj['edited'])}, missing {len(dj['missing'])}")
         except Exception:
             warn("drift report unavailable")
+        try:
+            pol, V = hil_read(proj)
+            ok(f"HIL threshold: {V.hil_describe(pol)}")
+        except Exception as e:
+            warn(f"HIL threshold unreadable: {e}")
         if "/Library/CloudStorage/" in proj.root or "/Box/" in proj.root or "/Dropbox/" in proj.root:
             warn("project lives in a cloud-synced folder — mtimes are unreliable (hooks hash content) and git worktrees are not recommended")
         for sf in (".claude/settings.json", ".claude/settings.local.json"):
@@ -769,7 +837,7 @@ def cmd_dev(home, args):
     die("usage: ks dev build | test | release <version>")
 
 
-COMMANDS = {"self": cmd_self, "operator": cmd_operator, "project": cmd_project, "routing": cmd_routing,
+COMMANDS = {"self": cmd_self, "operator": cmd_operator, "project": cmd_project, "routing": cmd_routing, "hil": cmd_hil,
             "ledger": cmd_ledger, "harness": cmd_harness, "doctor": cmd_doctor, "dev": cmd_dev}
 
 
