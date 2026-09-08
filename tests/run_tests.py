@@ -706,6 +706,24 @@ def main():
         r = run([PY, ks, "operator", "set", "Carlos Veira"], env=kenv)
         r2 = run([PY, ks, "operator", "show"], env={k: v for k, v in kenv.items() if k != "TKSFW_USER"})
         check("ks operator set/show", r.returncode == 0 and "Carlos Veira" in r2.stdout and "source: file" in r2.stdout, r2.stdout + r2.stderr)
+        ut = open(os.path.join(tmp, "kscfg", "user.toml")).read()
+        check("ks operator set keeps the recorded home in user.toml (2.3.1)", 'home = "' in ut and 'name = "Carlos Veira"' in ut, ut)
+        r = run([PY, ks, "self", "setup", "--operator", "Carlos Veira"], env=kenv, inp="")
+        check("ks self setup keeps the recorded home too", 'home = "' in open(os.path.join(tmp, "kscfg", "user.toml")).read(), r.stdout + r.stderr)
+        # ZIP path: the marketplace bundle is a valid home and `ks self install` works from plugins/tksfw/bin/ks
+        import zipfile
+        zdir = os.path.join(tmp, "ziphome")
+        zfile = next((os.path.join(REPO, "dist", f) for f in os.listdir(os.path.join(REPO, "dist")) if f.startswith("tksfw-marketplace-") and f.endswith(".zip")), None)
+        if zfile:
+            zipfile.ZipFile(zfile).extractall(zdir)
+            zks = os.path.join(zdir, "tksfw-marketplace", "plugins", "tksfw", "bin", "ks")
+            zenv = dict(kenv); zenv["TKSFW_CONFIG_DIR"] = os.path.join(tmp, "zipcfg"); zenv.pop("TKSFW_HOME", None)
+            r = run([PY, zks, "self", "install", "--bin-dir", os.path.join(tmp, "zipbin")], env=zenv)
+            r2 = run([PY, zks, "self", "home"], env=zenv)
+            check("ZIP bundle: `plugins/tksfw/bin/ks self install` works and records the plugin as home (getting-started step 2, path A)",
+                  r.returncode == 0 and os.path.islink(os.path.join(tmp, "zipbin", "ks")) and r2.stdout.strip().endswith(os.path.join("tksfw-marketplace", "plugins", "tksfw")), r.stdout + r.stderr + r2.stdout)
+            gs = open(os.path.join(REPO, "docs", "getting-started.md"), encoding="utf-8").read()
+            check("getting-started names the ZIP path to ks and the marketplace folder", "plugins/tksfw/bin/ks self install" in gs and "tksfw-marketplace" in gs and "tools/ks self install" in gs)
         kproj = os.path.join(tmp, "ksproj")
         os.makedirs(kproj)
         r = run([PY, ks, "project", "init"], cwd=kproj, env=kenv)

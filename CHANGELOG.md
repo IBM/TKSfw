@@ -2,6 +2,12 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [2.3.1] — 2026-09-08
+
+### Fixed
+- `ks operator set` / `ks self setup --operator` (via `hooklib.write_operator`) rewrote `~/.config/tksfw/user.toml` and dropped the `home` recorded by `ks self install`; `ks doctor` then warned "user.toml home = not recorded" and `ks` fell back to its script location. Other keys are now preserved.
+- `docs/getting-started.md`: the ZIP path was wrong in step 2 (`~/tksfw/tools/ks` does not exist in `tksfw-marketplace-<v>.zip`; `ks` is at `<home>/plugins/tksfw/bin/ks`) and in step 6 (completion script). Rewritten with two explicit choices — source (A: ZIP bundle, B: git checkout; the differences are paths only) and install level (user level / plugin mode, recommended, vs project level / full mode) — with the rationale, and a steps table with one column per source. Mode switching documented as re-initialisation (tested: existing ledgers, plan and agents are kept). 4 new tests (248 total), including an end-to-end `ks self install` from the unzipped marketplace bundle.
+
 ## [2.3.0] — 2026-09-08
 
 ### Changed

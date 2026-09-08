@@ -380,15 +380,31 @@ def operator():
 
 
 def write_operator(name):
-    """Create/replace ~/.config/tksfw/user.toml with the given operator name."""
+    """Create or update ~/.config/tksfw/user.toml with the operator name, keeping the other keys
+    (`home`, recorded by `ks self install`)."""
     name = name.strip().replace('"', "'")
     if not name:
         raise ValueError("empty operator name")
+    keep = {}
+    if os.path.isfile(USER_CONFIG):
+        try:
+            import tomllib
+            with open(USER_CONFIG, "rb") as fh:
+                keep = {k: v for k, v in tomllib.load(fh).items() if k not in ("schema", "name")}
+        except Exception as e:
+            log(f"write_operator: could not read {USER_CONFIG}: {e}")
     os.makedirs(os.path.dirname(USER_CONFIG), exist_ok=True)
+    lines = ["# TKSfw per-user configuration (read by the hooks, new_entry_id.py and ks)", "schema = 1",
+             f'name = "{name}"          # OwnerSessionUserName on every ledger entry you write']
+    for k, v in keep.items():
+        if isinstance(v, str):
+            lines.append(f'{k} = "{v}"')
+        elif isinstance(v, bool):
+            lines.append(f"{k} = {'true' if v else 'false'}")
+        elif isinstance(v, (int, float)):
+            lines.append(f"{k} = {v}")
     with open(USER_CONFIG, "w", encoding="utf-8") as fh:
-        fh.write("# TKSfw per-user configuration (read by the hooks and by new_entry_id.py)\n"
-                 "schema = 1\n"
-                 f'name = "{name}"          # OwnerSessionUserName on every ledger entry you write\n')
+        fh.write("\n".join(lines) + "\n")
     return USER_CONFIG
 
 

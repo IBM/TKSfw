@@ -1,6 +1,6 @@
 # Getting started — from zero to the first armed project
 
-Ten steps, once per machine (steps 1–7) and once per project (8–10). Commands are for macOS/Linux with zsh or bash.
+Once per machine (steps 1–7), once per project (8–10). Commands are for macOS/Linux with zsh or bash.
 
 ## Prerequisites
 
@@ -10,21 +10,47 @@ Ten steps, once per machine (steps 1–7) and once per project (8–10). Command
 | git ≥ 2.20 | `git --version` (worktree isolation; optional otherwise) |
 | Codex CLI and/or Claude Code, current versions, with plugins enabled | `codex --version` · `claude --version` |
 
+## Two choices before you start
+
+### Choice 1 — where the framework comes from (source)
+
+| Source | Who it is for | What you get | `<home>` in the steps below |
+|---|---|---|---|
+| **A. ZIP bundle** `dist/tksfw-marketplace-<v>.zip` (recommended for users) | Anyone using the framework; no git access to the TKSfw repo needed | A ready-made marketplace: both catalogs (`.agents/plugins/`, `.claude-plugin/`) and the built plugins `plugins/tksfw`, `plugins/tksfw-tools`. `ks` is inside the plugin at `plugins/tksfw/bin/ks` | the unzipped folder, e.g. `~/tksfw-marketplace` |
+| **B. Git checkout** of the TKSfw repository | Framework maintainers, or teams that track releases with `git pull` | The full repo: sources, `template/`, `tools/ks`, tests, docs, and the same committed `plugins/` — the repo root is itself a marketplace | the checkout, e.g. `~/tksfw` |
+
+The other archives in `dist/` are not needed for this guide: `tksfw-plugin-<v>.zip` / `tksfw-tools-plugin-<v>.zip` are single-plugin archives for Claude Code's `archive` source or a hand-built personal marketplace; `tksfw-template-<v>.zip` is the bare project template (`docs/distribution.md`).
+
+The only differences between A and B are **paths**: where `ks` lives, where the completion script lives, and which folder you register as marketplace. The steps table shows both.
+
+### Choice 2 — where the framework runs (install level)
+
+| Level | Command | How it works | Choose it when |
+|---|---|---|---|
+| **User level — plugin mode** (recommended) | `ks project init` | Hooks and skills run from the plugin installed in each harness (Codex `/plugins`, `claude plugin install`). A project gets only the thin layer: `AGENTS.md`, `CLAUDE.local.md`, `.agents/{workarea,agents,models.toml}`, `.codex/`. Updating the plugin updates every project at once; the guard in `.agents/.tksfw.json` arms/disarms per project | You work on your own machine(s); you want one install and one update path; projects should stay small and free of framework code |
+| **Project level — full mode** | `ks project init --full` | Hooks and skills are copied into the project (`.agents/hooks/`, `.agents/skills/`) and pinned to that version; the plugin, if installed, yields to them. Everything a session needs travels with the repository | The repository is shared with people who will not install the plugin (customer teams, CI, air-gapped machines), or the project must be frozen at a framework version regardless of what is installed on the machine |
+
+Rationale: the method (AGENTS.md, ledgers, plan) is always project-local — that never changes. What moves is the **tooling**: keeping it in the plugin avoids ~45 framework files in every repo and gives one place to update and re-trust; copying it in makes the repo self-sufficient at the price of per-project updates (`ks project update`) and per-project hook trust in Codex. Both modes are managed by the same `ks` commands. Switching later is a re-initialisation, not an update: plugin → full is `rm .agents/.tksfw.json && ks project init --full` (existing ledgers, plan and agents are kept — only the missing tooling files are added); full → plugin is the same with `ks project init`, then delete `.agents/hooks/`, `.agents/skills/` and the `.claude/skills/` mirror by hand. `ks` itself is always installed at user level (step 2), even if your projects are full mode.
+
 ## Steps
 
-| # | Step | Command / action |
-|---|---|---|
-| 1 | Get the framework | `git clone <TKSfw repo> ~/tksfw` — or unzip `dist/tksfw-marketplace-<v>.zip` to a folder `<home>` |
-| 2 | Put `ks` on PATH | `python3 ~/tksfw/tools/ks self install` (adds `~/.local/bin/ks`, records the home in `~/.config/tksfw/user.toml`) — from an unzipped bundle: `python3 <home>/plugins/tksfw/bin/ks self install` |
-| 3 | Register the marketplace and install the plugin | Codex: `codex plugin marketplace add ~/tksfw` → in Codex `/plugins` → install **tksfw** (and **tksfw-tools** if you use the Perplexity/Playwright MCP servers) → restart → `/hooks` → trust. Claude Code: `claude plugin marketplace add ~/tksfw` then `claude plugin install tksfw@tksfw --scope user` (+ `tksfw-tools@tksfw` optional) |
-| 4 | One-shot user setup | `ks self setup --operator "Your Name"` — sets the operator (step 5), appends the bootstrap stanza to `~/.codex/AGENTS.md` and `~/.claude/CLAUDE.md` (idempotent), prints the completion hint |
-| 5 | Operator name (if you skipped `--operator`) | `ks operator set "Your Name"` → `~/.config/tksfw/user.toml`; every ledger entry you write carries it |
-| 6 | Shell completion (optional) | add `source ~/tksfw/tools/ks-completion.sh` to `~/.zshrc` / `~/.bashrc` |
-| 7 | Verify the install | `ks doctor` — must show 0 FAIL; WARN lines name the step that fixes them |
-| 8 | Create (arm) a project | `cd <project> && ks project init` (tooling from the plugin) or `ks project init --full` (self-contained: hooks and skills copied in-tree, no plugin dependency) |
-| 8b | Describe the project (optional, recommended) | Put the archetype in `KS_PROJECT.md` (L3: what kind of project this is and how such projects run) and the project spec in `KS_SPEC.md` (L4: what this one must deliver) at the project root. Other names or folders: `ks layers pin --l3 <path> --l4 <path>`. L4 alone is fine |
-| 9 | First session | Launch Codex or Claude Code in the project. SessionStart shows the session token, operator, routing table and the project layers (L3/L4) with their status. Type `/ks-start` to begin executing as the archetype prescribes. Codex asks to trust the project `.codex` layer (and the hooks in full mode) |
-| 10 | Acknowledge the hooks | After trusting in Codex: `ks harness retrust --ack`. From now on `ks doctor` / `ks harness retrust` tell you when a framework update needs re-trusting |
+| # | Step | A — ZIP bundle | B — Git checkout |
+|---|---|---|---|
+| 1 | Get the framework | `unzip tksfw-marketplace-<v>.zip -d ~` → creates `~/tksfw-marketplace/` (the archive has one top-level folder; that folder is `<home>`) | `git clone <TKSfw repo> ~/tksfw` |
+| 2 | Put `ks` on PATH | `python3 ~/tksfw-marketplace/plugins/tksfw/bin/ks self install` | `python3 ~/tksfw/tools/ks self install` |
+|   | | Both: adds `~/.local/bin/ks` (symlink) and records `<home>` in `~/.config/tksfw/user.toml`; prints the completion line and a note if `~/.local/bin` is not on your PATH | |
+| 3 | Register the marketplace, install the plugin | Codex: `codex plugin marketplace add ~/tksfw-marketplace` | Codex: `codex plugin marketplace add ~/tksfw` |
+|   | | Both: in Codex `/plugins` → install **tksfw** (and **tksfw-tools** if you use the Perplexity/Playwright MCP servers) → restart → `/hooks` → trust. Claude Code: `claude plugin marketplace add <home>` then `claude plugin install tksfw@tksfw --scope user` (+ `tksfw-tools@tksfw` optional). Full-mode-only users can skip this step: a full-mode project carries its own hooks and skills, and the bootstrap stanza comes from step 4, not from the plugin | |
+| 4 | One-shot user setup | `ks self setup --operator "Your Name"` — sets the operator (step 5), appends the bootstrap stanza to `~/.codex/AGENTS.md` and `~/.claude/CLAUDE.md` (idempotent), prints the completion hint | same |
+| 5 | Operator name (if you skipped `--operator`) | `ks operator set "Your Name"` → `~/.config/tksfw/user.toml`; every ledger entry you write carries it | same |
+| 6 | Shell completion (optional) | add `source ~/tksfw-marketplace/plugins/tksfw/bin/ks-completion.sh` to `~/.zshrc` / `~/.bashrc` | add `source ~/tksfw/tools/ks-completion.sh` |
+| 7 | Verify the install | `ks doctor` — must show 0 FAIL; each WARN names the step that fixes it. `ks self home` prints `<home>` as recorded | same |
+| 8 | Create (arm) a project | `cd <project> && ks project init` (plugin mode, recommended) or `ks project init --full` (project level — see Choice 2) | same |
+| 8b | Describe the project (optional, recommended) | Put the archetype in `KS_PROJECT.md` (L3: what kind of project this is and how such projects run) and the project spec in `KS_SPEC.md` (L4: what this one must deliver) at the project root. Other names or folders: `ks layers pin --l3 <path> --l4 <path>`. L4 alone is fine | same |
+| 9 | First session | Launch Codex or Claude Code in the project. SessionStart shows the session token, operator, routing table and the project layers (L3/L4) with their status. Type `/ks-start` to begin executing as the archetype prescribes. Codex asks to trust the project `.codex` layer (and the hooks in full mode) | same |
+| 10 | Acknowledge the hooks | After trusting in Codex: `ks harness retrust --ack`. From now on `ks doctor` / `ks harness retrust` tell you when a framework update needs re-trusting | same |
+
+If you ever run `ks` from a place it cannot resolve, set `TKSFW_HOME=<home>` — the lookup order is `TKSFW_HOME`, `~/.config/tksfw/user.toml`, the script's own location, then the harness plugin caches.
 
 ## After that
 
@@ -33,7 +59,8 @@ Ten steps, once per machine (steps 1–7) and once per project (8–10). Command
 | Check the model routing this machine will use | `ks routing show` — the provider table (`[routing.<provider>]` in `.agents/models.toml`) must match your endpoint; pin one with `ks routing use <table>` |
 | See where a project stands | `ks project status` |
 | Change or move the L3/L4 files | edit them (Layer ARCHETYPE / PROJECT in `changes.yaml`); the next start reports *changed*; `ks layers resolve` at any time; `ks layers pin` for other paths |
-| Everyday operations (switch routing, update, archive, second session, upgrade) | `docs/operations.md` |
+| Upgrade the framework | A: unzip the new bundle over `<home>` (or beside it and `ks self install` from the new one); B: `git pull`. Then `ks doctor`, re-trust if asked, `ks project update` in each full-mode project — `docs/operations.md` |
+| Everyday operations (switch routing, archive, second session, reset) | `docs/operations.md` |
 | All commands | `docs/ks.md` |
 
 ## Uninstall
@@ -41,4 +68,4 @@ Ten steps, once per machine (steps 1–7) and once per project (8–10). Command
 | Scope | Action |
 |---|---|
 | One project | `ks project disable` (inert, files kept) or delete `.agents/`, `AGENTS.md`, `CLAUDE.local.md`, `.codex/` |
-| User level | Codex `/plugins` → remove tksfw; `claude plugin uninstall tksfw@tksfw`; remove the stanza block from `~/.codex/AGENTS.md` and `~/.claude/CLAUDE.md`; `rm ~/.local/bin/ks ~/.config/tksfw -r` |
+| User level | Codex `/plugins` → remove tksfw; `claude plugin uninstall tksfw@tksfw`; remove the stanza block from `~/.codex/AGENTS.md` and `~/.claude/CLAUDE.md`; `rm -r ~/.local/bin/ks ~/.config/tksfw`; delete `<home>` (`~/tksfw-marketplace` or `~/tksfw`) |
