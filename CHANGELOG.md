@@ -2,6 +2,12 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [2.4.2] — 2026-09-08
+
+### Changed (documentation)
+- `docs/getting-started.md`: "If step 3 fails" table (Codex ≥ 0.15x legacy `profile =` migration to `<name>.config.toml`; "Operation not permitted" on `~/.codex/.tmp` from a sandboxed shell); "Upgrade the framework" row rewritten as the full user-level procedure.
+- `docs/operations.md`: "Upgrade the framework (user level)" — replace the bundle folder (not overlay), `ks self version`, restart Codex / update the Claude plugin, `ks harness retrust` (+ `--ack`), `ks doctor`, `ks project update` per project (required in full mode, thin-layer refresh in plugin mode).
+
 ## [2.4.1] — 2026-09-08
 
 ### Fixed

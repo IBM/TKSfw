@@ -59,7 +59,7 @@ If you ever run `ks` from a place it cannot resolve, set `TKSFW_HOME=<home>` (th
 | Check the model routing this machine will use | `ks routing show` — the provider table (`[routing.<provider>]` in `.agents/models.toml`) must match your endpoint; pin one with `ks routing use <table>` |
 | See where a project stands | `ks project status` |
 | Change or move the L3/L4 files | edit them (Layer ARCHETYPE / PROJECT in `changes.yaml`); the next start reports *changed*; `ks layers resolve` at any time; `ks layers pin` for other paths |
-| Upgrade the framework | A: unzip the new bundle over `<home>` (or beside it and `ks self install` from the new one); B: `git pull`. Then `ks doctor`, re-trust if asked, `ks project update` in each full-mode project — `docs/operations.md` |
+| Upgrade the framework | A: `rm -rf ~/tksfw && unzip tksfw-<v>.zip -d ~` (replace the folder; `ks`, `user.toml` and the marketplace registration all point at `~/tksfw`, so nothing else moves) · B: `git -C ~/tksfw pull`. Then: restart Codex (Claude: `claude plugin marketplace update tksfw && claude plugin update tksfw@tksfw`), `ks harness retrust` (re-trust in `/hooks` if asked, then `--ack`), `ks doctor`, and `ks project update` in each project (required in full mode, refreshes the thin layer in plugin mode) — `docs/operations.md` |
 | Everyday operations (switch routing, archive, second session, reset) | `docs/operations.md` |
 | All commands | `docs/ks.md` |
 
