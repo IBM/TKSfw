@@ -818,6 +818,26 @@ def main():
         check("ks harness retrust: unknown → ack → clean", r.returncode == 1 and r2.returncode == 0 and r3.returncode == 0 and "no change" in r3.stdout, r.stdout + r3.stdout)
         r = run([PY, ks, "doctor"], cwd=kproj, env=kenv)
         check("ks doctor runs end to end", r.returncode == 0 and "== project" in r.stdout and "FAIL ·" in r.stdout, r.stdout[-300:] + r.stderr)
+        check("ks doctor: no marketplace / plugin / trust recorded → three WARNs naming the step",
+              "Codex marketplace: none" in r.stdout and "tksfw@tksfw: not installed" in r.stdout, r.stdout)
+        # Codex ≥ 0.15x records the marketplace, the plugin and hook trust in config.toml — doctor must read those (2.4.1)
+        dch = os.path.join(tmp, "codexhome_reg")
+        os.makedirs(dch, exist_ok=True)
+        hj = json.load(open(os.path.join(plug, "hooks", "hooks.json")))
+        entries = [(ev, i, j) for ev, lst in hj["hooks"].items() for i, h in enumerate(lst) for j, _ in enumerate(h.get("hooks") or [])]
+        state = "".join(f'[hooks.state."tksfw@tksfw:hooks/hooks.json:{ev.lower()}:{i}:{j}"]\ntrusted_hash = "sha256:00"\n\n' for ev, i, j in entries)
+        with open(os.path.join(dch, "config.toml"), "w") as fh:
+            fh.write(f'model = "gpt-5.6-sol"\nmodel_provider = "ibm"\n\n[model_providers.ibm]\nbase_url = "https://x"\n\n'
+                     f'[marketplaces.tksfw]\nsource_type = "local"\nsource = "{os.path.dirname(os.path.dirname(plug))}"\n\n[plugins."tksfw@tksfw"]\nenabled = true\n\n{state}')
+        renv = dict(kenv); renv["CODEX_HOME"] = dch
+        r = run([PY, ks, "doctor"], cwd=kproj, env=renv)
+        check("ks doctor reads [marketplaces], [plugins] and [hooks.state] from Codex config.toml",
+              "Codex marketplace: `tksfw` →" in r.stdout and "tksfw@tksfw: enabled" in r.stdout and f"Codex hooks trusted: {len(entries)}/{len(entries)}" in r.stdout
+              and "personal marketplace" not in r.stdout, r.stdout)
+        with open(os.path.join(dch, "config.toml"), "a") as fh:
+            fh.write('profile = "x"\nprofile = "y"\n')          # duplicate key → invalid TOML
+        r = run([PY, ks, "doctor"], cwd=kproj, env=renv)
+        check("ks doctor FAILs loudly when Codex config.toml does not parse", "does not parse" in r.stdout and "1 FAIL" in r.stdout or "FAIL" in r.stdout.split("\n")[-2], r.stdout[-400:])
         r = run([PY, ks, "dev", "test"], cwd=kproj, env=kenv)
         check("ks dev refuses to run from a plugin home", r.returncode != 0 and "checkout" in r.stderr, r.stderr)
         r = run([PY, os.path.join(REPO, "tools", "ks"), "self", "version"], env=kenv | {"TKSFW_HOME": REPO})

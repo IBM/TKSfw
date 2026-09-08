@@ -778,14 +778,51 @@ def cmd_doctor(home, args):
         ok(r.stdout.strip())
     print("== harnesses (user level)")
     codex_home = os.environ.get("CODEX_HOME") or os.path.join(os.path.expanduser("~"), ".codex")
-    mk = os.path.join(os.path.expanduser("~"), ".agents", "plugins", "marketplace.json")
-    (ok if os.path.isfile(mk) else warn)(f"Codex personal marketplace: {mk if os.path.isfile(mk) else 'absent — `codex plugin marketplace add <home>` (getting-started step 3)'}")
     ccfg = os.path.join(codex_home, "config.toml")
+    mk = os.path.join(os.path.expanduser("~"), ".agents", "plugins", "marketplace.json")
+    bundle_root = os.path.dirname(os.path.dirname(home.path)) if home.kind == "plugin" else home.path
+    ctoml = None
     if os.path.isfile(ccfg):
-        t = open(ccfg, encoding="utf-8").read()
-        (ok if "hooks" in t else warn)(f"Codex config {ccfg}: " + ("mentions hooks" if "hooks" in t else "no hooks feature flag found — hooks may be disabled"))
+        try:
+            import tomllib
+            with open(ccfg, "rb") as fh:
+                ctoml = tomllib.load(fh)
+        except Exception as e:
+            fail(f"Codex config {ccfg} does not parse: {e} — every `codex` command fails until fixed (getting-started, 'If step 3 fails')")
     else:
         warn(f"Codex config not found at {ccfg}")
+    if ctoml is not None:
+        # marketplace: `codex plugin marketplace add <dir>` records [marketplaces.<name>] source = <dir> (Codex ≥ 0.15x);
+        # a hand-written personal catalog at ~/.agents/plugins/marketplace.json is the older alternative
+        mks = ctoml.get("marketplaces") or {}
+        ours = [(n, m.get("source")) for n, m in mks.items() if isinstance(m, dict) and isinstance(m.get("source"), str)
+                and os.path.realpath(os.path.expanduser(m["source"])) in (os.path.realpath(bundle_root), os.path.realpath(home.path))]
+        if ours:
+            ok(f"Codex marketplace: `{ours[0][0]}` → {ours[0][1]}")
+        elif os.path.isfile(mk):
+            ok(f"Codex personal marketplace: {mk}")
+        elif mks:
+            warn(f"Codex marketplaces registered ({', '.join(mks)}) but none points at {bundle_root} — `codex plugin marketplace add {bundle_root}`")
+        else:
+            warn(f"Codex marketplace: none — `codex plugin marketplace add {bundle_root}` (getting-started step 3)")
+        # plugin installed + enabled
+        pl = (ctoml.get("plugins") or {}).get("tksfw@tksfw")
+        if isinstance(pl, dict):
+            (ok if pl.get("enabled", True) else warn)(f"Codex plugin tksfw@tksfw: {'enabled' if pl.get('enabled', True) else 'installed but disabled — /plugins'}")
+        else:
+            warn("Codex plugin tksfw@tksfw: not installed — Codex `/plugins` → install (getting-started step 3)")
+        # hook trust: one [hooks.state."tksfw@tksfw:hooks/hooks.json:<event>:i:j"] per hook entry
+        hs = [k for k in (ctoml.get("hooks", {}).get("state") or {}) if k.startswith("tksfw@tksfw:hooks/hooks.json:")]
+        try:
+            hj = json.load(open(os.path.join(home.path, "hooks", "hooks.json"))) if home.kind == "plugin" else \
+                 json.load(open(os.path.join(home.path, "plugins", "tksfw", "hooks", "hooks.json")))
+            total = sum(len(h.get("hooks") or []) for ev in (hj.get("hooks") or {}).values() for h in ev)
+        except Exception:
+            total = None
+        if hs:
+            (ok if total is None or len(hs) >= total else warn)(f"Codex hooks trusted: {len(hs)}" + (f"/{total} entries" if total else "") + ("" if total is None or len(hs) >= total else " — restart Codex, `/hooks` → trust"))
+        elif isinstance(pl, dict):
+            warn("Codex hooks: none trusted yet — restart Codex, `/hooks` → trust, then `ks harness retrust --ack`")
     cl = os.path.join(os.path.expanduser("~"), ".claude", "settings.json")
     if os.path.isfile(cl):
         try:

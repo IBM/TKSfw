@@ -2,6 +2,11 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [2.4.1] — 2026-09-08
+
+### Fixed
+- `ks doctor` warned "Codex personal marketplace: absent" although the marketplace was registered: Codex ≥ 0.15x records `codex plugin marketplace add` in `~/.codex/config.toml` (`[marketplaces.<name>] source = <dir>`), not in `~/.agents/plugins/marketplace.json`. Doctor now parses `config.toml` and reports the marketplace that points at the framework home (the hand-written personal catalog remains an accepted alternative), the plugin state (`[plugins."tksfw@tksfw"] enabled`) and hook trust (`[hooks.state."tksfw@tksfw:hooks/hooks.json:…"]` entries vs the entries in `hooks.json`), replacing the weak "config mentions hooks" line. A `config.toml` that does not parse is a FAIL with the parser message (every `codex` command fails in that state). 3 new tests (253 total).
+
 ## [2.4.0] — 2026-09-08
 
 ### Changed
