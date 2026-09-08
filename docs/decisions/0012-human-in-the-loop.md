@@ -11,7 +11,7 @@ default stricter (both conditions), and the threshold changeable during a sessio
 | Choice | Rationale |
 |---|---|
 | Rule in AGENTS.md § Human in the Loop; threshold in `models.toml` `[hil]` (`impact`, `reversibility`, `logic and|or`, `mode enforce|advisory`) | The rule is method (static); the threshold is configuration (live) — same split as model routing |
-| Default `Impact ≥ HIGH` **and** `Reversibility ≥ HARD`, `enforce` | Operator's requirement; fewer interruptions than OR, still catching the irreversible high-stakes calls |
+| Default `Impact ≥ HIGH` **or** `Reversibility ≥ HARD`, `enforce` (2.3.0; 2.1.0–2.2.1 shipped **and**) | Operator's requirement after use: a high-impact call that is easy to undo and a hard-to-undo call of modest impact both deserve a human; `ks hil set --logic and` restores the stricter-to-trigger variant |
 | Enforcement in the validator (`hil_problems`), applied as a hard failure only to **new** decision entries (`--hil-ids`, passed by the PostToolUse hook); existing entries produce WARN lines in `ks ledger check` | Legacy ledgers stay valid; the check bites where it can be acted on — at write time |
 | Two violations: above-threshold entry without `ConfirmationType: OPERATOR`; above-threshold entry authored by a non-`main` agent with `Status ≠ OPEN` | Workers escalate, `main` asks the operator and logs the `ACCEPTED` transition as a DECISION event |
 | What is not verified: that a human actually confirmed | Not observable from the ledger; `OPERATOR` is the agent's attestation, the harness's ask-the-user tool is the mechanism, and the entry is auditable |

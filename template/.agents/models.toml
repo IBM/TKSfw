@@ -36,7 +36,7 @@ codex_agent_files = "inline"
 [hil]                            # Human in the Loop threshold (AGENTS.md § Human in the Loop) — `ks hil show|set`
 impact = "HIGH"                  # VERY LOW | LOW | MEDIUM | HIGH | VERY HIGH
 reversibility = "HARD"           # TRIVIAL | EASY | MEDIUM | HARD | VERY HARD
-logic = "and"                    # "and": both at/above their level; "or": either
+logic = "or"                     # "or": either at/above its level (default); "and": both
 mode = "enforce"                 # enforce: a non-compliant new decision entry is rejected; advisory: warned
 
 [state]                          # ledger digest limits (STATE.md / SessionStart / SubagentStart briefing) — digest.py

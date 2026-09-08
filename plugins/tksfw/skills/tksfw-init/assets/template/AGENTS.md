@@ -93,7 +93,7 @@
 
 ### Human in the Loop
 - A decision at or above the **HIL threshold** is confirmed by the operator **before it takes effect** (ask, then `ConfirmationType: OPERATOR`); below it `AUTO-MODE` is allowed and still logged.
-- Threshold = configuration: `[hil]` in `.agents/models.toml`, default `Impact ≥ HIGH` **and** `Reversibility ≥ HARD`, `mode = enforce` (a non-compliant new entry is rejected). `ks hil set …` changes it live.
+- Threshold = configuration: `[hil]` in `.agents/models.toml`, default `Impact ≥ HIGH` **or** `Reversibility ≥ HARD`, `mode = enforce` (a non-compliant new entry is rejected). `ks hil set …` changes it live.
 - Workers never accept above-threshold decisions: leave `Status: OPEN` and return; `main` asks the operator and logs the `ACCEPTED` transition. STATE.md marks them "NEEDS OPERATOR CONFIRMATION".
 
 ### Tools

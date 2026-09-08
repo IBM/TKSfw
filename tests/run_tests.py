@@ -59,7 +59,7 @@
      in STATE.md within budget; task view with evidence chain; SubagentStart briefing with the open
      handoff, global in-force decisions and lessons; prompt notice for new issues and failed gates;
      ks ledger digest; AGENTS.md consult rule; [state] limits honoured
- 22. Human in the Loop (2.1.0): default threshold HIGH and HARD; hook rejects a new above-threshold
+ 22. Human in the Loop (2.1.0, default OR since 2.3.0): default threshold HIGH or HARD; hook rejects a new above-threshold
      AUTO-MODE decision and a Worker-accepted one; compliant OPEN/OPERATOR passes; legacy entries warn
      only; advisory mode warns; ks hil show/set (validation, effect line, live prompt notice); digest
      marks pending HIL decisions; doctor line; AGENTS.md section
@@ -1039,20 +1039,26 @@ def main():
                        inp=json.dumps({"session_id": "SH", "turn_id": "h2", "hook_event_name": "PostToolUse", "tool_name": "Write", "cwd": hp,
                                        "tool_input": {"file_path": hshard, "content": content}}))
         r = run([PY, ks, "hil", "show"], cwd=hp, env=kenv)
-        check("ks hil show: default HIGH and HARD, enforce", "Impact >= HIGH AND Reversibility >= HARD (enforce)" in r.stdout, r.stdout)
+        check("ks hil show: default HIGH or HARD, enforce", "Impact >= HIGH OR Reversibility >= HARD (enforce)" in r.stdout, r.stdout)
         e101_bad = dech("Dcsn0101", "ZFS everywhere", "OPEN", "VERY HIGH", "VERY HARD", "AUTO-MODE")
         e101 = dech("Dcsn0101", "ZFS everywhere", "OPEN", "VERY HIGH", "VERY HARD", "OPERATOR")
         e102_bad = dech("Dcsn0102", "Worker accepted", "ACCEPTED", "HIGH", "HARD", "OPERATOR", "x-builder")
         e102 = dech("Dcsn0102", "Worker accepted", "OPEN", "HIGH", "HARD", "OPERATOR", "x-builder")
         e103 = dech("Dcsn0103", "Escalated", "OPEN", "HIGH", "HARD", "OPERATOR", "x-builder")
-        e104 = dech("Dcsn0104", "Small call", "ACCEPTED", "HIGH", "EASY", "AUTO-MODE")
+        e104 = dech("Dcsn0104", "Small call", "ACCEPTED", "MEDIUM", "EASY", "AUTO-MODE")
+        e104_or = dech("Dcsn0110", "High but easy", "ACCEPTED", "HIGH", "EASY", "AUTO-MODE")
         r = hook_write(e101_bad, ["Dcsn0101"])
         check("hook rejects a new above-threshold AUTO-MODE decision", r.returncode == 2 and "ConfirmationType must be OPERATOR" in r.stderr, r.stderr[:300])
         r = hook_write(e101 + e102_bad, ["Dcsn0102"])
         check("hook rejects an above-threshold decision accepted by a Worker (fixed entry in place passes)", r.returncode == 2 and "must stay OPEN" in r.stderr and "Dcsn0101" not in r.stderr, r.stderr[:300])
         r = hook_write(e101 + e102 + e103 + e104, ["Dcsn0103", "Dcsn0104"])
-        check("compliant entries pass: Worker OPEN/OPERATOR above threshold; HIGH/EASY AUTO-MODE below (AND logic)", r.returncode == 0, r.stderr[:300])
-        base = e101 + e102 + e103 + e104
+        check("compliant entries pass: Worker OPEN/OPERATOR above threshold; MEDIUM/EASY AUTO-MODE below", r.returncode == 0, r.stderr[:300])
+        r = hook_write(e101 + e102 + e103 + e104 + e104_or, ["Dcsn0110"])
+        check("OR default: HIGH/EASY AUTO-MODE is above threshold and rejected", r.returncode == 2 and "ConfirmationType must be OPERATOR" in r.stderr, r.stderr[:300])
+        e110 = dech("Dcsn0110", "High but easy", "OPEN", "HIGH", "EASY", "OPERATOR")
+        r = hook_write(e101 + e102 + e103 + e104 + e110, ["Dcsn0110"])
+        check("the same entry fixed in place (OPEN/OPERATOR) passes", r.returncode == 0, r.stderr[:300])
+        base = e101 + e102 + e103 + e104 + e110
         # legacy (not new) entries only warn
         base += dech("Dcsn0105", "Old big call", "ACCEPTED", "VERY HIGH", "VERY HARD", "AUTO-MODE")
         open(hshard, "w").write(base)
@@ -1068,7 +1074,7 @@ def main():
         r = run([PY, ks, "hil", "set", "--impact", "bogus"], cwd=hp, env=kenv)
         check("ks hil set rejects a bad level", r.returncode != 0 and "not in" in r.stderr + r.stdout, r.stderr)
         r = run([PY, os.path.join(plug, "hooks", "track_edits.py"), "--phase", "prompt"], cwd=hp, env=kenv, inp=json.dumps({"session_id": "SH", "turn_id": "h4", "cwd": hp, "prompt": "x"}))
-        check("prompt notice announces the HIL change", "HIL threshold now Impact >= MEDIUM OR Reversibility >= HARD (advisory)" in r.stdout and "was Impact >= HIGH AND" in r.stdout, r.stdout[:400])
+        check("prompt notice announces the HIL change", "HIL threshold now Impact >= MEDIUM OR Reversibility >= HARD (advisory)" in r.stdout and "was Impact >= HIGH OR" in r.stdout, r.stdout[:400])
         base += dech("Dcsn0106", "Medium call", "ACCEPTED", "MEDIUM", "EASY", "AUTO-MODE")
         r = hook_write(base, ["Dcsn0106"])
         check("advisory mode: above-threshold (OR, MEDIUM) AUTO-MODE decision is warned, not rejected", r.returncode == 0, r.stderr[:300])
@@ -1085,7 +1091,7 @@ def main():
         check("ks doctor shows the HIL threshold", "HIL threshold: Impact >= MEDIUM OR Reversibility >= HARD (enforce)" in r.stdout, r.stdout[-600:])
         agents_md = open(os.path.join(REPO, "template", "AGENTS.md"), encoding="utf-8").read()
         check("AGENTS.md has the Human in the Loop section with the default and the Worker rule",
-              "### Human in the Loop" in agents_md and "`Impact ≥ HIGH` **and** `Reversibility ≥ HARD`" in agents_md and "Workers never accept" in agents_md and "§ Human in the Loop" in agents_md)
+              "### Human in the Loop" in agents_md and "`Impact ≥ HIGH` **or** `Reversibility ≥ HARD`" in agents_md and "Workers never accept" in agents_md and "§ Human in the Loop" in agents_md)
 
         agents_md = open(os.path.join(full, "AGENTS.md"), encoding="utf-8").read()
         check("AGENTS.md keeps the naming kernel and points to define-agent",

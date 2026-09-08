@@ -2,6 +2,12 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [2.3.0] — 2026-09-08
+
+### Changed
+- Human-in-the-Loop default logic is now **OR**: a decision with `Impact ≥ HIGH` **or** `Reversibility ≥ HARD` requires operator confirmation (2.1.0–2.2.1 shipped **and**). Code default (`HIL_DEFAULT`), template `models.toml` `[hil].logic = "or"`, AGENTS.md § Human in the Loop, schemas reference, operations guide and ADR 0012 updated; 2 new tests (244 total).
+- Existing projects: `ks project update` refreshes an unmodified `models.toml`; a locally edited one is kept and listed — run `ks hil set --logic or` there (live, no restart). Projects wanting the stricter-to-trigger variant: `ks hil set --logic and`.
+
 ## [2.2.1] — 2026-09-07
 
 Documentation pass for the project layers; no code changes.

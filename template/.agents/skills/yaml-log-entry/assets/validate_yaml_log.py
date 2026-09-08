@@ -127,12 +127,12 @@ DECISION_REVERSIBILITY = {"TRIVIAL", "EASY", "MEDIUM", "HARD", "VERY HARD"}
 DECISION_CONFIRMATION = {"OPERATOR", "AUTO-MODE"}
 IMPACT_ORDER = ["VERY LOW", "LOW", "MEDIUM", "HIGH", "VERY HIGH"]
 REVERSIBILITY_ORDER = ["TRIVIAL", "EASY", "MEDIUM", "HARD", "VERY HARD"]
-HIL_DEFAULT = {"impact": "HIGH", "reversibility": "HARD", "logic": "and", "mode": "enforce"}
+HIL_DEFAULT = {"impact": "HIGH", "reversibility": "HARD", "logic": "or", "mode": "enforce"}
 
 
 def hil_policy(ledger_path=None):
     """[hil] from .agents/models.toml next to the workarea (2.1.0): the Human-in-the-Loop threshold.
-    Defaults: Impact >= HIGH AND Reversibility >= HARD, enforce. Bad values fall back per key."""
+    Defaults: Impact >= HIGH OR Reversibility >= HARD, enforce (2.3.0; was AND in 2.1–2.2). Bad values fall back per key."""
     pol = dict(HIL_DEFAULT)
     cands = []
     if ledger_path:
