@@ -8,7 +8,7 @@ every folder that has not opted in, and can create or disarm a project instance 
 
 | Step | Codex | Claude Code |
 |---|---|---|
-| Marketplace | `codex plugin marketplace add <TKSfw repo or unzipped marketplace root>` | `claude plugin marketplace add <same>` |
+| Marketplace | `codex plugin marketplace add <TKSfw checkout or unzipped bundle, e.g. ~/tksfw>` | `claude plugin marketplace add <same>` |
 | Plugin | `/plugins` → **tksfw** (and optionally **tksfw-tools**) → restart → `/hooks` trust | `claude plugin install tksfw@tksfw --scope user` (`tksfw-tools@tksfw` optional) |
 | Bootstrap stanza | append `plugins/tksfw/bootstrap/AGENTS.global.md` to `~/.codex/AGENTS.md` | append `plugins/tksfw/bootstrap/CLAUDE.global.md` to `~/.claude/CLAUDE.md` |
 

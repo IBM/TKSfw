@@ -713,17 +713,21 @@ def main():
         # ZIP path: the marketplace bundle is a valid home and `ks self install` works from plugins/tksfw/bin/ks
         import zipfile
         zdir = os.path.join(tmp, "ziphome")
-        zfile = next((os.path.join(REPO, "dist", f) for f in os.listdir(os.path.join(REPO, "dist")) if f.startswith("tksfw-marketplace-") and f.endswith(".zip")), None)
+        zfile = next((os.path.join(REPO, "dist", f) for f in os.listdir(os.path.join(REPO, "dist")) if re.fullmatch(r"tksfw-\d+\.\d+\.\d+\.zip", f)), None)
         if zfile:
             zipfile.ZipFile(zfile).extractall(zdir)
-            zks = os.path.join(zdir, "tksfw-marketplace", "plugins", "tksfw", "bin", "ks")
+            zks = os.path.join(zdir, "tksfw", "plugins", "tksfw", "bin", "ks")
             zenv = dict(kenv); zenv["TKSFW_CONFIG_DIR"] = os.path.join(tmp, "zipcfg"); zenv.pop("TKSFW_HOME", None)
             r = run([PY, zks, "self", "install", "--bin-dir", os.path.join(tmp, "zipbin")], env=zenv)
             r2 = run([PY, zks, "self", "home"], env=zenv)
             check("ZIP bundle: `plugins/tksfw/bin/ks self install` works and records the plugin as home (getting-started step 2, path A)",
-                  r.returncode == 0 and os.path.islink(os.path.join(tmp, "zipbin", "ks")) and r2.stdout.strip().endswith(os.path.join("tksfw-marketplace", "plugins", "tksfw")), r.stdout + r.stderr + r2.stdout)
+                  r.returncode == 0 and os.path.islink(os.path.join(tmp, "zipbin", "ks")) and r2.stdout.strip().endswith(os.path.join("tksfw", "plugins", "tksfw")), r.stdout + r.stderr + r2.stdout)
             gs = open(os.path.join(REPO, "docs", "getting-started.md"), encoding="utf-8").read()
-            check("getting-started names the ZIP path to ks and the marketplace folder", "plugins/tksfw/bin/ks self install" in gs and "tksfw-marketplace" in gs and "tools/ks self install" in gs)
+            check("getting-started names the ZIP path to ks and the marketplace folder", "plugins/tksfw/bin/ks self install" in gs and "tksfw-marketplace" not in gs and "unzip tksfw-<v>.zip" in gs and "tools/ks self install" in gs)
+            zenv2 = dict(zenv); zenv2["TKSFW_HOME"] = os.path.join(zdir, "tksfw")
+            r = run([PY, zks, "self", "home"], env=zenv2)
+            check("TKSFW_HOME may name the bundle folder; ks resolves the plugin inside it", r.stdout.strip().endswith(os.path.join("tksfw", "plugins", "tksfw")), r.stdout + r.stderr)
+            check("bundle carries the docs and README", os.path.isfile(os.path.join(zdir, "tksfw", "docs", "getting-started.md")) and os.path.isfile(os.path.join(zdir, "tksfw", "README.md")))
         kproj = os.path.join(tmp, "ksproj")
         os.makedirs(kproj)
         r = run([PY, ks, "project", "init"], cwd=kproj, env=kenv)

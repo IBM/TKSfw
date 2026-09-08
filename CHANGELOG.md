@@ -2,6 +2,13 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [2.4.0] — 2026-09-08
+
+### Changed
+- Delivery convention: the framework bundle is now `dist/tksfw-<v>.zip` and unzips to `tksfw/` (was `tksfw-marketplace-<v>.zip` → `tksfw-marketplace/`). "Marketplace" is what the harnesses call the catalog inside; it never needed to be in the artefact or folder name. A bundle and a git checkout now share the same `<home>` (`~/tksfw`) and the same `codex plugin marketplace add ~/tksfw`.
+- The bundle carries `docs/`, `README.md`, `CHANGELOG.md`, `CREDITS.md` and `VERSION` besides the two catalogs and the plugins, so a ZIP user has the guides at hand.
+- `ks` resolves a bundle root: `TKSFW_HOME` or `user.toml` may name `~/tksfw` and the plugin inside (`plugins/tksfw`) is found automatically. `docs/getting-started.md`, `docs/distribution.md`, `docs/user-level.md` updated; 2 new tests (250 total). The single-plugin archives (`tksfw-plugin-<v>.zip`, `tksfw-tools-plugin-<v>.zip`) and `tksfw-template-<v>.zip` keep their names.
+
 ## [2.3.1] — 2026-09-08
 
 ### Fixed

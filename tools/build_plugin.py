@@ -24,7 +24,7 @@ Codex sets both PLUGIN_ROOT and (for compatibility) CLAUDE_PLUGIN_ROOT, so one f
 
 Packages written to dist/ (all reproducible from the repo):
   <plugin>-plugin-<v>.zip     each plugin directory alone (top-level folder `<plugin>/`)
-  tksfw-marketplace-<v>.zip   a self-contained marketplace root: both catalogs + plugins/*
+  tksfw-<v>.zip               the framework bundle (unzips to tksfw/): both catalogs + plugins/* + docs, README, CHANGELOG, CREDITS, VERSION
   tksfw-template-<v>.zip      the per-project method instance (template/) + tools/new_project.py
 A SHA256SUMS file accompanies the ZIPs (Claude Code `archive` sources can pin `sha256`).
 
@@ -241,11 +241,12 @@ def package(ver):
         p = os.path.join(DIST, f"{n}-plugin-{ver}.zip")
         zip_dir(p, [(os.path.join(PLUGINS_OUT, n), n)])
         made.append(p)
-    p = os.path.join(DIST, f"{NAME}-marketplace-{ver}.zip")
-    zip_dir(p, [(os.path.join(REPO, ".claude-plugin"), f"{NAME}-marketplace/.claude-plugin"),
-                (os.path.join(REPO, ".agents", "plugins"), f"{NAME}-marketplace/.agents/plugins")]
-            + [(os.path.join(PLUGINS_OUT, n), f"{NAME}-marketplace/plugins/{n}") for n in names]
-            + [(os.path.join(REPO, "docs", "distribution.md"), f"{NAME}-marketplace")])
+    p = os.path.join(DIST, f"{NAME}-{ver}.zip")                      # the framework bundle → unzips to tksfw/
+    zip_dir(p, [(os.path.join(REPO, ".claude-plugin"), f"{NAME}/.claude-plugin"),
+                (os.path.join(REPO, ".agents", "plugins"), f"{NAME}/.agents/plugins")]
+            + [(os.path.join(PLUGINS_OUT, n), f"{NAME}/plugins/{n}") for n in names]
+            + [(os.path.join(REPO, "docs"), f"{NAME}/docs")]
+            + [(os.path.join(REPO, f), NAME) for f in ("README.md", "CHANGELOG.md", "CREDITS.md", "VERSION") if os.path.isfile(os.path.join(REPO, f))])
     made.append(p)
     p = os.path.join(DIST, f"{NAME}-template-{ver}.zip")
     zip_dir(p, [(TEMPLATE, f"{NAME}-template/template"),

@@ -16,12 +16,12 @@ Once per machine (steps 1–7), once per project (8–10). Commands are for macO
 
 | Source | Who it is for | What you get | `<home>` in the steps below |
 |---|---|---|---|
-| **A. ZIP bundle** `dist/tksfw-marketplace-<v>.zip` (recommended for users) | Anyone using the framework; no git access to the TKSfw repo needed | A ready-made marketplace: both catalogs (`.agents/plugins/`, `.claude-plugin/`) and the built plugins `plugins/tksfw`, `plugins/tksfw-tools`. `ks` is inside the plugin at `plugins/tksfw/bin/ks` | the unzipped folder, e.g. `~/tksfw-marketplace` |
+| **A. ZIP bundle** `dist/tksfw-<v>.zip` (recommended for users) | Anyone using the framework; no git access to the TKSfw repo needed | The framework bundle, unzipping to `tksfw/`: both marketplace catalogs (`.agents/plugins/`, `.claude-plugin/`), the built plugins `plugins/tksfw`, `plugins/tksfw-tools`, the `docs/`, README, CHANGELOG, CREDITS. `ks` is inside the plugin at `plugins/tksfw/bin/ks` | the unzipped folder, `~/tksfw` |
 | **B. Git checkout** of the TKSfw repository | Framework maintainers, or teams that track releases with `git pull` | The full repo: sources, `template/`, `tools/ks`, tests, docs, and the same committed `plugins/` — the repo root is itself a marketplace | the checkout, e.g. `~/tksfw` |
 
 The other archives in `dist/` are not needed for this guide: `tksfw-plugin-<v>.zip` / `tksfw-tools-plugin-<v>.zip` are single-plugin archives for Claude Code's `archive` source or a hand-built personal marketplace; `tksfw-template-<v>.zip` is the bare project template (`docs/distribution.md`).
 
-The only differences between A and B are **paths**: where `ks` lives, where the completion script lives, and which folder you register as marketplace. The steps table shows both.
+Both unpack to `~/tksfw`, which is also the folder you register as marketplace. The only differences between A and B are the paths of `ks` and of the completion script (`plugins/tksfw/bin/` in the bundle, `tools/` in the checkout). The steps table shows both.
 
 ### Choice 2 — where the framework runs (install level)
 
@@ -36,21 +36,21 @@ Rationale: the method (AGENTS.md, ledgers, plan) is always project-local — tha
 
 | # | Step | A — ZIP bundle | B — Git checkout |
 |---|---|---|---|
-| 1 | Get the framework | `unzip tksfw-marketplace-<v>.zip -d ~` → creates `~/tksfw-marketplace/` (the archive has one top-level folder; that folder is `<home>`) | `git clone <TKSfw repo> ~/tksfw` |
-| 2 | Put `ks` on PATH | `python3 ~/tksfw-marketplace/plugins/tksfw/bin/ks self install` | `python3 ~/tksfw/tools/ks self install` |
+| 1 | Get the framework | `unzip tksfw-<v>.zip -d ~` → creates `~/tksfw/` (the archive has one top-level folder; that folder is `<home>`) | `git clone <TKSfw repo> ~/tksfw` |
+| 2 | Put `ks` on PATH | `python3 ~/tksfw/plugins/tksfw/bin/ks self install` | `python3 ~/tksfw/tools/ks self install` |
 |   | | Both: adds `~/.local/bin/ks` (symlink) and records `<home>` in `~/.config/tksfw/user.toml`; prints the completion line and a note if `~/.local/bin` is not on your PATH | |
-| 3 | Register the marketplace, install the plugin | Codex: `codex plugin marketplace add ~/tksfw-marketplace` | Codex: `codex plugin marketplace add ~/tksfw` |
+| 3 | Register the marketplace, install the plugin | Codex: `codex plugin marketplace add ~/tksfw` | same |
 |   | | Both: in Codex `/plugins` → install **tksfw** (and **tksfw-tools** if you use the Perplexity/Playwright MCP servers) → restart → `/hooks` → trust. Claude Code: `claude plugin marketplace add <home>` then `claude plugin install tksfw@tksfw --scope user` (+ `tksfw-tools@tksfw` optional). Full-mode-only users can skip this step: a full-mode project carries its own hooks and skills, and the bootstrap stanza comes from step 4, not from the plugin | |
 | 4 | One-shot user setup | `ks self setup --operator "Your Name"` — sets the operator (step 5), appends the bootstrap stanza to `~/.codex/AGENTS.md` and `~/.claude/CLAUDE.md` (idempotent), prints the completion hint | same |
 | 5 | Operator name (if you skipped `--operator`) | `ks operator set "Your Name"` → `~/.config/tksfw/user.toml`; every ledger entry you write carries it | same |
-| 6 | Shell completion (optional) | add `source ~/tksfw-marketplace/plugins/tksfw/bin/ks-completion.sh` to `~/.zshrc` / `~/.bashrc` | add `source ~/tksfw/tools/ks-completion.sh` |
+| 6 | Shell completion (optional) | add `source ~/tksfw/plugins/tksfw/bin/ks-completion.sh` to `~/.zshrc` / `~/.bashrc` | add `source ~/tksfw/tools/ks-completion.sh` |
 | 7 | Verify the install | `ks doctor` — must show 0 FAIL; each WARN names the step that fixes it. `ks self home` prints `<home>` as recorded | same |
 | 8 | Create (arm) a project | `cd <project> && ks project init` (plugin mode, recommended) or `ks project init --full` (project level — see Choice 2) | same |
 | 8b | Describe the project (optional, recommended) | Put the archetype in `KS_PROJECT.md` (L3: what kind of project this is and how such projects run) and the project spec in `KS_SPEC.md` (L4: what this one must deliver) at the project root. Other names or folders: `ks layers pin --l3 <path> --l4 <path>`. L4 alone is fine | same |
 | 9 | First session | Launch Codex or Claude Code in the project. SessionStart shows the session token, operator, routing table and the project layers (L3/L4) with their status. Type `/ks-start` to begin executing as the archetype prescribes. Codex asks to trust the project `.codex` layer (and the hooks in full mode) | same |
 | 10 | Acknowledge the hooks | After trusting in Codex: `ks harness retrust --ack`. From now on `ks doctor` / `ks harness retrust` tell you when a framework update needs re-trusting | same |
 
-If you ever run `ks` from a place it cannot resolve, set `TKSFW_HOME=<home>` — the lookup order is `TKSFW_HOME`, `~/.config/tksfw/user.toml`, the script's own location, then the harness plugin caches.
+If you ever run `ks` from a place it cannot resolve, set `TKSFW_HOME=<home>` (the bundle folder or the checkout; the plugin inside a bundle is found automatically) — the lookup order is `TKSFW_HOME`, `~/.config/tksfw/user.toml`, the script's own location, then the harness plugin caches.
 
 ## After that
 
@@ -68,4 +68,4 @@ If you ever run `ks` from a place it cannot resolve, set `TKSFW_HOME=<home>` —
 | Scope | Action |
 |---|---|
 | One project | `ks project disable` (inert, files kept) or delete `.agents/`, `AGENTS.md`, `CLAUDE.local.md`, `.codex/` |
-| User level | Codex `/plugins` → remove tksfw; `claude plugin uninstall tksfw@tksfw`; remove the stanza block from `~/.codex/AGENTS.md` and `~/.claude/CLAUDE.md`; `rm -r ~/.local/bin/ks ~/.config/tksfw`; delete `<home>` (`~/tksfw-marketplace` or `~/tksfw`) |
+| User level | Codex `/plugins` → remove tksfw; `claude plugin uninstall tksfw@tksfw`; remove the stanza block from `~/.codex/AGENTS.md` and `~/.claude/CLAUDE.md`; `rm -r ~/.local/bin/ks ~/.config/tksfw`; delete `<home>` (`~/tksfw`) |

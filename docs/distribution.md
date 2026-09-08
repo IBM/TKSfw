@@ -35,7 +35,7 @@ from `python3 .agents/hooks/X.py` to `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/X.py"
 | `plugins/tksfw/` | `.codex-plugin/plugin.json`, `.claude-plugin/plugin.json`, `skills/`, `hooks/` | the method plugin; committed so the repo root is itself a marketplace for both harnesses |
 | `plugins/tksfw-tools/` | both manifests, `mcp/codex.json`, `mcp/claude.json`, `hooks/check_tools.py` | optional MCP companion (Perplexity + Playwright) — see `mcp-tools.md` |
 | `dist/<plugin>-plugin-<v>.zip` | one plugin directory each | Claude Code `archive` source; manual unzip into a personal marketplace |
-| `dist/tksfw-marketplace-<v>.zip` | `tksfw-marketplace/` = both catalogs + `plugins/tksfw/` + `plugins/tksfw-tools/` | static hand-off for users without git access: unzip, add as local marketplace in either harness |
+| `dist/tksfw-<v>.zip` | `tksfw/` = both catalogs + `plugins/tksfw/` + `plugins/tksfw-tools/` + `docs/`, README, CHANGELOG, CREDITS, VERSION | static hand-off for users without git access: unzip, add as local marketplace in either harness |
 | `dist/tksfw-template-<v>.zip` | `template/` + `tools/new_project.py` | instantiating projects on machines without the repo |
 
 Why one shared `hooks/hooks.json` works for both harnesses: Claude Code exports
@@ -63,17 +63,17 @@ Keep `version` out of the marketplace entry — `plugin.json` wins silently.
 | Codex | `codex plugin marketplace add <git-url-or-owner/repo>` then `/plugins` → install **tksfw** → restart → `/hooks` trust | reads `.agents/plugins/marketplace.json`; `codex plugin marketplace upgrade` refreshes |
 | Claude Code | `claude plugin marketplace add <owner/repo or git URL>` then `claude plugin install tksfw@tksfw` | reads `.claude-plugin/marketplace.json`; `/plugin marketplace update` + `/plugin update tksfw` for new versions |
 
-### 3b. Static ZIP (no git, no hosting) — `tksfw-marketplace-<v>.zip`
+### 3b. Static ZIP (no git, no hosting) — `tksfw-<v>.zip` (the framework bundle)
 
-1. Unzip anywhere stable, e.g. `~/tksfw-marketplace/` (the folder must stay in place).
-2. Codex: `codex plugin marketplace add ~/tksfw-marketplace`, restart, `/plugins` → install, `/hooks` → trust.
+1. `unzip tksfw-<v>.zip -d ~` → `~/tksfw/` (the folder must stay in place; same `<home>` as a git checkout).
+2. Codex: `codex plugin marketplace add ~/tksfw`, restart, `/plugins` → install, `/hooks` → trust.
    Codex copies local plugins to `~/.codex/plugins/cache/tksfw/tksfw/local/`; after replacing the
    folder with a newer ZIP, restart Codex so the local install picks up the new files.
-3. Claude Code: `claude plugin marketplace add ~/tksfw-marketplace`, then `claude plugin install tksfw@tksfw`
-   (interactive: `/plugin marketplace add ~/tksfw-marketplace`, `/plugin install tksfw@tksfw`, `/reload-plugins`).
+3. Claude Code: `claude plugin marketplace add ~/tksfw`, then `claude plugin install tksfw@tksfw`
+   (interactive: `/plugin marketplace add ~/tksfw`, `/plugin install tksfw@tksfw`, `/reload-plugins`).
    Updates: unzip the new version over the folder, `/plugin marketplace update`, `/plugin update tksfw`.
 
-Validation before shipping (Claude Code CLI): `claude plugin validate ~/tksfw-marketplace` — and in
+Validation before shipping (Claude Code CLI): `claude plugin validate ~/tksfw` — and in
 Codex `codex plugin marketplace list` shows the root it resolved.
 
 ### 3c. Claude Code only — HTTPS ZIP as an `archive` source

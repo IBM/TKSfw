@@ -83,6 +83,17 @@ def home_kind(path):
     return None
 
 
+def resolve_home(path):
+    """`path` itself, or — when it is an unzipped bundle root (tksfw/ with plugins/tksfw inside) — the
+    plugin inside it. Lets TKSFW_HOME or user.toml name the bundle folder, not a path four levels down."""
+    if home_kind(path):
+        return path
+    inner = os.path.join(path or "", "plugins", "tksfw")
+    if path and home_kind(inner) == "plugin":
+        return inner
+    return None
+
+
 def candidate_homes():
     yield os.environ.get("TKSFW_HOME"), "TKSFW_HOME"
     yield user_toml().get("home"), "user.toml"
@@ -101,6 +112,7 @@ class Home:
     def __init__(self):
         self.path, self.how, self.kind = None, None, None
         for p, how in candidate_homes():
+            p = resolve_home(p)
             k = home_kind(p)
             if k:
                 self.path, self.how, self.kind = os.path.abspath(p), how, k
