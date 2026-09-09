@@ -1184,7 +1184,7 @@ def main():
         check("project ships .agents/config.toml (no models.toml)", os.path.isfile(os.path.join(cp3, ".agents", "config.toml")) and not os.path.exists(os.path.join(cp3, ".agents", "models.toml")))
         r = run([PY, ks, "routing", "list"], cwd=cp3, env=kenv)
         check("ks routing list: four tables, ibm-anthropic active via match, ibm-anthropic-cc marked default, models per tier",
-              r.returncode == 0 and "4 routing table(s)" in r.stdout and "ibm-anthropic     [active (codex model_provider (match))]" in r.stdout
+              r.returncode == 0 and "5 routing table(s)" in r.stdout and "ibm-anthropic     [active (codex model_provider (match))]" in r.stdout and "gpt-5.6-sol[1m]" in r.stdout
               and "ibm-anthropic-cc  [default]" in r.stdout and "claude-sonnet-5[1m]" in r.stdout and "gpt-5.6-terra" in r.stdout
               and "google/gemini-flash-latest" in r.stdout and "anthropic/claude-opus-latest" in r.stdout and "match: codex_model_provider=ibm" in r.stdout, r.stdout)
         bad = open(os.path.join(cp3, ".agents", "config.toml")).read().replace('default_routing = "ibm-anthropic-cc"', 'default_routing = "nope"')
@@ -1197,6 +1197,10 @@ def main():
         check("ks routing list marks the pinned table", "ibm-anthropic-cc  [pinned, default, active (selected (config.toml))]" in r.stdout, r.stdout)
         r = run([PY, ks, "routing", "resolve", "x-builder"], cwd=cp3, env=kenv)
         check("resolve under the pinned anthropic-cc table gives the 1M sonnet", "claude-sonnet-5[1m]" in r.stdout, r.stdout)
+        run([PY, ks, "routing", "use", "ibm-openai-cc"], cwd=cp3, env=kenv)
+        r = run([PY, ks, "routing", "resolve", "x-builder"], cwd=cp3, env=kenv)
+        check("ibm-openai-cc: 1M gpt-5.6-terra for Claude Code", '"gpt-5.6-terra[1m]"' in r.stdout, r.stdout)
+        run([PY, ks, "routing", "use", "ibm-anthropic-cc"], cwd=cp3, env=kenv)
         # legacy file name: readers accept models.toml; update renames it and keeps the pin
         os.replace(os.path.join(cp3, ".agents", "config.toml"), os.path.join(cp3, ".agents", "models.toml"))
         r = run([PY, ks, "routing", "show"], cwd=cp3, env=kenv)

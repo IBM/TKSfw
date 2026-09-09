@@ -36,6 +36,7 @@ Preferred harness: **Claude Code**. The IBM endpoint is one Codex provider (`mod
 | Table | Harness | research | build | judge | Selected by |
 |---|---|---|---|---|---|
 | `ibm-anthropic-cc` | Claude Code — **default** | claude-haiku-4-5 | claude-sonnet-5[1m] | claude-opus-5[1m] | `default_routing` (any Claude Code session without a gateway match) |
+| `ibm-openai-cc` | Claude Code | gpt-5.6-luna[1m] | gpt-5.6-terra[1m] | gpt-5.6-sol[1m] | `ks routing use ibm-openai-cc` (or `TKSFW_ROUTING`) |
 | `ibm-anthropic` | Codex | claude-haiku-4-5 | claude-sonnet-5 | claude-opus-5 | `match.codex_model_provider = "ibm"` — listed first, so it wins the provider match |
 | `ibm-openai` | Codex | gpt-5.6-luna | gpt-5.6-terra | gpt-5.6-sol | same match rule, listed second → `ks routing use ibm-openai` (or `TKSFW_ROUTING=ibm-openai`) to use it |
 | `openrouter` | Claude Code via gateway (example) | google/gemini-flash-latest | anthropic/claude-sonnet-latest | anthropic/claude-opus-latest | `match.claude_base_url = "https://openrouter.ai/api"` |

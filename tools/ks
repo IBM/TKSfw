@@ -1009,8 +1009,8 @@ Selection order at spawn: TKSFW_ROUTING → `selected` → Codex `model_provider
 with match.codex_model_provider, else table key) → Claude Code ANTHROPIC_BASE_URL prefix
 (match.claude_base_url) → `default_routing` → [routing.default] → deny.
 Shipped tables (IBM endpoint, provider "ibm"): ibm-anthropic-cc (Claude Code, 1M-context; the default),
-ibm-anthropic (Codex, Anthropic models; wins the provider match), ibm-openai (Codex, gpt-5.6-*), plus an
-openrouter example. Preferred harness: Claude Code.
+ibm-openai-cc (Claude Code, gpt-5.6-*[1m]), ibm-anthropic (Codex, Anthropic models; wins the provider
+match), ibm-openai (Codex, gpt-5.6-*), plus an openrouter example. Preferred harness: Claude Code.
 """,
     "hil": """ks hil — the Human-in-the-Loop threshold ([hil] in .agents/config.toml; AGENTS.md § Human in the Loop)
 

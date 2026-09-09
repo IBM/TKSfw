@@ -2,6 +2,11 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [3.1.1] — 2026-09-09
+
+### Added
+- `[routing.ibm-openai-cc]`: Claude Code against the IBM endpoint with OpenAI models in their 1M-context variants — gpt-5.6-luna[1m] / gpt-5.6-terra[1m] / gpt-5.6-sol[1m]. No match rule (the default remains `ibm-anthropic-cc`): `ks routing use ibm-openai-cc`. Docs, `ks help routing`, 1 new test (275 total).
+
 ## [3.1.0] — 2026-09-09
 
 ### Changed
