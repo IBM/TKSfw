@@ -1,5 +1,16 @@
+# Project-level Codex configuration (TKSfw). Codex ignores provider/profile keys here — those live in
+# ~/.codex/config.toml. What this file does: a named permission profile that hides archives and backups
+# from the agent while allowing writes inside the project (Codex permission profiles, beta).
+#
+# Permission profiles do not compose with the older `sandbox_mode`: if your ~/.codex/config.toml (or the
+# selected --profile) sets `sandbox_mode`, Codex uses that and silently ignores `default_permissions`.
+# Remove `sandbox_mode` from the user config to let this profile apply.
 default_permissions = "hardened"
 
-[permissions.hardened.filesystem]
-"_archive/**" = "none"
-"_backup/**" = "none"
+[permissions.hardened]
+description = "TKSfw: write inside the workspace; _archive/ and _backup/ are not readable"
+extends = ":workspace"
+
+[permissions.hardened.filesystem.":workspace_roots"]
+"_archive/**" = "deny"
+"_backup/**" = "deny"

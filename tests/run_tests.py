@@ -1135,6 +1135,15 @@ def main():
         check("AGENTS.md has the Human in the Loop section with the default and the Worker rule",
               "### Human in the Loop" in agents_md and "`Impact ≥ HIGH` **or** `Reversibility ≥ HARD`" in agents_md and "Workers never accept" in agents_md and "§ Human in the Loop" in agents_md)
 
+        # .codex/config.toml (2.5.1): permission-profile syntax Codex 0.15x accepts — no bare relative keys
+        import tomllib as _tl2
+        cc = _tl2.load(open(os.path.join(REPO, "template", ".codex", "config.toml"), "rb"))
+        fs = cc["permissions"][cc["default_permissions"]]["filesystem"]
+        bare = [k for k in fs if not (os.path.isabs(k) or k.startswith("~") or k.startswith(":"))]
+        check("template .codex/config.toml: filesystem keys are absolute, ~/ or :tokens; deny rules under :workspace_roots; extends :workspace",
+              not bare and fs[":workspace_roots"].get("_archive/**") == "deny" and cc["permissions"]["hardened"].get("extends") == ":workspace"
+              and "none" not in json.dumps(fs), str(fs))
+
         # 23 — install log and post-init guidance
         ip = os.path.join(tmp, "instp")
         r = run([PY, ks, "project", "init", ip], cwd=tmp, env=kenv)

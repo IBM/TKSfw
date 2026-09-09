@@ -52,6 +52,20 @@ Rationale: the method (AGENTS.md, ledgers, plan) is always project-local — tha
 
 If you ever run `ks` from a place it cannot resolve, set `TKSFW_HOME=<home>` (the bundle folder or the checkout; the plugin inside a bundle is found automatically) — the lookup order is `TKSFW_HOME`, `~/.config/tksfw/user.toml`, the script's own location, then the harness plugin caches.
 
+## If step 3 fails
+
+| Message | Cause | Fix |
+|---|---|---|
+| `failed to load configuration … legacy \`profile = "<name>"\` config is no longer supported; use --profile <name> with <name>.config.toml` | Codex ≥ 0.15x dropped the top-level `profile` key and the `[profiles.<name>]` tables in `~/.codex/config.toml` (not written by TKSfw; a pre-existing personal setting). Every `codex` command fails until it is fixed | Delete the `profile = …` line; move the keys you want as machine defaults (`model`, `model_reasoning_effort`, `sandbox_mode`) to the top level; move each `[profiles.<name>]` table into its own file `~/.codex/<name>.config.toml` (plain names only — `sol`, not `gpt-5.6-sol`) and select it with `codex --profile <name>` ([Codex config reference](https://developers.openai.com/codex/config-reference)) |
+| `failed to create marketplace install directory ~/.codex/.tmp/marketplaces: Operation not permitted` | The shell running `codex` cannot write to `~/.codex` (sandboxed or remote shell) | Run the command in your own terminal |
+
+## If the first session fails to start
+
+| Message | Cause | Fix |
+|---|---|---|
+| `Error loading configuration: filesystem path \`_archive/**\` must be absolute, use \`~/...\`, or start with \`:\`` | The project's `.codex/config.toml` predates 2.5.1 (old permission syntax) | `ks project update` in the project (refreshes an unmodified `.codex/config.toml`); if you edited it, replace the `[permissions.hardened.filesystem]` table with the 2.5.1 template (`extends = ":workspace"`, deny rules under `[permissions.hardened.filesystem.":workspace_roots"]`) |
+| The archive/backup folders are still readable by the agent | `sandbox_mode` is set in `~/.codex/config.toml` or the selected `--profile`; Codex then ignores `default_permissions` (permission profiles do not compose with the older sandbox settings — [Codex permissions](https://developers.openai.com/codex/permissions)) | Remove `sandbox_mode` from the user config to let the project profile apply, or accept the older sandbox behaviour |
+
 ## After that
 
 | Need | Command |

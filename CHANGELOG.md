@@ -2,6 +2,12 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [2.5.1] — 2026-09-09
+
+### Fixed
+- Codex refused to start in a freshly armed project: `Error loading configuration: filesystem path \`_archive/**\` must be absolute, use \`~/...\`, or start with \`:\``. The template `.codex/config.toml` used pre-beta permission syntax (bare relative keys, value `none`). Now: `[permissions.hardened]` with `extends = ":workspace"` and the deny rules under `[permissions.hardened.filesystem.":workspace_roots"]` (`"_archive/**" = "deny"`, `"_backup/**" = "deny"`), per the [Codex permissions](https://developers.openai.com/codex/permissions) reference. Existing projects: `ks project update` refreshes an unmodified `.codex/config.toml`.
+- Documented the interplay with the older sandbox settings: when `sandbox_mode` is set in `~/.codex/config.toml` or the selected profile, Codex ignores `default_permissions` (no error; the project profile simply does not apply). `docs/getting-started.md`: "If the first session fails to start" table. 1 new test (260 total).
+
 ## [2.5.0] — 2026-09-09
 
 ### Added
