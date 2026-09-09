@@ -2,6 +2,14 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [3.3.0] — 2026-09-09
+
+### Fixed
+- Claude Code rejected routed spawns with third-party ids ("Agent tool only accepts sonnet, opus, haiku, fable"): the per-spawn `model` parameter takes aliases only. The hook now injects the tier's alias for Claude Code (research → `haiku`, build → `sonnet`, judge → `opus`; override with `[claude_aliases]` in `config.toml`) and names the concrete id in `additionalContext`; `ks routing use` / `project init|update` write the alias → id map as `ANTHROPIC_DEFAULT_{HAIKU,SONNET,OPUS}_MODEL` into `.claude/settings.local.json` `env` (next launch) and re-render the agent mirrors (`.claude/agents/*.md` keep the full routed id and take precedence). Codex spawns unchanged.
+
+### Changed
+- `ks routing use` re-renders agent mirrors in plugin mode too (via `agentlib`, which the plugin ships). `sync_harness.py` honours `TKSFW_PROJECT_ROOT`. `route_model.py --main --claude` reports `alias` and `aliases`. Docs: "Claude Code and third-party model ids" (also clarifies that `.agents/agents/*.toml` is the neutral source, not a Codex file). Tests updated (282 total).
+
 ## [3.2.0] — 2026-09-09
 
 ### Added

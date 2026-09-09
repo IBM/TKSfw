@@ -90,6 +90,29 @@ A pinned table applies to both harnesses: pin a `-cc` table only in projects you
 would be handed `…[1m]` ids). Unpinned, the selection is harness-aware (provider match for Codex,
 `default_routing` for Claude Code).
 
+## Claude Code and third-party model ids (3.3.0)
+
+Claude Code's Agent tool accepts only the aliases `sonnet`, `opus`, `haiku`, `fable` in its per-spawn `model`
+parameter, while agent frontmatter, `/model`, `--model` and the `ANTHROPIC_DEFAULT_<ALIAS>_MODEL` variables
+accept full ids ([model configuration](https://code.claude.com/docs/en/model-config),
+[subagents](https://code.claude.com/docs/en/sub-agents)). TKSfw therefore uses three channels together:
+
+| Channel | Content | Written by |
+|---|---|---|
+| Spawn (`updatedInput.model`) | the tier's **alias**: research → `haiku`, build → `sonnet`, judge → `opus` (override: `[claude_aliases]` in `config.toml`, `tier = "alias"`) | `route_model.py` at every spawn |
+| Alias map (`env` in `.claude/settings.local.json`) | `ANTHROPIC_DEFAULT_HAIKU_MODEL` / `SONNET` / `OPUS` = the table's research / build / judge ids — this is how a gateway model such as `gpt-5.6-terra[1m]` is reached through an alias | `ks routing use`, `ks project init|update`; applies at the next launch |
+| Custom agent frontmatter (`.claude/agents/<name>.md`) | `model: <full routed id>` — takes precedence over the alias, so custom agents are exact even before a restart | the hook on every agent write; `ks routing use` re-renders all mirrors |
+
+Built-in agent types (`Explore`, `Plan`, `general-purpose`) have no frontmatter and rely on the alias map, so
+**restart Claude Code after `ks routing use`** for them to follow. The hook's `additionalContext` always names
+the concrete id ("spawned as alias `sonnet` → gpt-5.6-terra[1m] via ANTHROPIC_DEFAULT_SONNET_MODEL") and the
+ledger entries record that id. Anthropic states it does not support routing Claude Code to non-Claude models
+through gateways ([LLM gateway](https://code.claude.com/docs/en/llm-gateway)); the mechanism above is the
+documented alias-override path, and it works as far as the gateway accepts the ids.
+
+`.agents/agents/<name>.toml` is the harness-neutral **source** of an agent definition (ADR 0004), not a Codex
+file: `.codex/agents/<name>.toml` and `.claude/agents/<name>.md` are generated from it.
+
 ## Changing models mid-session
 
 1. Wait for running subagents to finish.

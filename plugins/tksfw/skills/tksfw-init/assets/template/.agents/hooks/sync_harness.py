@@ -54,7 +54,7 @@ import shutil
 import hashlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
+ROOT = os.environ.get("TKSFW_PROJECT_ROOT") or os.path.normpath(os.path.join(HERE, "..", ".."))   # plugin mode: ks passes the project root
 os.environ.setdefault("TKSFW_PROJECT_ROOT", ROOT)          # hooklib must agree on the root
 sys.path.insert(0, HERE)
 import route_model as RM  # noqa: E402

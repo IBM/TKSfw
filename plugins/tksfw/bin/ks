@@ -552,12 +552,22 @@ def apply_main_model(proj, quiet=False):
                 data = json.load(open(sl, encoding="utf-8"))
             except Exception:
                 data = {}
-        if data.get("model") != cl["model"]:
+        env = dict(data.get("env") or {})
+        for k in [k for k in env if k.startswith("ANTHROPIC_DEFAULT_") and k.endswith("_MODEL")]:
+            env.pop(k)
+        for alias, mid in (cl.get("aliases") or {}).items():          # alias → routed id (third-party ids included)
+            if alias and mid:
+                env[f"ANTHROPIC_DEFAULT_{alias.upper()}_MODEL"] = mid
+        changed = data.get("model") != cl["model"] or (data.get("env") or {}) != env
+        if changed:
             data["model"] = cl["model"]
+            data["env"] = env
             os.makedirs(os.path.dirname(sl), exist_ok=True)
             json.dump(data, open(sl, "w", encoding="utf-8"), indent=2)
             open(sl, "a", encoding="utf-8").write("\n")
+        amap = ", ".join(f"{a}→{m}" for a, m in (cl.get("aliases") or {}).items())
         lines.append(f"Claude Code main session → {cl['model']} (judge tier of [routing.{cl['routing']}]; .claude/settings.local.json, next launch — now: `/model {cl['model']}`)")
+        lines.append(f"Claude Code subagent aliases → {amap} (ANTHROPIC_DEFAULT_*_MODEL in .claude/settings.local.json; applies at the next launch — restart Claude Code after a routing change)")
     cx = mm.get("codex") or {}
     if cx.get("model"):
         cp = os.path.join(proj.root, ".codex", "config.toml")
@@ -574,6 +584,22 @@ def apply_main_model(proj, quiet=False):
         if new != text:
             open(cp, "w", encoding="utf-8").write(new)
         lines.append(f"Codex main session → {cx['model']}" + (f" / {cx['reasoning_effort']}" if cx.get("reasoning_effort") else "") + f" (judge tier of [routing.{cx['routing']}]; .codex/config.toml, next launch — now: `/model`)")
+    # re-render the agent mirrors (.claude/agents/*.md carry the full routed id; .codex/agents/*.toml the id + effort)
+    agents_dir = os.path.join(proj.root, ".agents", "agents")
+    if os.path.isdir(agents_dir) and any(f.endswith(".toml") for f in os.listdir(agents_dir)):
+        code = ("import sys, json; sys.path.insert(0, sys.argv[1]); import agentlib; "
+                "res = agentlib.sync(check=False); print(json.dumps([list(r[:2]) for r in res]))")
+        r = run([PY, "-c", code, proj.hooks], cwd=proj.root, env=proj.env(), capture=True)
+        try:
+            res = json.loads((r.stdout or "").strip().splitlines()[-1])
+            n = len([x for x in res if x[0] == "wrote"])
+            bad = [x for x in res if x[0] == "conflict"]
+        except Exception:
+            n, bad = 0, []
+        if n:
+            lines.append(f"Agent mirrors re-rendered with the routed models: {n} file(s) (.claude/agents, .codex/agents)")
+        if bad:
+            lines.append(f"Agent mirrors NOT rendered for {len(bad)} source(s) — fix them (`ks harness sync --check` in full mode): " + ", ".join(x[1] for x in bad))
     if not quiet:
         for l in lines:
             print(l)
@@ -1063,6 +1089,10 @@ changes.yaml (Layer METHOD) — nothing to write by hand.
   ks routing use <table>            pin a table (`selected = "<table>"`); applies to the next spawn, no
                                     restart. Refuses while agents are live (--force).
   ks routing use --clear            unpin → automatic selection.
+
+Claude Code spawns use aliases (research→haiku, build→sonnet, judge→opus); `ks routing use` writes the alias →
+routed-id map (ANTHROPIC_DEFAULT_*_MODEL) into .claude/settings.local.json and re-renders the agent mirrors.
+Restart Claude Code after a routing change so built-in agents follow; custom agents follow at once.
 
 The main session runs on the judge tier of the active table: `ks routing use` / `project init|update` write it
 to .claude/settings.local.json (Claude Code) and .codex/config.toml (Codex) for the next launch and print the

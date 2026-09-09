@@ -257,14 +257,22 @@ def deny(reason):
                                    "permissionDecisionReason": reason}})
 
 
-def allow(tool_input, res, harness):
+def allow(tool_input, res, harness, table=None):
     new = dict(tool_input)
-    new["model"] = res["model"]
+    alias = claude_alias(table or {}, res["tier"]) if harness == "claude" else None
+    if alias:
+        # Claude Code's Agent tool schema accepts only aliases here; the alias resolves to the routed id
+        # through ANTHROPIC_DEFAULT_<ALIAS>_MODEL (written by ks into .claude/settings.local.json), and a
+        # custom agent's own frontmatter (.claude/agents/<name>.md, full id) takes precedence anyway.
+        new["model"] = alias
+    else:
+        new["model"] = res["model"]
     if harness == "codex" and res.get("reasoning_effort"):
         new["reasoning_effort"] = res["reasoning_effort"]
     eff = f" ({res['reasoning_effort']})" if res.get("reasoning_effort") else ""
+    via = f" (spawned as alias `{alias}` → {res['model']} via ANTHROPIC_DEFAULT_{alias.upper()}_MODEL)" if alias else ""
     ctx = (f"TKSfw routing: {res['agent']} → role {res['role']} → tier {res['tier']} → "
-           f"model {res['model']}{eff} [routing.{res['routing']}]. Record `Model: {res['model']}` "
+           f"model {res['model']}{eff} [routing.{res['routing']}]{via}. Record `Model: {res['model']}` "
            f"in the handoffs.yaml / events.yaml entries for this delegation.")
     H.emit({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow",
                                    "updatedInput": new, "additionalContext": ctx}})
@@ -300,6 +308,16 @@ def print_table(harness):
 
 
 MAIN_TIER = "judge"                                   # the main session orchestrates, plans and judges
+CLAUDE_ALIASES = {"research": "haiku", "build": "sonnet", "judge": "opus"}   # override: [claude_aliases] tier = "alias"
+
+
+def claude_alias(table, tier):
+    """Claude Code's Agent tool accepts only the aliases sonnet|opus|haiku|fable in its per-spawn `model`
+    parameter (3.3.0). Each tier maps to one alias; `ks` writes ANTHROPIC_DEFAULT_<ALIAS>_MODEL into
+    .claude/settings.local.json so the alias resolves to the routed model id (third-party ids included)."""
+    ov = table.get("claude_aliases") if isinstance(table.get("claude_aliases"), dict) else {}
+    a = str(ov.get(tier) or CLAUDE_ALIASES.get(tier) or "").lower()
+    return a if a in ("sonnet", "opus", "haiku", "fable") else None
 
 
 def main_model(harness):
@@ -312,8 +330,12 @@ def main_model(harness):
     if tab is None:
         return {"harness": harness, "routing": None, "selected_by": how, "tier": MAIN_TIER, "model": None, "reasoning_effort": None}
     e = tab.get(MAIN_TIER) or {}
-    return {"harness": harness, "routing": key, "selected_by": how, "tier": MAIN_TIER,
-            "model": e.get("model"), "reasoning_effort": e.get("reasoning_effort")}
+    out = {"harness": harness, "routing": key, "selected_by": how, "tier": MAIN_TIER,
+           "model": e.get("model"), "reasoning_effort": e.get("reasoning_effort")}
+    if harness == "claude":                          # alias → id map for ANTHROPIC_DEFAULT_<ALIAS>_MODEL
+        out["alias"] = claude_alias(table, MAIN_TIER)
+        out["aliases"] = {claude_alias(table, t): (tab.get(t) or {}).get("model") for t in (table.get("tiers") or {}) if claude_alias(table, t)}
+    return out
 
 
 def main():
@@ -383,7 +405,7 @@ def main():
              "tool": tool_name, **{k: v for k, v in res.items() if k != "ok"}, "allowed": res["ok"]
              or (res.get("unknown_role") and table.get("on_unknown_role") == "inherit")})
     if res["ok"]:
-        allow(tool_input, res, harness)
+        allow(tool_input, res, harness, table)
     elif res.get("unknown_role") and (table.get("on_unknown_role") or "deny") == "inherit":
         sys.exit(0)
     else:

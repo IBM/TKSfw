@@ -242,16 +242,17 @@ def main():
         r, out = hook("Agent", {"subagent_type": "report-builder", "prompt": "p", "description": "d"},
                       env=base_env | {"ANTHROPIC_BASE_URL": "https://openrouter.ai/api/v1"}, extra={"prompt_id": "p1"})
         hs = out.get("hookSpecificOutput", {})
-        check("routing claude: builder → openrouter table by ANTHROPIC_BASE_URL, model only",
-              hs.get("permissionDecision") == "allow" and hs.get("updatedInput", {}).get("model") == "anthropic/claude-sonnet-latest"
+        check("routing claude: builder → openrouter table by ANTHROPIC_BASE_URL; spawn carries the alias, context the id (3.3.0)",
+              hs.get("permissionDecision") == "allow" and hs.get("updatedInput", {}).get("model") == "sonnet"
+              and "anthropic/claude-sonnet-latest" in hs.get("additionalContext", "") and "ANTHROPIC_DEFAULT_SONNET_MODEL" in hs.get("additionalContext", "")
               and "reasoning_effort" not in hs.get("updatedInput", {}), r.stdout + r.stderr)
         r, out = hook("Agent", {"subagent_type": "x-planner", "prompt": "p"}, env=base_env, extra={"prompt_id": "p2"})
         hs = out.get("hookSpecificOutput", {})
         check("routing: TKSFW_ROUTING override", hook("Agent", {"subagent_type": "x-planner", "prompt": "p"},
               env=base_env | {"TKSFW_ROUTING": "openrouter"}, extra={"prompt_id": "p3"})[1]
-              .get("hookSpecificOutput", {}).get("updatedInput", {}).get("model") == "anthropic/claude-opus-latest")
+              .get("hookSpecificOutput", {}).get("updatedInput", {}).get("model") == "opus")
         check("routing claude without base URL: default_routing → ibm-anthropic-cc (1M sonnet/opus)",
-              hs.get("permissionDecision") == "allow" and hs.get("updatedInput", {}).get("model") == "claude-opus-5[1m]" and "[routing.ibm-anthropic-cc]" in hs.get("additionalContext", ""), r.stdout)
+              hs.get("permissionDecision") == "allow" and hs.get("updatedInput", {}).get("model") == "opus" and "claude-opus-5[1m]" in hs.get("additionalContext", "") and "[routing.ibm-anthropic-cc]" in hs.get("additionalContext", ""), r.stdout)
         r, out = hook("spawn_agent", {"agent_type": "atlas"}, env=base_env, extra={"turn_id": "t2"})
         hs = out.get("hookSpecificOutput", {})
         check("routing: unknown role denied", hs.get("permissionDecision") == "deny" and "atlas" in hs.get("permissionDecisionReason", ""), r.stdout)
@@ -1239,6 +1240,17 @@ def main():
         check("routing use rewrites both main-session models and says how to switch now",
               json.load(open(sl))["model"] == "gpt-5.6-sol[1m]" and 'model = "gpt-5.6-sol[1m]"' in cc and cc.count("model_reasoning_effort") == 1
               and "now: `/model gpt-5.6-sol[1m]`" in r.stdout, r.stdout + cc)
+        envm = json.load(open(sl)).get("env", {})
+        check("routing use writes the Claude Code alias map (ANTHROPIC_DEFAULT_*_MODEL) for third-party ids",
+              envm == {"ANTHROPIC_DEFAULT_HAIKU_MODEL": "gpt-5.6-luna[1m]", "ANTHROPIC_DEFAULT_SONNET_MODEL": "gpt-5.6-terra[1m]", "ANTHROPIC_DEFAULT_OPUS_MODEL": "gpt-5.6-sol[1m]"}
+              and "subagent aliases → haiku→gpt-5.6-luna[1m]" in r.stdout, json.dumps(envm) + r.stdout[-400:])
+        # agent mirrors re-rendered on routing use (plugin mode) with the full routed id in Claude frontmatter
+        open(os.path.join(mp5, ".agents", "agents", "cv-writer.toml"), "w").write('name = "cv-writer"\ndescription = "MUST BE USED for writing CVs."\ndeveloper_instructions = "Write."\n')
+        r = run([PY, ks, "routing", "use", "ibm-anthropic-cc", "--force"], cwd=mp5, env=kenv)
+        cm = os.path.join(mp5, ".claude", "agents", "cv-writer.md")
+        check("routing use re-renders agent mirrors in plugin mode; Claude frontmatter carries the routed id",
+              os.path.isfile(cm) and "model: claude-sonnet-5[1m]" in open(cm).read() and "Agent mirrors re-rendered" in r.stdout, r.stdout[-300:] + (open(cm).read() if os.path.isfile(cm) else ""))
+        r = run([PY, ks, "routing", "use", "ibm-openai-cc", "--force"], cwd=mp5, env=kenv)
         _tl3.loads(cc)
         r = run([PY, ks, "project", "update", mp5, "--force"], cwd=tmp, env=kenv)
         cc = open(os.path.join(mp5, ".codex", "config.toml")).read()
