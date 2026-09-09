@@ -12,10 +12,11 @@
     python3 tools/new_project.py --set-operator "Carlos Veira"    # write ~/.config/tksfw/user.toml (per user, once)
     python3 tools/new_project.py --show-operator                  # resolved operator name and its source
 
-Full mode copies:   AGENTS.md, CLAUDE.local.md, .agents/{hooks,skills,workarea}, .codex/
+Full mode copies:   AGENTS.md, CLAUDE.local.md, .agents/{hooks,skills,workarea}, .codex/, .claude/settings.json
                     then runs .agents/hooks/sync_harness.py (generates .codex/hooks.json,
                     .claude/settings.json and the .claude/skills mirrors).
-Plugin mode copies: AGENTS.md, CLAUDE.local.md, .agents/workarea/, .codex/config.toml, .codex/prompts/
+Plugin mode copies: AGENTS.md, CLAUDE.local.md, .agents/workarea/, .codex/config.toml, .codex/prompts/,
+                    .claude/settings.json (permission deny rules — the Claude Code twin of .codex/config.toml)
                     (no hooks, no skills, no harness mirrors — the plugin provides them).
 
 A manifest `.agents/.tksfw.json` records the framework version, `enabled` (the ARMING switch every

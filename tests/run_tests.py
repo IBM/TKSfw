@@ -1135,6 +1135,13 @@ def main():
         check("AGENTS.md has the Human in the Loop section with the default and the Worker rule",
               "### Human in the Loop" in agents_md and "`Impact ≥ HIGH` **or** `Reversibility ≥ HARD`" in agents_md and "Workers never accept" in agents_md and "§ Human in the Loop" in agents_md)
 
+        # .claude/settings.json (2.6.0): Claude Code twin of the Codex permission profile, in both modes
+        for _mode, _proj in (("plugin", ip_probe := os.path.join(tmp, "clprobe")), ("full", os.path.join(tmp, "clprobe_full"))):
+            run([PY, ks, "project", "init", _proj] + (["--full"] if _mode == "full" else []), cwd=tmp, env=kenv)
+            cs = json.load(open(os.path.join(_proj, ".claude", "settings.json")))
+            check(f".claude/settings.json installed in {_mode} mode with the deny rules" + (" and hooks (sync_harness kept the other keys)" if _mode == "full" else ""),
+                  cs["permissions"]["deny"] == ["Read(./_archive/**)", "Read(./_backup/**)"] and (_mode == "plugin" or cs.get("hooks")), json.dumps(cs)[:300])
+
         # .codex/config.toml (2.5.1): permission-profile syntax Codex 0.15x accepts — no bare relative keys
         import tomllib as _tl2
         cc = _tl2.load(open(os.path.join(REPO, "template", ".codex", "config.toml"), "rb"))

@@ -2,6 +2,19 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [2.6.1] — 2026-09-09
+
+### Fixed
+- 2.6.0 shipped `.claude/settings.json` only in the built plugin: the source `template/.claude/settings.json` was swallowed by the `.gitignore` rule for the generated `template/.claude/` mirrors, so `tools/build_plugin.py` on a fresh checkout removed it again and the 2.6.0 tests failed (`FileNotFoundError … clprobe/.claude/settings.json`). The rule is now `template/.claude/*` with `!template/.claude/settings.json`; the source file is committed.
+
+## [2.6.0] — 2026-09-09
+
+### Added
+- `template/.claude/settings.json`: Claude Code project settings with `permissions.deny` for `Read(./_archive/**)` and `Read(./_backup/**)` — the twin of the Codex permission profile in `.codex/config.toml`. Installed in both modes (plugin mode: 9 files); in full mode `sync_harness.py` adds the `hooks` key and keeps the rest. `ks project update` adds it to existing projects. 2 new tests (262 total).
+
+### Clarified
+- What a plugin-mode project contains for Claude Code and why there is no `.claude/skills` or hooks in it (they come from the plugin; `CLAUDE.local.md` is the entry point; `.claude/agents/` is rendered when the first agent is defined) — `docs/getting-started.md`, Choice 2.
+
 ## [2.5.1] — 2026-09-09
 
 ### Fixed

@@ -11,5 +11,6 @@ __pycache__/
 # project runtime state must never be committed from a template test run
 template/.agents/workarea/.hook-state/
 template/.agents/workarea/STATE.md
-template/.claude/
+template/.claude/*
+!template/.claude/settings.json
 template/.codex/hooks.json
