@@ -100,7 +100,7 @@
 
 - Use the Playwright MCP tools to interact with websites; their temporary files and screenshots MUST live inside the `.playwright` folder.
 - Use the Perplexity MCP tools to search and verify data over the internet.
-- `ks` (the framework command line) may be run through the shell tool when the operator asks for an operational change — e.g. `ks routing use <table>`, `ks ledger archive-plan`; such changes are METHOD-layer and logged in `changes.yaml`.
+- `ks` (the framework CLI) may be run through the shell tool when the operator asks for an operational change — e.g. `ks routing use <table>`, `ks ledger archive-plan`; such changes are METHOD-layer and logged in `changes.yaml`.
 
 ### Skill Layering
 
@@ -116,7 +116,7 @@
 #### Project Layers (L3 / L4)
 
 - The session-start block lists the project layers when present: L3 `KS_PROJECT.md` (archetype) and L4 `KS_SPEC.md` (project spec), or the paths pinned under `layers` in `.agents/.tksfw.json`. **Read them in full before planning or executing**; re-read any marked *changed*. L4 overrides L3; **neither overrides this file or the method** — on a conflict follow the method and log a `decisions.yaml` entry titled `Layer conflict: …` (Scope: layer, rule, resolution).
-- Start execution as the archetype prescribes with `/ks-start` (the `ks-start` skill). Edits: L3 = `Layer: ARCHETYPE`, L4 = `Layer: PROJECT`.
+- Start execution as the archetype prescribes with the `ks-start` skill; re-read edited instructions with `ks-reload`. Edits: L3 = `Layer: ARCHETYPE`, L4 = `PROJECT`.
 
 #### Activity Plan
 

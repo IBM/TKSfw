@@ -2,6 +2,16 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [2.7.0] — 2026-09-09
+
+### Fixed
+- `/ks-start` was "Unrecognized command" in Codex: the template shipped Codex custom prompts under the project's `.codex/prompts/`, but Codex reads custom prompts only from `~/.codex/prompts/` (as `/prompts:<name>`) and has deprecated them in favour of skills ([Codex custom prompts](https://developers.openai.com/codex/custom-prompts)). The start is the `ks-start` skill, which both harnesses already had: Codex `$ks-start` (or `/skills`), Claude Code `/tksfw:ks-start` (`/ks-start` when unambiguous). Post-init message, AGENTS.md § Project Layers, getting-started, operations, README, ADR 0013 and the tksfw-init skill now say so.
+
+### Changed
+- `template/.codex/prompts/` removed. The reload prompt became the `ks-reload` skill (re-read AGENTS.md, L3, L4 from disk after edits; journals the hashes). Both harnesses see it (Codex `$ks-reload`, Claude Code `/tksfw:ks-reload`).
+- `ks project update` now removes files the template no longer ships when they are still byte-identical to what was installed ("removed (retired by the template, pristine)"); edited copies are kept and listed for manual deletion. Existing projects lose their dead `.codex/prompts/*.md` on the next update.
+- AGENTS.md 18,973 B. 2 new tests (264 total).
+
 ## [2.6.1] — 2026-09-09
 
 ### Fixed

@@ -15,8 +15,10 @@
 Full mode copies:   AGENTS.md, CLAUDE.local.md, .agents/{hooks,skills,workarea}, .codex/, .claude/settings.json
                     then runs .agents/hooks/sync_harness.py (generates .codex/hooks.json,
                     .claude/settings.json and the .claude/skills mirrors).
-Plugin mode copies: AGENTS.md, CLAUDE.local.md, .agents/workarea/, .codex/config.toml, .codex/prompts/,
+Plugin mode copies: AGENTS.md, CLAUDE.local.md, .agents/workarea/, .codex/config.toml,
                     .claude/settings.json (permission deny rules — the Claude Code twin of .codex/config.toml)
+--update also removes files the template no longer ships when they are still byte-identical to what was
+installed (pristine); an edited copy is kept and listed.
                     (no hooks, no skills, no harness mirrors — the plugin provides them).
 
 A manifest `.agents/.tksfw.json` records the framework version, `enabled` (the ARMING switch every
@@ -188,6 +190,23 @@ def main():
         else:
             kept.append(rel)                           # locally edited (or pre-existing): never overwrite
 
+    removed, retired_kept = [], []
+    for rel, h in prev_hashes.items():                 # files the template no longer ships (2.7.0)
+        if rel in new_hashes:
+            continue
+        dst = os.path.join(target, rel)
+        if not os.path.exists(dst):
+            continue
+        if sha256(dst) == h:
+            os.remove(dst)
+            removed.append(rel)
+            d = os.path.dirname(dst)
+            while d != target and os.path.isdir(d) and not os.listdir(d):
+                os.rmdir(d)
+                d = os.path.dirname(d)
+        else:
+            retired_kept.append(rel)
+
     manifest = {"framework": "TKSfw", "version": version(), "plugin_mode": plugin_mode,
                 "enabled": (prev or {}).get("enabled", True) is not False, "files": new_hashes}
     for keep in ("resets", "layers", "installs"):          # generation history (ks project reset); L3/L4 paths (ks layers pin); install log
@@ -207,7 +226,8 @@ def main():
         fh.write("\n")
 
     print(f"TKSfw v{manifest['version']} → {target}  ({'plugin' if plugin_mode else 'full'} mode)")
-    for label, items in (("installed", installed), ("refreshed", refreshed), ("kept (edited locally)", kept)):
+    for label, items in (("installed", installed), ("refreshed", refreshed), ("kept (edited locally)", kept),
+                         ("removed (retired by the template, pristine)", removed), ("retired but edited locally — delete by hand", retired_kept)):
         if items:
             print(f"  {label}: {len(items)}")
             for r in items[:40]:
@@ -231,7 +251,8 @@ def main():
         print("  1. Launch Codex (or Claude Code) in this folder. Codex asks to trust the project's .codex layer — accept —")
         print("     and lists the project's hooks: type /hooks and trust them (full mode ships its own hooks).")
         print("  2. `ks harness retrust --ack` to record that trust, then `ks doctor` — 0 FAIL means ready.")
-    print("  3. Optional: describe the project in KS_PROJECT.md (L3) / KS_SPEC.md (L4), then start a session with /ks-start.")
+    print("  3. Optional: describe the project in KS_PROJECT.md (L3) / KS_SPEC.md (L4).")
+    print("  4. Start the run with the ks-start skill: Codex `$ks-start` (or /skills → ks-start); Claude Code `/tksfw:ks-start` (`/ks-start` when unambiguous).")
     if kept:
         print(f"\nReview the {len(kept)} locally edited file(s) against template/ and merge by hand.")
 

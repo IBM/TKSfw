@@ -19,14 +19,14 @@ flexible; remote libraries and their distribution (areas 2 and 3) are roadmap.
 | Status against a per-host record (`layers.json`): `new` / `unchanged` / `changed` / `missing`; the hook and `ks layers journal` (called by `/ks-start`) write the baseline | `changed` is the drift signal that forces a re-read instead of trusting stale context. Same hash algorithm as the journal (`sha256_file`) |
 | L3/L4 are watched INPUTS: class `layer:l3` / `layer:l4`, journaled by PostToolUse, reported by the Stop hook and STATE.md as "Project layer edits … (Layer: ARCHETYPE for L3 / PROJECT for L4)" | Mid-run edits to the spec are exactly the drift an operator wants flagged; the taxonomy in AGENTS.md already maps L3 → ARCHETYPE, L4 → PROJECT |
 | Precedence: L4 overrides L3; neither overrides L2/L1. A conflict is logged as a `decisions.yaml` entry titled `Layer conflict: …` (Scope: layer, rule, resolution) — no new ledger kind | A new kind would touch the validated schema, the hook validator, the skill and its tests for a rare event; a Title prefix is greppable and schema-neutral |
-| `ks-start` skill (Group A, in the core plugin; Codex prompt `/prompts:ks-start` and Claude `/ks-start`) = the explicit start: resolve → (offer `pin` when paths were passed) → read L3 then L4 → check precedence → `ks layers journal` → run the L3 start protocol → report | Loading is automatic and silent; starting is user intent and deterministic. Separating the two means a user who never types `/ks-start` is still correctly briefed |
+| `ks-start` skill (Group A, in the core plugin; invoked as a skill: Codex `$ks-start`, Claude `/tksfw:ks-start`. 2.7.0: the `.codex/prompts/` copies were dropped — Codex reads custom prompts only from `~/.codex/prompts/` and has deprecated them) = the explicit start: resolve → (offer `pin` when paths were passed) → read L3 then L4 → check precedence → `ks layers journal` → run the L3 start protocol → report | Loading is automatic and silent; starting is user intent and deterministic. Separating the two means a user who never types `/ks-start` is still correctly briefed |
 | SessionStart payload refactored into emitters + assembler (`SECTIONS` in `inject_state.py`): `state` (truncated to fit) and `layers` (reserved first), each between `<!-- tksfw:<id> -->` markers; a failing emitter degrades to an error marker | The hook was already accreting lines; a third section (routing table, agent roster) becomes a one-file addition; golden tests can assert each section |
 | `ks go` (headless launch/validation), remote libraries, mandatory frontmatter for library-sourced L3 | Deferred — roadmap (areas 2 and 3) |
 
 ## Consequences
 - New: `hooks/layers.py`, `ks layers resolve|pin|journal|section`, `ks project status` layers line,
-  `skills/ks-start/SKILL.md`, `.codex/prompts/ks-start.md`; `new_project.py --update` preserves the
-  `layers` stanza; `.codex/prompts/reload-instructions.md` names the new files.
+  `skills/ks-start/SKILL.md`; `new_project.py --update` preserves the `layers` stanza; the reload
+  instruction is the `ks-reload` skill (2.7.0; formerly a Codex prompt).
 - AGENTS.md § Project Layers (L3 / L4); Skill Layering Group B and the Change-Log `Layer` taxonomy name
   `KS_PROJECT.md` / `KS_SPEC.md`; redundant sentences trimmed elsewhere to keep the kernel at 18,958 B
   (< 19,000). Legacy `_project-archetype.md` / `_project.md` references removed.

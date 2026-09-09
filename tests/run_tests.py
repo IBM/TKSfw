@@ -140,7 +140,7 @@ def main():
               cmds and all('"${CLAUDE_PLUGIN_ROOT}/hooks/' in c and ".agents/hooks" not in c for c in cmds), str(cmds))
         check("sync_harness.py excluded from plugin", not os.path.exists(os.path.join(plug, "hooks", "sync_harness.py")))
         skills = sorted(os.listdir(os.path.join(plug, "skills")))
-        check("skills bundled", skills == ["define-agent", "delegate-work", "ks-start", "register-deliverables", "tksfw-init", "verify-integrity", "verify-sources", "yaml-log-entry"], str(skills))
+        check("skills bundled", skills == ["define-agent", "delegate-work", "ks-reload", "ks-start", "register-deliverables", "tksfw-init", "verify-integrity", "verify-sources", "yaml-log-entry"], str(skills))
         check("skill tests dropped from bundle", not os.path.exists(os.path.join(plug, "skills", "yaml-log-entry", "tests")))
         check("validator present in bundle", os.path.isfile(os.path.join(plug, "skills", "yaml-log-entry", "assets", "validate_yaml_log.py")))
 
@@ -1249,7 +1249,7 @@ def main():
         b1 = lblock(t1)
         check("SessionStart injects the layers block on a fresh project (no STATE yet), marked, with both rows as new",
               "| L3 | `KS_PROJECT.md` | new, not yet journaled |" in b1 and "| L4 | `KS_SPEC.md` | new, not yet journaled |" in b1
-              and "Read L3 then L4 in full" in b1 and "/ks-start" in b1, t1[:800])
+              and "Read L3 then L4 in full" in b1 and "ks-start" in b1, t1[:800])
         check("layers block stays within its 600-byte cap", 0 < len(b1.encode()) <= 600, str(len(b1.encode())))
         t2 = lstart("L2")
         check("second start: statuses unchanged (hashes journaled by the hook)", "| L3 | `KS_PROJECT.md` | unchanged |" in lblock(t2) and "| L4 | `KS_SPEC.md` | unchanged |" in lblock(t2), lblock(t2))
@@ -1311,9 +1311,24 @@ def main():
         sk = open(os.path.join(plug, "skills", "ks-start", "SKILL.md"), encoding="utf-8").read()
         check("ks-start skill calls the resolver and journals, never restates the tiers as policy", "ks layers resolve --json" in sk and "ks layers journal" in sk and "Layer conflict:" in sk and sk.startswith("---\nname: ks-start"))
         check("ks-start mirrored into .claude/skills of the full-mode project", os.path.islink(os.path.join(full, ".claude", "skills", "ks-start")) or os.path.isdir(os.path.join(full, ".claude", "skills", "ks-start")))
-        prompts = os.path.join(REPO, "template", ".codex", "prompts")
-        pr = open(os.path.join(prompts, "reload-instructions.md"), encoding="utf-8").read()
-        check("Codex prompts: reload-instructions names KS_PROJECT.md/KS_SPEC.md and ks-start prompt exists", "KS_PROJECT.md" in pr and "KS_SPEC.md" in pr and "_project-archetype" not in pr and os.path.isfile(os.path.join(prompts, "ks-start.md")))
+        check("no project-level Codex prompts in the template (Codex reads only ~/.codex/prompts; deprecated)", not os.path.isdir(os.path.join(REPO, "template", ".codex", "prompts")))
+        rl = open(os.path.join(plug, "skills", "ks-reload", "SKILL.md"), encoding="utf-8").read()
+        check("ks-reload skill replaces the reload prompt: names the layers, re-reads from disk, journals", rl.startswith("---\nname: ks-reload") and "KS_PROJECT.md" in rl and "KS_SPEC.md" in rl and "ks layers journal" in rl)
+        # project update prunes retired, pristine template files (2.7.0)
+        stale = os.path.join(lp, ".codex", "prompts")
+        os.makedirs(stale, exist_ok=True)
+        open(os.path.join(stale, "ks-start.md"), "w").write("old prompt\n")
+        open(os.path.join(stale, "edited.md"), "w").write("edited by the operator\n")
+        import hashlib as _hl
+        mfp = os.path.join(lp, ".agents", ".tksfw.json")
+        mf = json.load(open(mfp))
+        mf["files"][".codex/prompts/ks-start.md"] = _hl.sha256(b"old prompt\n").hexdigest()
+        mf["files"][".codex/prompts/edited.md"] = "0" * 64
+        json.dump(mf, open(mfp, "w"), indent=2, sort_keys=True)
+        r = run([PY, ks, "project", "update", lp, "--force"], cwd=tmp, env=kenv)
+        check("ks project update removes retired pristine files and keeps edited ones (listed)",
+              not os.path.exists(os.path.join(stale, "ks-start.md")) and os.path.exists(os.path.join(stale, "edited.md"))
+              and "removed (retired by the template, pristine): 1" in r.stdout and "retired but edited locally" in r.stdout, r.stdout[-500:])
         agents_md = open(os.path.join(REPO, "template", "AGENTS.md"), encoding="utf-8").read()
         check("AGENTS.md: Project Layers section, precedence rule, no legacy layer file names, kernel < 19,000 B",
               "#### Project Layers (L3 / L4)" in agents_md and "L4 overrides L3" in agents_md and "neither overrides this file or the method" in agents_md

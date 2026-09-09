@@ -34,7 +34,7 @@ Everything it writes is plain files inside the project; the plugin directory its
    show the user the list. The project layers (`KS_PROJECT.md` L3, `KS_SPEC.md` L4, or paths pinned under
    `layers` in `.agents/.tksfw.json`) are the user's content: `--update` never touches them and preserves
    the `layers` stanza. On a new project, suggest writing `KS_SPEC.md` (and `KS_PROJECT.md` when an archetype
-   applies); the first session then lists them at start and `/ks-start` begins execution.
+   applies); the first session then lists them at start and the `ks-start` skill (`$ks-start` in Codex, `/tksfw:ks-start` in Claude Code) begins execution.
 4. Ask the user to re-trust hooks in Codex `/hooks` if the project is self-contained (in-project hooks);
    plugin-mode projects need nothing (the plugin's hooks are already trusted).
 5. Log the initialisation or update in `.agents/workarea/changes.yaml` (Layer METHOD) via the
