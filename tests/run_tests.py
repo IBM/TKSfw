@@ -1224,6 +1224,37 @@ def main():
         else:
             check("ks help has a guide for every command", True)
 
+        # 25 — main-session model
+        mp5 = os.path.join(tmp, "mainm")
+        r = run([PY, ks, "project", "init", mp5], cwd=tmp, env=kenv)
+        sl = os.path.join(mp5, ".claude", "settings.local.json")
+        cc = open(os.path.join(mp5, ".codex", "config.toml")).read()
+        check("init writes the main-session model: Claude Code → claude-opus-5[1m] (default table), Codex → claude-opus-5 (provider match)",
+              "Claude Code main session → claude-opus-5[1m]" in r.stdout and json.load(open(sl))["model"] == "claude-opus-5[1m]"
+              and 'model = "claude-opus-5"' in cc and 'model_reasoning_effort = "high"' in cc, r.stdout[-600:])
+        import tomllib as _tl3
+        _tl3.loads(cc)
+        r = run([PY, ks, "routing", "use", "ibm-openai-cc"], cwd=mp5, env=kenv)
+        cc = open(os.path.join(mp5, ".codex", "config.toml")).read()
+        check("routing use rewrites both main-session models and says how to switch now",
+              json.load(open(sl))["model"] == "gpt-5.6-sol[1m]" and 'model = "gpt-5.6-sol[1m]"' in cc and cc.count("model_reasoning_effort") == 1
+              and "now: `/model gpt-5.6-sol[1m]`" in r.stdout, r.stdout + cc)
+        _tl3.loads(cc)
+        r = run([PY, ks, "project", "update", mp5, "--force"], cwd=tmp, env=kenv)
+        cc = open(os.path.join(mp5, ".codex", "config.toml")).read()
+        check("project update classifies .codex/config.toml as pristine despite the model lines and keeps them",
+              ".codex/config.toml" not in (r.stdout.split("kept (edited locally)")[1].split("unchanged")[0] if "kept (edited locally)" in r.stdout else "")
+              and 'model = "gpt-5.6-sol[1m]"' in cc and 'default_permissions = "hardened"' in cc, r.stdout)
+        r = run([PY, os.path.join(plug, "hooks", "route_model.py"), "--main"], cwd=mp5, env=kenv)
+        mm = json.loads(r.stdout)
+        check("route_model --main reports the judge tier per harness", mm["claude"]["model"] == "gpt-5.6-sol[1m]" and mm["codex"]["routing"] == "ibm-openai-cc", r.stdout)
+        # prompt notice after a routing change names the main-session switch
+        run([PY, os.path.join(plug, "hooks", "inject_state.py")], cwd=mp5, env=kenv, inp=json.dumps({"session_id": "SM", "turn_id": "m1", "source": "startup", "cwd": mp5}))
+        run([PY, os.path.join(plug, "hooks", "track_edits.py"), "--phase", "prompt"], cwd=mp5, env=kenv, inp=json.dumps({"session_id": "SM", "turn_id": "m2", "cwd": mp5, "prompt": "x"}))
+        run([PY, ks, "routing", "use", "ibm-anthropic-cc", "--force"], cwd=mp5, env=kenv)
+        r = run([PY, os.path.join(plug, "hooks", "track_edits.py"), "--phase", "prompt"], cwd=mp5, env=kenv, inp=json.dumps({"session_id": "SM", "turn_id": "m3", "cwd": mp5, "prompt": "x"}))
+        check("prompt notice: routing switch + main-session /model instruction", "Model routing now [routing.ibm-anthropic-cc]" in r.stdout and "/model claude-opus-5[1m]" in r.stdout, r.stdout[:600])
+
         agents_md = open(os.path.join(full, "AGENTS.md"), encoding="utf-8").read()
         check("AGENTS.md keeps the naming kernel and points to define-agent",
               "define-agent" in agents_md and "Reserved name `main`" in agents_md and "project-agent-1" not in agents_md

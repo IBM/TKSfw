@@ -71,6 +71,25 @@ role) and render two managed mirrors:
 Mirrors are never watched by the edit-hash hook (only the source is a framework edit); a hand-made
 file at a mirror path is reported as a conflict and never touched; deleting a source prunes its mirrors.
 
+## The main session's model (3.2.0)
+
+The routing tables govern subagent spawns through the hook. The **main session** (the orchestrator, which
+plans and judges) is launched by the harness with its own model choice, so TKSfw aligns it to the **judge
+tier** of the active table where each harness reads its startup model:
+
+| Harness | Written by `ks project init|update` and `ks routing use` | When it applies |
+|---|---|---|
+| Claude Code | `.claude/settings.local.json` → `"model"` (project-local, wins over the user default; not template-managed) | next launch; now: `/model <judge model>` (`s` in the picker = this session only) |
+| Codex | `.codex/config.toml` → `model`, `model_reasoning_effort` (project config; `ks project update` keeps these lines) | next launch; now: `/model` |
+
+Neither harness re-reads settings during a session, so `ks routing use` prints the `/model` command to run,
+and the prompt notice tells the model to ask the operator for it. `python3 .agents/hooks/route_model.py --main`
+prints the resolved main-session model per harness.
+
+A pinned table applies to both harnesses: pin a `-cc` table only in projects you run with Claude Code (Codex
+would be handed `…[1m]` ids). Unpinned, the selection is harness-aware (provider match for Codex,
+`default_routing` for Claude Code).
+
 ## Changing models mid-session
 
 1. Wait for running subagents to finish.

@@ -32,6 +32,7 @@ import os
 import json
 import shutil
 import hashlib
+import re
 import argparse
 import subprocess
 
@@ -48,6 +49,25 @@ PLUGIN_MODE_EXCLUDE_TOP = {os.path.join(".agents", "hooks"), os.path.join(".agen
 def version():
     with open(os.path.join(REPO, "VERSION"), encoding="utf-8") as fh:
         return fh.read().strip()
+
+
+def _norm_hash(rel, path):
+    """Hash for classification. `.codex/config.toml` is compared without the top-level `model` /
+    `model_reasoning_effort` lines that `ks` writes for the main session (3.2.0), so they never count as
+    a local edit; the refresh keeps them (see the copy loop)."""
+    if rel.replace(os.sep, "/") == ".codex/config.toml":
+        with open(path, encoding="utf-8") as fh:
+            body = "".join(l for l in fh if not re.match(r'^(model|model_reasoning_effort)\s*=', l))
+        return hashlib.sha256(body.encode("utf-8")).hexdigest()
+    return sha256(path)
+
+
+def _model_lines(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return [l for l in fh if re.match(r'^(model|model_reasoning_effort)\s*=', l)]
+    except OSError:
+        return []
 
 
 def sha256(path):
@@ -140,9 +160,9 @@ def main():
             h = sha256(os.path.join(TEMPLATE, rel))
             if not os.path.exists(dst):
                 rep["missing"].append(rel)
-            elif sha256(dst) == h:
+            elif _norm_hash(rel, dst) == h:
                 rep["unchanged"].append(rel)
-            elif ph.get(rel) == sha256(dst):
+            elif ph.get(rel) == _norm_hash(rel, dst):
                 rep["outdated"].append(rel)            # untouched locally, newer in this version
             else:
                 rep["edited"].append(rel)              # edited locally (merge by hand)
@@ -191,11 +211,17 @@ def main():
             shutil.copy2(src, dst)
             installed.append(rel)
             continue
-        cur = sha256(dst)
+        cur = _norm_hash(rel, dst)
         if cur == h:
             unchanged.append(rel)
         elif rel in prev_hashes and prev_hashes[rel] == cur:
+            keep_lines = _model_lines(dst) if rel.replace(os.sep, "/") == ".codex/config.toml" else []
             shutil.copy2(src, dst)                     # untouched since install: safe to refresh
+            if keep_lines:                             # re-insert the ks-written main-session model lines
+                body = open(dst, encoding="utf-8").read().splitlines(keepends=True)
+                idx = next((i for i, l in enumerate(body) if l.startswith("[")), len(body))
+                body[idx:idx] = keep_lines
+                open(dst, "w", encoding="utf-8").write("".join(body))
             refreshed.append(rel)
         else:
             kept.append(rel)                           # locally edited (or pre-existing): never overwrite

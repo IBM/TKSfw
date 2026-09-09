@@ -23,6 +23,7 @@ itself through the shell tool — while a session is open.
 |---|---|---|---|
 | Switch model routing | `ks routing use <table>` (refuses while subagents run; `--force`) · `ks routing show` to verify | Next spawn | `changes.yaml`, Layer METHOD |
 | Return to automatic routing | `ks routing use --clear` | Next spawn | METHOD |
+| Align the running main session to the routing table | after `ks routing use <table>` run the `/model <judge model>` it prints (Claude Code; `s` in the picker = this session only) or `/model` in Codex — harnesses do not re-read settings mid-session; the next launch picks it up from `.claude/settings.local.json` / `.codex/config.toml` | Immediate (by hand) | — |
 | Change an operator name | `ks operator set "<name>"` | Next prompt | — |
 | Disarm / re-arm a project | `ks project disable` / `enable` | Immediate (disarmed hooks cannot announce themselves) | METHOD |
 | Update a project to the installed framework | 1. finish sessions (`ks project status` shows active ones) 2. `ks project update` (refuses while sessions are active; `--force`) 3. merge the files it lists as edited 4. restart the harness 5. full mode only: Codex `/hooks` → trust, `ks harness retrust --ack` 6. the first session logs the update in `changes.yaml` (Layer METHOD) — SessionStart tells it to, until it does | Next session | METHOD |

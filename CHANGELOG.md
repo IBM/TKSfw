@@ -2,6 +2,15 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [3.2.0] — 2026-09-09
+
+### Added
+- Main-session model follows the routing table: the orchestrator runs on the **judge tier** of the table each harness would select. `ks project init|update` and `ks routing use` write it to `.claude/settings.local.json` (`model`, project-local — wins over the user default, not template-managed) and `.codex/config.toml` (`model`, `model_reasoning_effort`), and print the `/model …` command to switch the running session now (harnesses do not re-read settings mid-session). `route_model.py --main [--codex|--claude]` prints the resolved main-session model. The prompt notice after a routing switch tells the model to ask the operator for `/model <judge model>`.
+- `new_project.py` classifies and refreshes `.codex/config.toml` ignoring the `ks`-written model lines, so they never count as a local edit and survive `ks project update`. 6 new tests (280 total).
+
+### Notes
+- A pinned table applies to both harnesses; pin a `-cc` table only in projects run with Claude Code. Unpinned selection stays harness-aware.
+
 ## [3.1.1] — 2026-09-09
 
 ### Added

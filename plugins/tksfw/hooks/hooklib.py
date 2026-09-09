@@ -458,6 +458,7 @@ def config_view(payload):
             if table:
                 key, _tab, how = RM.select_routing(table, RM.detect_harness(payload, None))
                 view["routing"], view["routing_how"], view["selected"] = key, how, table.get("selected")
+                view["main_model"] = ((_tab or {}).get(RM.MAIN_TIER) or {}).get("model") if _tab else None
     except Exception as e:
         log(f"config_view: {type(e).__name__}: {e}")
     return view
@@ -476,7 +477,10 @@ def config_changes(payload, update=True):
         if now["routing"] != old.get("routing") or now["selected"] != old.get("selected"):
             lines.append(f"Model routing now [routing.{now['routing']}] via {now['routing_how']}"
                          + (f" (pinned: selected = \"{now['selected']}\")" if now.get("selected") else "")
-                         + f" — was [routing.{old.get('routing')}]. Applies to the next spawn; record the model the hook reports.")
+                         + f" — was [routing.{old.get('routing')}]. Applies to the next spawn; record the model the hook reports."
+                         + (f" Main session: this session keeps the model it was launched with; the judge-tier model of the new table is `{now['main_model']}` — "
+                            f"tell the operator to switch now with `/model {now['main_model']}` (Claude Code) or `/model` (Codex); `ks` has already written it for the next launch."
+                            if now.get("main_model") else ""))
         if now.get("hil") != old.get("hil") and old.get("hil") is not None:
             lines.append(f"HIL threshold now {now['hil']} — was {old.get('hil')}. Applies to the next decision entry; pending decisions are re-marked in STATE.md.")
         elif now["models_hash"] != old.get("models_hash") and now["routing"] == old.get("routing") and now["selected"] == old.get("selected"):

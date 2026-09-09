@@ -29,6 +29,7 @@ Internal errors → exit 0 silently (fail-open), logged to hooks.log.
 Standalone:
   python3 .agents/hooks/route_model.py --print        # resolved table for THIS environment
   python3 .agents/hooks/route_model.py --check        # validate config.toml (exit 1 on problems)
+  python3 .agents/hooks/route_model.py --main [--codex|--claude]   # main-session (judge tier) model per harness, JSON
   python3 .agents/hooks/route_model.py --resolve sources-researcher   # one lookup
 """
 import sys
@@ -298,9 +299,30 @@ def print_table(harness):
     return 0
 
 
+MAIN_TIER = "judge"                                   # the main session orchestrates, plans and judges
+
+
+def main_model(harness):
+    """{harness, routing, selected_by, tier, model, reasoning_effort} for the MAIN session of `harness`
+    (3.2.0): the judge-tier entry of the table that harness would select. None when no table resolves."""
+    table = load_table()
+    if table is None:
+        return None
+    key, tab, how = select_routing(table, harness)
+    if tab is None:
+        return {"harness": harness, "routing": None, "selected_by": how, "tier": MAIN_TIER, "model": None, "reasoning_effort": None}
+    e = tab.get(MAIN_TIER) or {}
+    return {"harness": harness, "routing": key, "selected_by": how, "tier": MAIN_TIER,
+            "model": e.get("model"), "reasoning_effort": e.get("reasoning_effort")}
+
+
 def main():
     args = sys.argv[1:]
     harness_arg = "codex" if "--codex" in args else "claude" if "--claude" in args else None
+    if "--main" in args:
+        out = {h: main_model(h) for h in ("codex", "claude")} if not harness_arg else main_model(harness_arg)
+        print(json.dumps(out, indent=2))
+        sys.exit(0)
     if "--check" in args:
         table = load_table()
         if table is None:

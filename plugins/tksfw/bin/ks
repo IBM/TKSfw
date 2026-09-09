@@ -322,7 +322,14 @@ def cmd_project(home, args):
     if sub == "init":
         target = next((a for a in rest if not a.startswith("--")), os.getcwd())
         cmd = [PY, home.new_project, target] + ([] if "--full" in rest else ["--plugin-mode"])
-        sys.exit(run(cmd).returncode)
+        rc = run(cmd).returncode
+        if rc == 0:
+            try:
+                print("Main session model (judge tier of the active routing table):")
+                apply_main_model(Project(home, os.path.abspath(target)))
+            except SystemExit:
+                pass
+        sys.exit(rc)
     if sub in ("update", "enable", "disable", "drift"):
         target = next((a for a in rest if not a.startswith("--")), None)
         proj = Project(home, target)
@@ -331,6 +338,7 @@ def cmd_project(home, args):
         cmd = [PY, home.new_project, proj.root, "--" + sub] + (["--json"] if "--json" in rest else [])
         rc = run(cmd).returncode
         if rc == 0 and sub == "update":
+            apply_main_model(proj)
             effect("session")
         elif rc == 0 and sub in ("enable", "disable"):
             effect("prompt" if sub == "enable" else "files")
@@ -523,6 +531,55 @@ def active_sessions(proj, within=1800):
     return out
 
 
+def apply_main_model(proj, quiet=False):
+    """3.2.0 — the main session runs on the judge tier of the active routing table. Write it where each
+    harness reads its startup model: Claude Code `.claude/settings.local.json` (`model`; project-local, wins
+    over the user default, not template-managed), Codex `.codex/config.toml` (`model`, `model_reasoning_effort`).
+    Applies at the next launch; the current session must switch by hand (`/model`). Returns the lines printed."""
+    rm = os.path.join(proj.hooks, "route_model.py")
+    r = run([PY, rm, "--main"], cwd=proj.root, env=proj.env(), capture=True)
+    try:
+        mm = json.loads(r.stdout)
+    except Exception:
+        return []
+    lines = []
+    cl = mm.get("claude") or {}
+    if cl.get("model"):
+        sl = os.path.join(proj.root, ".claude", "settings.local.json")
+        data = {}
+        if os.path.isfile(sl):
+            try:
+                data = json.load(open(sl, encoding="utf-8"))
+            except Exception:
+                data = {}
+        if data.get("model") != cl["model"]:
+            data["model"] = cl["model"]
+            os.makedirs(os.path.dirname(sl), exist_ok=True)
+            json.dump(data, open(sl, "w", encoding="utf-8"), indent=2)
+            open(sl, "a", encoding="utf-8").write("\n")
+        lines.append(f"Claude Code main session → {cl['model']} (judge tier of [routing.{cl['routing']}]; .claude/settings.local.json, next launch — now: `/model {cl['model']}`)")
+    cx = mm.get("codex") or {}
+    if cx.get("model"):
+        cp = os.path.join(proj.root, ".codex", "config.toml")
+        text = open(cp, encoding="utf-8").read() if os.path.isfile(cp) else ""
+        body = [l for l in text.splitlines(keepends=True) if not re.match(r'^(model|model_reasoning_effort)\s*=', l)]
+        ins = f'model = "{cx["model"]}"                      # main session = judge tier of [routing.{cx["routing"]}] — written by `ks` (routing use / project update)\n'
+        if cx.get("reasoning_effort"):
+            ins += f'model_reasoning_effort = "{cx["reasoning_effort"]}"\n'
+        # insert before the first table header (top-level keys must precede tables)
+        idx = next((i for i, l in enumerate(body) if l.startswith("[")), len(body))
+        # after the leading comment block / default_permissions line
+        body[idx:idx] = [ins]
+        new = "".join(body)
+        if new != text:
+            open(cp, "w", encoding="utf-8").write(new)
+        lines.append(f"Codex main session → {cx['model']}" + (f" / {cx['reasoning_effort']}" if cx.get("reasoning_effort") else "") + f" (judge tier of [routing.{cx['routing']}]; .codex/config.toml, next launch — now: `/model`)")
+    if not quiet:
+        for l in lines:
+            print(l)
+    return lines
+
+
 def cmd_routing(home, args):
     sub = args[0] if args else "show"
     proj = Project(home)
@@ -577,7 +634,8 @@ def cmd_routing(home, args):
         lines = [l for l in text.splitlines(keepends=True) if not re.match(r'^\s*selected\s*=', l)]
         if "--clear" in args:
             open(path, "w", encoding="utf-8").write("".join(lines))
-            print("routing selection cleared (automatic: TKSFW_ROUTING → provider match → [routing.default])")
+            print("routing selection cleared (automatic: TKSFW_ROUTING → provider match → default_routing)")
+            apply_main_model(proj)
         else:
             if len(args) < 2:
                 die("usage: ks routing use <table> | use --clear")
@@ -593,6 +651,7 @@ def cmd_routing(home, args):
                 lines.insert(0, ins)
             open(path, "w", encoding="utf-8").write("".join(lines))
             print(f"routing pinned to [routing.{table}] — log it in changes.yaml (Layer: METHOD)")
+            apply_main_model(proj)
         rc = run([PY, rm, "--check"], cwd=proj.root, env=proj.env()).returncode
         if rc == 0:
             effect("spawn")
@@ -1004,6 +1063,10 @@ changes.yaml (Layer METHOD) — nothing to write by hand.
   ks routing use <table>            pin a table (`selected = "<table>"`); applies to the next spawn, no
                                     restart. Refuses while agents are live (--force).
   ks routing use --clear            unpin → automatic selection.
+
+The main session runs on the judge tier of the active table: `ks routing use` / `project init|update` write it
+to .claude/settings.local.json (Claude Code) and .codex/config.toml (Codex) for the next launch and print the
+`/model …` command to switch the running session now.
 
 Selection order at spawn: TKSFW_ROUTING → `selected` → Codex `model_provider` (first table in file order
 with match.codex_model_provider, else table key) → Claude Code ANTHROPIC_BASE_URL prefix
