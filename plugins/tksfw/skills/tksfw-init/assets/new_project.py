@@ -68,6 +68,16 @@ def template_files(plugin_mode):
             yield os.path.join(rel_dir, f) if rel_dir else f
 
 
+def _operator_name():
+    """Operator from the hooks' resolution (user.toml / TKSFW_USER / git), or None — best effort."""
+    try:
+        sys.path.insert(0, os.path.join(TEMPLATE, ".agents", "hooks"))
+        import hooklib as H
+        return H.operator_source()[0] or None
+    except Exception:
+        return None
+
+
 def load_manifest(target):
     p = os.path.join(target, MANIFEST_REL)
     if os.path.isfile(p):
@@ -179,9 +189,16 @@ def main():
 
     manifest = {"framework": "TKSfw", "version": version(), "plugin_mode": plugin_mode,
                 "enabled": (prev or {}).get("enabled", True) is not False, "files": new_hashes}
-    for keep in ("resets", "layers"):                      # generation history (ks project reset); L3/L4 paths (ks layers pin)
+    for keep in ("resets", "layers", "installs"):          # generation history (ks project reset); L3/L4 paths (ks layers pin); install log
         if (prev or {}).get(keep):
             manifest[keep] = prev[keep]
+    # install log (2.5.0): every init/update is recorded here; the first session afterwards is told to log
+    # it in changes.yaml (Layer METHOD) — the operator has nothing to write by hand
+    import datetime as _dt
+    manifest.setdefault("installs", []).append({"ts": _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "version": version(),
+                                                "action": "update" if prev else "init", "mode": "plugin" if plugin_mode else "full",
+                                                "operator": _operator_name()})
+    manifest["installs"] = manifest["installs"][-20:]
     mp = os.path.join(target, MANIFEST_REL)
     os.makedirs(os.path.dirname(mp), exist_ok=True)
     with open(mp, "w", encoding="utf-8") as fh:
@@ -201,10 +218,21 @@ def main():
         if os.path.isfile(sync):
             print("running sync_harness.py …")
             subprocess.run([sys.executable, sync], cwd=target, check=False)
-    print("\nNext: launch Codex in the project once to trust the .codex layer and, if hooks changed, "
-          "re-trust them in /hooks. Record the install/update in .agents/workarea/changes.yaml (Layer: METHOD).")
+    action = "update" if prev else "install"
+    print(f"\nRecorded: {action} of v{manifest['version']} in .agents/.tksfw.json — the first session logs it in "
+          "changes.yaml (Layer METHOD); nothing to write by hand.")
+    print("\nNext steps")
+    if plugin_mode:
+        print("  1. Launch Codex (or Claude Code) in this folder. Codex asks once to trust the project's .codex layer — accept.")
+        print("  2. `ks doctor` here: 0 FAIL means the project is ready. Hooks run from the installed plugin, so there is")
+        print("     nothing to re-trust for this project unless the framework itself was upgraded (doctor says so).")
+    else:
+        print("  1. Launch Codex (or Claude Code) in this folder. Codex asks to trust the project's .codex layer — accept —")
+        print("     and lists the project's hooks: type /hooks and trust them (full mode ships its own hooks).")
+        print("  2. `ks harness retrust --ack` to record that trust, then `ks doctor` — 0 FAIL means ready.")
+    print("  3. Optional: describe the project in KS_PROJECT.md (L3) / KS_SPEC.md (L4), then start a session with /ks-start.")
     if kept:
-        print(f"Review the {len(kept)} locally edited file(s) against template/ and merge by hand.")
+        print(f"\nReview the {len(kept)} locally edited file(s) against template/ and merge by hand.")
 
 
 if __name__ == "__main__":

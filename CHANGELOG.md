@@ -2,6 +2,15 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [2.5.0] — 2026-09-09
+
+### Added
+- Install log: `ks project init` / `update` append `{ts, version, action, mode, operator}` to `installs` in `.agents/.tksfw.json`. SessionStart tells the model "TKSfw installed/updated vX on … — not yet recorded: log it in changes.yaml (Layer METHOD)" until a METHOD-layer changes entry newer than the install exists (`hooklib.install_line`). The operator no longer has anything to write by hand.
+
+### Changed
+- Post-init/update message rewritten: "Recorded: install|update of vX in .agents/.tksfw.json — the first session logs it in changes.yaml; nothing to write by hand", then mode-specific **Next steps** — plugin mode: launch the harness, accept the `.codex` trust prompt, `ks doctor` (nothing to re-trust per project); full mode: accept `.codex` trust, `/hooks` → trust the project's own hooks, `ks harness retrust --ack`, `ks doctor`; both: optional L3/L4 files, `/ks-start`.
+- `docs/getting-started.md` steps 8–10 and `docs/operations.md` "Update a project" aligned (re-trust is a full-mode / framework-upgrade matter). 6 new tests (259 total).
+
 ## [2.4.2] — 2026-09-08
 
 ### Changed (documentation)

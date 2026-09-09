@@ -221,6 +221,29 @@ def guard():
         sys.exit(0)
 
 
+def install_line():
+    """'TKSfw v<ver> installed|updated <ts> (<mode>) by <op> — not yet in changes.yaml: log it …' or ''.
+    The manifest's `installs` log (new_project.py) is compared with the METHOD-layer changes entries:
+    once an entry with Timestamp >= the install stamp exists, the line disappears (2.5.0)."""
+    m = read_manifest() or {}
+    inst = m.get("installs") or []
+    if not inst:
+        return ""
+    last = inst[-1]
+    ts = str(last.get("ts") or "")
+    try:
+        for _i, f in load_kind("changes"):
+            if str(f.get("Layer", "")).upper() == "METHOD" and str(f.get("Timestamp", "")) >= ts:
+                return ""
+    except Exception as e:
+        log(f"install_line: {e}")
+    verb = "installed" if last.get("action") == "init" else "updated to"
+    who = f" by {last['operator']}" if last.get("operator") else ""
+    return (f"TKSfw {verb} v{last.get('version', '?')} on {ts[:16]} ({last.get('mode', '?')} mode){who} — not yet recorded: "
+            f"log it now in changes.yaml (Layer METHOD, Title \"TKSfw v{last.get('version', '?')} {verb.split()[0]}\"); "
+            "the operator was told this happens automatically.")
+
+
 def generation_line():
     """'Generation N — reset <ts> by <op> (<mode>); previous generation in <history>' or ''."""
     m = read_manifest() or {}

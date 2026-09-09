@@ -1135,6 +1135,31 @@ def main():
         check("AGENTS.md has the Human in the Loop section with the default and the Worker rule",
               "### Human in the Loop" in agents_md and "`Impact ≥ HIGH` **or** `Reversibility ≥ HARD`" in agents_md and "Workers never accept" in agents_md and "§ Human in the Loop" in agents_md)
 
+        # 23 — install log and post-init guidance
+        ip = os.path.join(tmp, "instp")
+        r = run([PY, ks, "project", "init", ip], cwd=tmp, env=kenv)
+        check("post-init: 'Recorded: install of v…' and plugin-mode next steps (no re-trust, ks doctor)",
+              "Recorded: install of v" in r.stdout and "nothing to write by hand" in r.stdout and "Next steps" in r.stdout
+              and "nothing to re-trust for this project" in r.stdout and "Record the install/update" not in r.stdout, r.stdout)
+        man = json.load(open(os.path.join(ip, ".agents", ".tksfw.json")))
+        check("manifest installs[0] = init/plugin with operator and version", man["installs"][0]["action"] == "init" and man["installs"][0]["mode"] == "plugin"
+              and man["installs"][0]["version"] == open(os.path.join(REPO, "VERSION")).read().strip() and man["installs"][0]["operator"], str(man.get("installs")))
+        r = run([PY, os.path.join(plug, "hooks", "inject_state.py")], cwd=ip, env=kenv, inp=json.dumps({"session_id": "SI", "turn_id": "i1", "source": "startup", "cwd": ip}))
+        ctx = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
+        check("SessionStart on a fresh project: install line asks the model to log the install (Layer METHOD)", "TKSfw installed v" in ctx and "Layer METHOD" in ctx, ctx[:400])
+        tI = next(json.load(open(os.path.join(ip, ".agents", "workarea", ".hook-state", "sessions", f)))["token"] for f in os.listdir(os.path.join(ip, ".agents", "workarea", ".hook-state", "sessions")))
+        open(os.path.join(ip, ".agents", "workarea", f"changes.{tI}.yaml"), "w").write(
+            f"- Chng0001:\n    AuthorAgent: main\n    Model: m\n    Timestamp: \"2099-01-01 00:00:00\"\n    OwnerSessionId: {tI}\n    OwnerSessionUserName: carlos\n    Layer: METHOD\n    Title: \"TKSfw installed\"\n    Description: |-\n      x\n    Files: |-\n      - .agents/.tksfw.json\n    Remarks: |-\n      x\n")
+        r = run([PY, os.path.join(plug, "hooks", "inject_state.py")], cwd=ip, env=kenv, inp=json.dumps({"session_id": "SI", "turn_id": "i2", "source": "resume", "cwd": ip}))
+        ctx = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"] if r.stdout.strip() else ""
+        check("install line disappears once a METHOD-layer change is logged", "not yet recorded" not in ctx, ctx[:300])
+        r = run([PY, ks, "project", "update", ip, "--force"], cwd=tmp, env=kenv)      # the test session above is still "active"
+        man = json.load(open(os.path.join(ip, ".agents", ".tksfw.json")))
+        check("project update appends installs[1] = update and says 'Recorded: update of v…'", len(man["installs"]) == 2 and man["installs"][1]["action"] == "update" and "Recorded: update of v" in r.stdout, r.stdout[-300:])
+        fp2 = os.path.join(tmp, "instfull")
+        r = run([PY, ks, "project", "init", fp2, "--full"], cwd=tmp, env=kenv)
+        check("post-init in full mode: /hooks trust + retrust --ack steps", "type /hooks and trust them" in r.stdout and "ks harness retrust --ack" in r.stdout, r.stdout[-600:])
+
         agents_md = open(os.path.join(full, "AGENTS.md"), encoding="utf-8").read()
         check("AGENTS.md keeps the naming kernel and points to define-agent",
               "define-agent" in agents_md and "Reserved name `main`" in agents_md and "project-agent-1" not in agents_md
