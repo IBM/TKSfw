@@ -63,7 +63,7 @@ def routing_summary(payload):
         key, tab, how = route_model.select_routing(table, harness)
         if tab is None:
             return ("Model routing: NO [routing.*] table matches this provider — subagent spawns will be "
-                    "denied until .agents/models.toml has one (or TKSFW_ROUTING is set).\n")
+                    "denied until .agents/config.toml has one (or TKSFW_ROUTING is set).\n")
         tiers = ", ".join(f"{t}={ (tab.get(t) or {}).get('model', '?') }" for t in (table.get("tiers") or {}))
         return f"Model routing [routing.{key}] via {how}: {tiers}.\n"
     except Exception as e:

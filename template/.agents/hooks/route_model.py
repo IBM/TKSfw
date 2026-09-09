@@ -5,10 +5,10 @@ Matcher (hooks.json): `^(Agent|Task)$|spawn_agent`. Codex exposes `spawn_agent` 
 Claude Code exposes `Agent` (formerly `Task`).
 
 At every spawn the hook
-  1. loads `.agents/models.toml` fresh from disk (so edits apply to the next spawn: no restart,
+  1. loads `.agents/config.toml` fresh from disk (so edits apply to the next spawn: no restart,
      no hook re-trust — the script itself does not change),
   2. selects the routing table for the provider this session is connected to
-     ($TKSFW_ROUTING → `selected = "<table>"` in models.toml (`ks routing use`) → Codex
+     ($TKSFW_ROUTING → `selected = "<table>"` in config.toml (`ks routing use`) → Codex
      `model_provider` in $CODEX_HOME/config.toml → Claude Code $ANTHROPIC_BASE_URL prefix match →
      [routing.default] → DENY),
   3. resolves the agent's role (full name in [roles], else the -<role> suffix) → tier → model,
@@ -23,12 +23,12 @@ At every spawn the hook
 
 Unknown role → DENY (or allow-unchanged when on_unknown_role = "inherit"). Missing routing for
 the current provider → DENY with the list of available tables (fail loud, never silently on the
-parent's model). No models.toml at all → the hook does nothing (project without routing).
+parent's model). No config.toml at all → the hook does nothing (project without routing).
 Internal errors → exit 0 silently (fail-open), logged to hooks.log.
 
 Standalone:
   python3 .agents/hooks/route_model.py --print        # resolved table for THIS environment
-  python3 .agents/hooks/route_model.py --check        # validate models.toml (exit 1 on problems)
+  python3 .agents/hooks/route_model.py --check        # validate config.toml (exit 1 on problems)
   python3 .agents/hooks/route_model.py --resolve sources-researcher   # one lookup
 """
 import sys
@@ -58,7 +58,7 @@ def models_path():
 
 
 def load_table(path=None):
-    """Parsed models.toml or None when absent. Raises on syntax errors (caller decides)."""
+    """Parsed config.toml or None when absent. Raises on syntax errors (caller decides)."""
     path = path or models_path()
     if not os.path.isfile(path) or tomllib is None:
         return None
@@ -141,11 +141,16 @@ def select_routing(table, harness):
         return forced, routing.get(forced), "TKSFW_ROUTING"
     selected = table.get("selected")                     # `ks routing use <table>` — persisted choice
     if selected:
-        return str(selected), routing.get(str(selected)), "selected (models.toml)"
+        return str(selected), routing.get(str(selected)), "selected (config.toml)"
     if harness == "codex":
         prov = codex_model_provider()
-        if prov and prov in routing:
-            return prov, routing[prov], "codex model_provider"
+        if prov:
+            for key, tab in routing.items():             # 3.0.0: explicit match first, then key == provider
+                m = tab.get("match") or {}
+                if str(m.get("codex_model_provider") or "") == prov:
+                    return key, tab, "codex model_provider (match)"
+            if prov in routing:
+                return prov, routing[prov], "codex model_provider"
     if harness == "claude":
         base = (os.environ.get("ANTHROPIC_BASE_URL") or "").rstrip("/")
         if base:
@@ -199,11 +204,11 @@ def resolve(table, name, harness):
         avail = sorted((table.get("routing") or {}).keys())
         return {"ok": False, "reason": (f"TKSfw routing: no [routing.*] table for this provider "
                                         f"(selection={how}, key={key!r}); available: {avail}. "
-                                        f"Set TKSFW_ROUTING=<key> or add the table to .agents/models.toml.")}
+                                        f"Set TKSFW_ROUTING=<key> or add the table to .agents/config.toml.")}
     role, tier, base = resolve_role(table, name)
     if tier is None:
         return {"ok": False, "unknown_role": True, "routing": key,
-                "reason": (f"TKSfw routing: agent {name!r} has no role in [roles] of .agents/models.toml "
+                "reason": (f"TKSfw routing: agent {name!r} has no role in [roles] of .agents/config.toml "
                            f"(known roles: {sorted((table.get('roles') or {}).keys())}). Name agents "
                            f"<family>-<role> per AGENTS.md § Agent Naming, or add the role.")}
     entry = tab.get(tier)
@@ -274,7 +279,7 @@ def print_table(harness):
         print(f"no routing: {models_path()} not found" + (" (tomllib unavailable)" if tomllib is None else ""))
         return 1
     key, tab, how = select_routing(table, harness)
-    print(f"models.toml: {models_path()}")
+    print(f"config: {models_path()}")
     print(f"harness={harness}  routing={key!r}  selected_by={how}")
     if tab is None:
         print("NO ROUTING TABLE for this environment — spawns will be denied. Available: "
@@ -293,9 +298,9 @@ def main():
     if "--check" in args:
         table = load_table()
         if table is None:
-            print("no models.toml"); sys.exit(1)
+            print("no config.toml"); sys.exit(1)
         probs = validate(table, harness_arg)
-        print("\n".join(probs) if probs else "models.toml ok")
+        print("\n".join(probs) if probs else "config.toml ok")
         sys.exit(1 if probs else 0)
     if "--print" in args:
         sys.exit(print_table(harness_arg or ("codex" if codex_model_provider() else "claude")))

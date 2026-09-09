@@ -2,7 +2,7 @@
 name: define-agent
 description: >
   Create, rename or edit a subagent definition (.agents/agents/<name>.toml) for this method: naming
-  convention <family>-<role> with the role vocabulary from .agents/models.toml, required fields,
+  convention <family>-<role> with the role vocabulary from .agents/config.toml, required fields,
   description prefix, sandbox mode by tier, and the rule that models are never hand-written. Load
   BEFORE creating, renaming or editing ANY .agents/agents/*.toml — the PostToolUse hook validates every
   agent file on write (assets/validate_agent.py) and blocks non-conforming definitions; a rename must
@@ -17,7 +17,7 @@ Owner of the agent-definition procedure and the naming convention (moved here fr
 ## Procedure
 
 1. Look for an existing agent by role in `.agents/agents/`; extend it rather than duplicate it.
-2. Choose the name: `<family>-<role>`; `<role>` must be a key of `[roles]` in `.agents/models.toml`
+2. Choose the name: `<family>-<role>`; `<role>` must be a key of `[roles]` in `.agents/config.toml`
    (the tier follows from it); `<family>` only when needed to disambiguate; ≤ 3 tokens; never `main`,
    never a harness built-in name, never a person or codename. Read `references/naming.md` when in doubt.
 3. Write `.agents/agents/<name>.toml` with `name`, `description` ("Use PROACTIVELY when…" /
@@ -28,7 +28,7 @@ Owner of the agent-definition procedure and the naming convention (moved here fr
    (the PostToolUse hook runs the same check and blocks on errors; warnings are advisory).
 5. Harness mirrors (`.codex/agents/<name>.toml` with the routed model lines, `.claude/agents/<name>.md`)
    are rendered automatically by the PostToolUse hook once the file is valid — never edit them.
-   Bulk re-render after changing `.agents/models.toml`: `python3 .agents/hooks/sync_harness.py --models`.
+   Bulk re-render after changing `.agents/config.toml`: `python3 .agents/hooks/sync_harness.py --models`.
 6. Log: a new or renamed agent is a `changes.yaml` entry (Layer METHOD or ARCHETYPE per the
    `yaml-log-entry` skill); a rename must state old → new so the Handoff/Event `AgentName` history
    stays traceable.

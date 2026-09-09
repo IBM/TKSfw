@@ -1,6 +1,6 @@
 # User-level deployment — install once, arm per project
 
-The project folder stays the unit of work (AGENTS.md, workarea, ledgers, `models.toml`, agent sources
+The project folder stays the unit of work (AGENTS.md, workarea, ledgers, `config.toml`, agent sources
 live there). What the user-level shape adds: the tooling is installed once per user, is **inert** in
 every folder that has not opted in, and can create or disarm a project instance on request.
 
@@ -85,5 +85,5 @@ Tolerated and guarded, not a design target. Each session gets a token at start; 
 | Codex user-level hooks cannot be disabled by a project | "higher-precedence config layers don't replace lower-precedence hooks" ([Codex hooks](https://learn.chatgpt.com/docs/hooks)); the guard is what makes them safe |
 | A Claude Code project that enables `tksfw@tksfw` in `.claude/settings.json` overrides your user-level `false` | opt out in `.claude/settings.local.json` |
 | Plugin directories are ephemeral on update | nothing is written there; state is project-local |
-| Provider tables | after `tksfw-init`, review `[routing.<provider>]` in `.agents/models.toml` for this machine's provider (`route_model.py --print`) |
+| Provider tables | after `tksfw-init`, review `[routing.<provider>]` in `.agents/config.toml` for this machine's provider (`route_model.py --print`) |
 | Re-trust | Codex asks to re-trust plugin hooks after each plugin update that changes a hook script |

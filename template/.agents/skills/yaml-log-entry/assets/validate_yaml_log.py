@@ -131,15 +131,16 @@ HIL_DEFAULT = {"impact": "HIGH", "reversibility": "HARD", "logic": "or", "mode":
 
 
 def hil_policy(ledger_path=None):
-    """[hil] from .agents/models.toml next to the workarea (2.1.0): the Human-in-the-Loop threshold.
+    """[hil] from .agents/config.toml next to the workarea (2.1.0): the Human-in-the-Loop threshold.
     Defaults: Impact >= HIGH OR Reversibility >= HARD, enforce (2.3.0; was AND in 2.1–2.2). Bad values fall back per key."""
     pol = dict(HIL_DEFAULT)
     cands = []
     if ledger_path:
-        cands.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(ledger_path))), "models.toml"))
+        ag = os.path.dirname(os.path.dirname(os.path.abspath(ledger_path)))
+        cands += [os.path.join(ag, "config.toml"), os.path.join(ag, "config.toml")]
     root = os.environ.get("TKSFW_PROJECT_ROOT")
     if root:
-        cands.append(os.path.join(root, ".agents", "models.toml"))
+        cands += [os.path.join(root, ".agents", "config.toml"), os.path.join(root, ".agents", "config.toml")]
     for mp in cands:
         if os.path.isfile(mp):
             try:

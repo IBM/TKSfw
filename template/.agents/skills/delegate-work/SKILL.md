@@ -4,7 +4,7 @@ description: >
   Mechanics for delegating work to subagents once the decision to delegate has been made (AGENTS.md
   § Subagents holds the decision rules): isolation (git worktree or agent work area), ownership matrix,
   handoff BEGIN/END logging, cleanup and pruning of finished worktrees/work areas, and how to change
-  models via .agents/models.toml. Load when parallelising subagents, when a subagent needs an isolated
+  models via .agents/config.toml. Load when parallelising subagents, when a subagent needs an isolated
   place to write, when cleaning up after a phase, or when the Stop hook reports stale work areas.
 ---
 

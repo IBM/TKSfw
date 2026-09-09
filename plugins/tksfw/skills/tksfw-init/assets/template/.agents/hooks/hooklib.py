@@ -112,8 +112,16 @@ PLUGIN_ROOT = os.path.dirname(HERE) if PLUGIN_MODE else None
 MANIFEST = os.path.join(PROJECT_ROOT, ".agents", ".tksfw.json")        # written by new_project.py / tksfw-init
 PROJECT_HOOKS = os.path.join(PROJECT_ROOT, ".agents", "hooks", "hooks.json")
 REGISTRY = os.path.join(WORKAREA, "deliverables.yaml")
-MODELS_TOML = os.path.join(PROJECT_ROOT, ".agents", "models.toml")   # model routing table (route_model.py)
-MODELS_TOML_REL = ".agents/models.toml"
+def _config_toml():
+    """`.agents/config.toml` (3.0.0) — or the legacy `.agents/models.toml` when only that exists."""
+    new = os.path.join(PROJECT_ROOT, ".agents", "config.toml")
+    old = os.path.join(PROJECT_ROOT, ".agents", "models.toml")
+    return old if (not os.path.isfile(new) and os.path.isfile(old)) else new
+
+
+CONFIG_TOML = _config_toml()                                          # project configuration (routing, hil, state, delegation)
+CONFIG_TOML_REL = os.path.relpath(CONFIG_TOML, PROJECT_ROOT).replace(os.sep, "/")
+MODELS_TOML, MODELS_TOML_REL = CONFIG_TOML, CONFIG_TOML_REL           # legacy names kept for callers
 AGENT_VALIDATOR = os.path.join(os.path.dirname(VALIDATOR_DIR), "..", "define-agent", "assets", "validate_agent.py")
 AGENT_VALIDATOR = os.path.normpath(AGENT_VALIDATOR)                  # sibling skill: plugin or in-project layout
 AGENTS_SRC = os.path.join(PROJECT_ROOT, ".agents", "agents")           # neutral agent definitions
@@ -433,7 +441,7 @@ def write_operator(name):
 
 def config_view(payload):
     """The configuration the model was told about (or should be): routing table, pin, armed flag,
-    operator, models.toml hash. Compared at every prompt against the session record → change notice."""
+    operator, config.toml hash. Compared at every prompt against the session record → change notice."""
     view = {"enabled": armed()[0], "operator": operator() or "", "models_hash": None,
             "routing": None, "routing_how": None, "selected": None, "hil": None}
     try:
@@ -472,7 +480,7 @@ def config_changes(payload, update=True):
         if now.get("hil") != old.get("hil") and old.get("hil") is not None:
             lines.append(f"HIL threshold now {now['hil']} — was {old.get('hil')}. Applies to the next decision entry; pending decisions are re-marked in STATE.md.")
         elif now["models_hash"] != old.get("models_hash") and now["routing"] == old.get("routing") and now["selected"] == old.get("selected"):
-            lines.append("`.agents/models.toml` changed (tiers/roles/limits) — applies to the next spawn.")
+            lines.append(f"`{CONFIG_TOML_REL}` changed (tiers/roles/limits) — applies to the next spawn.")
         if now["operator"] != old.get("operator"):
             lines.append(f"Operator now `{now['operator'] or 'UNKNOWN'}` (was `{old.get('operator') or 'UNKNOWN'}`) — use it as OwnerSessionUserName from here on.")
         if now["enabled"] != old.get("enabled"):

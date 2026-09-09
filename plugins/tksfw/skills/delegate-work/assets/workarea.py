@@ -58,10 +58,13 @@ LEDGER_FILES = {"changes.yaml", "lessons.yaml", "handoffs.yaml", "events.yaml", 
 
 
 def max_parallel():
-    """[delegation] max_parallel_agents from .agents/models.toml (default 4)."""
+    """[delegation] max_parallel_agents from .agents/config.toml (default 4)."""
     try:
         import tomllib
-        with open(os.path.join(ROOT, ".agents", "models.toml"), "rb") as fh:
+        cp = os.path.join(ROOT, ".agents", "config.toml")
+        if not os.path.isfile(cp):
+            cp = os.path.join(ROOT, ".agents", "config.toml")       # legacy name (< 3.0.0)
+        with open(cp, "rb") as fh:
             v = (tomllib.load(fh).get("delegation") or {}).get("max_parallel_agents", 4)
         return int(v) if int(v) > 0 else 4
     except Exception:

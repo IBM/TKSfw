@@ -2,6 +2,20 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [3.0.0] — 2026-09-09
+
+Configuration file renamed and routing tables made explicit. Major version because both were part of the 2.x compatibility promise; migration is automatic.
+
+### Changed
+- `.agents/models.toml` → **`.agents/config.toml`** (it holds `[routing.*] [tiers] [roles] [naming]`, `[hil]`, `[state]`, `[delegation]`). Every reader (hooks, skill assets, `ks`) accepts the legacy name; `ks project update` renames an existing file in place — content, routing pin, HIL threshold and limits survive, and its recorded hash is carried over.
+- `[routing.ibm]` → **`[routing.ibm-openai]`** with `match = { codex_model_provider = "ibm" }`. Codex selection now tries `match.codex_model_provider` first, then a table keyed by the provider id (legacy). `TKSFW_ROUTING=ibm` in shell profiles must become `ibm-openai`.
+
+### Added
+- `[routing.ibm-anthropic]` (claude-haiku-4-5 / claude-sonnet-5 / claude-opus-5) and `[routing.ibm-anthropic-cc]` (claude-haiku-4-5 / claude-sonnet-5[1m] / claude-opus-5[1m], for Claude Code). Neither carries a `match` yet: pin with `ks routing use <table>`, or add `match.codex_model_provider` / `match.claude_base_url` for the endpoint you use.
+- `ks routing list`: every table with match rule, model per tier, and `[pinned]` / `[active (how)]` markers — the menu for `ks routing use`.
+- `ks help [<command>]` and `ks <command> --help`: a full guide per command (self, operator, project, routing, hil, layers, ledger, harness, doctor, dev), shipped inside `ks`.
+- ADR 0014; `docs/model-routing.md` "Tables shipped in the template"; `docs/ks.md`, getting-started rows. 8 new tests (272 total).
+
 ## [2.7.0] — 2026-09-09
 
 ### Fixed

@@ -5,7 +5,7 @@
     ks operator set <name> | show                 per-user ~/.config/tksfw/user.toml
     ks project init [dir] [--full] | update [dir] | enable | disable | status | drift [--json]
     ks project reset [--archive [--label L]] [--keep-agents] [--registry] [--dry-run] [--yes] [--force]
-    ks routing show | check | resolve <agent> | use <table> | use --clear
+    ks routing list | show | check | resolve <agent> | use <table> | use --clear
     ks hil show | set [--impact L] [--reversibility L] [--logic and|or] [--mode enforce|advisory]
     ks layers resolve [--l3 P] [--l4 P] [--json] | pin --l3 P | --l4 P | --clear | journal | section
     ks ledger check | find <id> [--refs] [--json] | digest [--task T] [--agent A] [--json]
@@ -14,6 +14,7 @@
     ks harness sync [--check] | retrust [--ack]
     ks doctor                                     installation integrity (user-level + project)
     ks dev build | test | release <version>       repository checkout only
+    ks help [<command>]                           this list, or the full guide for one command
 
 ks is a thin dispatcher: every operation is an existing framework script (hooks, skill assets,
 tools/new_project.py); ks only resolves WHERE they are and adds status/doctor/retrust/drift views.
@@ -164,6 +165,12 @@ class Project:
         self.hooks = os.path.join(self.root, ".agents", "hooks") if self.root and os.path.isfile(os.path.join(self.root, ".agents", "hooks", "hooks.json")) else home.hooks
         self.skills = os.path.join(self.root, ".agents", "skills") if self.root and os.path.isdir(os.path.join(self.root, ".agents", "skills", "yaml-log-entry")) else home.skills
         self.workarea = os.path.join(self.root, ".agents", "workarea") if self.root else None
+
+    def config_toml(self):
+        """`.agents/config.toml` (3.0.0), or the legacy `.agents/models.toml` when only that exists."""
+        new = os.path.join(self.root, ".agents", "config.toml")
+        old = os.path.join(self.root, ".agents", "models.toml")
+        return old if (not os.path.isfile(new) and os.path.isfile(old)) else new
 
     def env(self):
         e = dict(os.environ)
@@ -524,13 +531,45 @@ def cmd_routing(home, args):
         sys.exit(run([PY, rm, "--print"], cwd=proj.root, env=proj.env()).returncode)
     if sub == "check":
         sys.exit(run([PY, rm, "--check"], cwd=proj.root, env=proj.env()).returncode)
+    if sub == "list":
+        import tomllib
+        path = proj.config_toml()
+        with open(path, "rb") as fh:
+            cfg = tomllib.load(fh)
+        routing = cfg.get("routing") or {}
+        tiers = list((cfg.get("tiers") or {}).keys()) or ["research", "build", "judge"]
+        if not routing:
+            die(f"no [routing.<table>] tables in {path}")
+        # effective table right now, as the hook would pick it
+        eff = run([PY, rm, "--print"], cwd=proj.root, env=proj.env(), capture=True)
+        m = re.search(r"routing='([^']+)'\s+selected_by=(.+)", eff.stdout or "")
+        cur, how = (m.group(1), m.group(2).strip()) if m else (None, None)
+        pinned = cfg.get("selected")
+        print(f"{os.path.relpath(path, proj.root)} — {len(routing)} routing table(s); `ks routing use <table>` pins one, `--clear` unpins")
+        w = max(len(k) for k in routing)
+        for key, tab in routing.items():
+            marks = []
+            if key == pinned:
+                marks.append("pinned")
+            if key == cur:
+                marks.append(f"active ({how})")
+            mt = tab.get("match") or {}
+            match = ", ".join(f"{k}={v}" for k, v in mt.items()) if isinstance(mt, dict) and mt else "—"
+            print(f"  {key:<{w}}  {('[' + ', '.join(marks) + ']') if marks else ''}")
+            print(f"  {'':<{w}}  match: {match}")
+            for t in tiers:
+                e = tab.get(t) or {}
+                print(f"  {'':<{w}}  {t:<9} {e.get('model', '?'):<28} effort={e.get('reasoning_effort', 'provider default')}")
+        if not cur:
+            print("  (no table is active for this shell: pin one with `ks routing use <table>` or set TKSFW_ROUTING)")
+        sys.exit(0)
     if sub == "resolve":
         if len(args) < 2:
             die("usage: ks routing resolve <agent-name>")
         sys.exit(run([PY, rm, "--resolve", args[1]], cwd=proj.root, env=proj.env()).returncode)
     if sub == "use":
         refuse_if_busy(proj, "routing use", args)
-        path = os.path.join(proj.root, ".agents", "models.toml")
+        path = proj.config_toml()
         text = open(path, encoding="utf-8").read()
         lines = [l for l in text.splitlines(keepends=True) if not re.match(r'^\s*selected\s*=', l)]
         if "--clear" in args:
@@ -597,7 +636,7 @@ def cmd_hil(home, args):
         if new == pol:
             print(f"HIL threshold unchanged: {V.hil_describe(pol)}")
             sys.exit(0)
-        path = os.path.join(proj.root, ".agents", "models.toml")
+        path = proj.config_toml()
         text = open(path, encoding="utf-8").read()
         block = ('[hil]                            # Human in the Loop threshold (AGENTS.md § Human in the Loop) — `ks hil show|set`\n'
                  f'impact = "{new["impact"]}"\n'
@@ -910,15 +949,158 @@ def cmd_dev(home, args):
     die("usage: ks dev build | test | release <version>")
 
 
-COMMANDS = {"self": cmd_self, "operator": cmd_operator, "project": cmd_project, "routing": cmd_routing, "hil": cmd_hil,
+
+
+HELP = {
+    "self": """ks self — install and inspect the ks command itself (user level)
+
+  ks self install [--bin-dir DIR]   symlink ks into ~/.local/bin (or DIR) and record the framework home in
+                                    ~/.config/tksfw/user.toml. Run once per machine, from the copy you want
+                                    to use: ~/tksfw/plugins/tksfw/bin/ks (bundle) or ~/tksfw/tools/ks (checkout).
+  ks self setup [--operator NAME]   one-shot user setup: operator name, bootstrap stanza appended to
+                                    ~/.codex/AGENTS.md and ~/.claude/CLAUDE.md (idempotent), completion hint, doctor.
+  ks self version                   framework version and how the home was resolved.
+  ks self home                      the framework home path (bundle: the plugin inside it).
+
+Home resolution: $TKSFW_HOME → user.toml `home` → the script's own location → harness plugin caches.
+""",
+    "operator": """ks operator — the per-user operator name (OwnerSessionUserName on every ledger entry you write)
+
+  ks operator set "<name>"          write name to ~/.config/tksfw/user.toml (other keys kept)
+  ks operator show                  resolved name and its source: file | env (TKSFW_USER) | git (fallback)
+
+Precedence: TKSFW_USER → user.toml → `git config user.name`. Sessions read it at start; a change applies
+to the next session.
+""",
+    "project": """ks project — arm, update and inspect a project (the folder that carries .agents/.tksfw.json)
+
+  ks project init [dir] [--full]    arm a folder. Plugin mode (default): thin layer only — AGENTS.md,
+                                    CLAUDE.local.md, .agents/{workarea,agents,config.toml}, .codex/config.toml,
+                                    .claude/settings.json; hooks and skills run from the installed plugin.
+                                    --full copies hooks and skills into .agents/ and pins the version.
+  ks project update [dir] [--force] refresh the thin layer to the installed version: pristine files are
+                                    replaced, edited files kept and listed, files the template retired are
+                                    removed when pristine. Refuses while a session is active (--force).
+  ks project status                 version, mode, ARMED/DISARMED, active sessions, live agents, layers.
+  ks project drift [--json]         which project files differ from the template and how.
+  ks project enable | disable       flip `enabled` in .agents/.tksfw.json — the hooks yield when disabled.
+  ks project reset [--archive [--label L]] [--keep-agents] [--registry] [--dry-run] [--yes] [--force]
+                                    start a new generation: clear (or archive to .agents/history/<stamp>/)
+                                    all ledgers, STATE.md, the plan and agents. Interactive confirmation
+                                    unless --yes; refuses while sessions are active.
+
+Every init/update is recorded in .agents/.tksfw.json (`installs`); the first session afterwards logs it in
+changes.yaml (Layer METHOD) — nothing to write by hand.
+""",
+    "routing": """ks routing — model routing tables in .agents/config.toml ([routing.<table>], [tiers], [roles])
+
+  ks routing list                   every table: match rule, model per tier, which one is pinned / active.
+  ks routing show                   the table the hook would use now, with the roles it serves.
+  ks routing check                  validate config.toml (tiers, roles, efforts, `selected`).
+  ks routing resolve <agent-name>   which model/effort a given agent name gets, and why.
+  ks routing use <table>            pin a table (`selected = "<table>"`); applies to the next spawn, no
+                                    restart. Refuses while agents are live (--force).
+  ks routing use --clear            unpin → automatic selection.
+
+Selection order at spawn: TKSFW_ROUTING → `selected` → Codex `model_provider` (match.codex_model_provider
+or table key) → Claude Code ANTHROPIC_BASE_URL prefix (match.claude_base_url) → [routing.default] → deny.
+Tables ship for the IBM endpoint: ibm-openai (gpt-5.6-*), ibm-anthropic (claude-*-5), ibm-anthropic-cc
+(1M-context variants for Claude Code), plus an openrouter example.
+""",
+    "hil": """ks hil — the Human-in-the-Loop threshold ([hil] in .agents/config.toml; AGENTS.md § Human in the Loop)
+
+  ks hil show                       effective threshold and mode.
+  ks hil set [--impact L] [--reversibility L] [--logic and|or] [--mode enforce|advisory]
+                                    change it live; validated; the session is told at its next prompt.
+
+Levels: impact VERY LOW|LOW|MEDIUM|HIGH|VERY HIGH; reversibility TRIVIAL|EASY|MEDIUM|HARD|VERY HARD.
+Default: Impact >= HIGH OR Reversibility >= HARD, enforce — a new decision at/above it must carry
+ConfirmationType OPERATOR; a Worker must leave it OPEN. `advisory` warns instead of rejecting.
+""",
+    "layers": """ks layers — the project layers: L3 archetype (KS_PROJECT.md) and L4 project spec (KS_SPEC.md)
+
+  ks layers resolve [--l3 P] [--l4 P] [--json]   which files resolve, from where (argument, pin, convention)
+                                                 and their status: new | unchanged | changed | missing.
+  ks layers pin --l3 P | --l4 P | --clear        declare non-conventional paths in .agents/.tksfw.json.
+  ks layers journal                              record the current hashes (baseline for the next start).
+  ks layers section                              the pointer block SessionStart injects.
+
+Exit codes for resolve: 0 resolved, 3 nothing resolved, 4 declared but missing. Start execution with the
+ks-start skill ($ks-start in Codex, /tksfw:ks-start in Claude Code); re-read after edits with ks-reload.
+""",
+    "ledger": """ks ledger — the YAML ledgers in .agents/workarea/ (changes, lessons, handoffs, events, decisions) and the plan
+
+  ks ledger check                   validate every ledger shard and the plan (tasks.md); cross-references.
+  ks ledger find <id> [--refs] [--json]
+                                    locate an entry by ID across shards and archives (--refs: who cites it).
+  ks ledger digest [--task T] [--agent A] [--json]
+                                    the ledgers as decision context: blocked gates, decisions in force,
+                                    pending decisions, open issues, work in flight, recent lessons/changes.
+                                    --task narrows to one task and adds its evidence chain; --agent previews
+                                    a subagent's briefing.
+  ks ledger export all|<kinds> [--out F] [--archive] [--session T] [--csv DIR]
+                                    Excel workbook (one sheet per ledger) or CSV files; default
+                                    .agents/workarea/exports/ledgers-<stamp>.xlsx.
+  ks ledger archive-plan [--dry-run]
+                                    move completed plan blocks to archive/tasks.md.
+  ks ledger archive <ledger|all> --before YYYY-MM-DD [--dry-run]
+                                    fold old entries into archive/<ledger>.yaml (refuses while sessions
+                                    are active unless --force).
+
+Shards: each session writes <ledger>.<token>.yaml; other sessions' shards and unsuffixed legacy files are
+read-only. IDs are minted by the yaml-log-entry skill; the hooks validate every write.
+""",
+    "harness": """ks harness — the harness-facing files (Codex, Claude Code)
+
+  ks harness sync [--check]         full mode only: regenerate .codex/hooks.json, .claude/settings.json hooks,
+                                    .claude/skills mirrors and agent mirrors from the .agents/ sources.
+  ks harness retrust [--ack]        did hooks.json change since you last trusted it? Codex must re-trust
+                                    changed hooks in /hooks; --ack records that you did.
+
+Plugin-mode projects have nothing to sync: hooks and skills come from the plugin. Re-trust is needed after
+a framework upgrade (plugin mode) or a project update (full mode).
+""",
+    "doctor": """ks doctor — installation integrity, user level and (when inside one) project level
+
+Checks: Python/git; framework home and user.toml; operator; Codex config parses, marketplace registered,
+plugin tksfw@tksfw enabled, hooks trusted (count vs hooks.json); Claude Code plugin enabled, hooks not
+disabled; bootstrap stanzas; inside a project: version vs installed, mode, ARMED, drift, HIL threshold,
+cloud-synced folder warning. Exit 0; FAIL lines name the step that fixes them.
+""",
+    "dev": """ks dev — maintainer commands (repository checkout only)
+
+  ks dev build                      template → plugins/tksfw + dist/*.zip (tools/build_plugin.py)
+  ks dev test                       the test suite (tests/run_tests.py)
+  ks dev release <version>          bump VERSION, build, test, commit, tag (tools/release.sh)
+""",
+    "help": """ks help [<command>]               this list, or the full guide for one command (self, operator, project,
+                                    routing, hil, layers, ledger, harness, doctor, dev)
+""",
+}
+
+
+def cmd_help(home, args):
+    if not args:
+        print(__doc__)
+        print("Run `ks help <command>` for the full guide of one command:", ", ".join(k for k in HELP if k != "help") + ".")
+        sys.exit(0)
+    key = args[0].lstrip("-")
+    if key not in HELP:
+        die(f"no help for {key!r}; commands: " + ", ".join(HELP))
+    print(HELP[key].rstrip("\n"))
+    sys.exit(0)
+
+
+COMMANDS = {"self": cmd_self, "operator": cmd_operator, "project": cmd_project, "routing": cmd_routing, "hil": cmd_hil, "help": cmd_help,
             "layers": cmd_layers, "ledger": cmd_ledger, "harness": cmd_harness, "doctor": cmd_doctor, "dev": cmd_dev}
 
 
 def main():
     a = sys.argv[1:]
-    if not a or a[0] in ("-h", "--help", "help"):
-        print(__doc__)
-        sys.exit(0)
+    if not a or a[0] in ("-h", "--help"):
+        cmd_help(None, [])
+    if len(a) >= 2 and a[1] in ("-h", "--help") and a[0] in HELP:
+        cmd_help(None, [a[0]])
     if a[0] in ("--version", "version"):
         a = ["self", "version"]
     if a[0] not in COMMANDS:

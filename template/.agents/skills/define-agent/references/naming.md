@@ -1,7 +1,7 @@
 # Agent definitions — fields and naming (method reference)
 
 Moved verbatim from `AGENTS.md` § Subagents / § Agent Naming (0.8.0). `AGENTS.md` keeps only the
-kernel: the `<family>-<role>` pattern, "role = a key of `[roles]` in `.agents/models.toml`", the
+kernel: the `<family>-<role>` pattern, "role = a key of `[roles]` in `.agents/config.toml`", the
 reserved name `main`, "a rename is a logged change", and the rule to load this skill before
 creating or renaming any `.agents/agents/*.toml`. `assets/validate_agent.py` enforces everything
 marked **[E]** (error, blocks the write) and reports everything marked **[W]** (warning).
@@ -26,7 +26,7 @@ marked **[E]** (error, blocks the write) and reports everything marked **[W]** (
     - `workspace-write` for writing roles (builder, writer, fetcher — a fetcher writes what it fetches,
       although it runs on the `research` tier)
   - `model` / `model_reasoning_effort`: NEVER hand-written. The tier is derived from the role (or a
-    `# tksfw-tier: <tier>` comment) and rendered into the Codex mirror from `.agents/models.toml`. With `codex_agent_files = "strip"` a literal `model` line is an error **[E]**;
+    `# tksfw-tier: <tier>` comment) and rendered into the Codex mirror from `.agents/config.toml`. With `codex_agent_files = "strip"` a literal `model` line is an error **[E]**;
     with `"inline"` a line that does not match the current routing is a warning **[W]** (it will be rewritten).
 - Persist agent files in the repo so they are reused across sessions, not recreated each time.
 - Harness mirrors — `.codex/agents/<name>.toml` (Codex) and `.claude/agents/<name>.md` (Claude Code) —
@@ -45,7 +45,7 @@ marked **[E]** (error, blocks the write) and reports everything marked **[W]** (
   - Use full, plain words — never truncations or acronyms (`pricing-reviewer`, not `prc-rvw`).
     "Short" means one clear word, not an abbreviation. Tokens shorter than 3 letters **[W]**.
 - Draw `<role>` from a closed, reused vocabulary so the fleet reads as one taxonomy. The vocabulary
-  is the set of keys of `[roles]` in `.agents/models.toml` (currently `planner`, `builder`,
+  is the set of keys of `[roles]` in `.agents/config.toml` (currently `planner`, `builder`,
   `reviewer`, `validator`, `researcher`, `fetcher`, `writer`) **[E]**; harness built-in agent names
   listed under `[naming] builtin_agents` are not method roles **[E]**.
   - Extend this list deliberately (edit `[roles]`, a METHOD change); do not invent a one-off role

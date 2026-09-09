@@ -2,13 +2,13 @@
 """Validate agent definitions (.agents/agents/<name>.toml, harness-neutral source) against the TKS method.
 
 Usage:
-    validate_agent.py <file.toml> [...] [--models <models.toml>] [--json] [--quiet]
+    validate_agent.py <file.toml> [...] [--models <config.toml>] [--json] [--quiet]
     validate_agent.py --all [--dir .agents/agents]
 
 Exit codes: 0 = no errors (warnings may be printed), 2 = errors, 1 = usage / file not found.
 
 Errors [E] block the write (the PostToolUse hook calls this); warnings [W] are advisory.
-The role vocabulary and naming options come from .agents/models.toml ([roles], [naming]); without
+The role vocabulary and naming options come from .agents/config.toml ([roles], [naming]); without
 that file the validator falls back to the method's default vocabulary. Standard library only.
 """
 import sys
@@ -38,11 +38,13 @@ PATH_RE = re.compile(r"(^|\s|`)[\w./-]*[/.][\w./*-]+")          # something that
 SUCCESS_WORDS = ("success", "criteria", "return", "deliver", "output", "acceptance", "done when")
 
 
-# ----------------------------------------------------------------------------- models.toml
+# ----------------------------------------------------------------------------- config.toml
 def find_models(start):
     cur = os.path.abspath(start if os.path.isdir(start) else os.path.dirname(start))
     while True:
-        p = os.path.join(cur, ".agents", "models.toml")
+        p = os.path.join(cur, ".agents", "config.toml")
+        if not os.path.isfile(p):
+            p = os.path.join(cur, ".agents", "config.toml")          # legacy name (< 3.0.0)
         if os.path.isfile(p):
             return p
         parent = os.path.dirname(cur)
@@ -114,7 +116,7 @@ def validate_text(text, path, models=None, siblings=()):
                 E.append(f"role `{role}` is a harness built-in name, not a method role")
             else:
                 E.append(f"role `{role}` (last token) is not in the vocabulary {sorted(roles)} — "
-                         f"pick one or extend [roles] in .agents/models.toml deliberately")
+                         f"pick one or extend [roles] in .agents/config.toml deliberately")
             short = [t for t in tokens if len(t) < MIN_TOKEN_LEN]
             if short:
                 W.append(f"token(s) {short} look like abbreviations; use full plain words")
@@ -144,7 +146,7 @@ def validate_text(text, path, models=None, siblings=()):
     if "model" in data or "model_reasoning_effort" in data:
         if mode == "strip":
             E.append("`model`/`model_reasoning_effort` must not be hand-written (codex_agent_files = \"strip\"); "
-                     "models are routed from .agents/models.toml")
+                     "models are routed from .agents/config.toml")
         else:
             W.append("`model`/`model_reasoning_effort` are rendered by sync_harness.py --models from the "
                      "routing table; hand-written values will be overwritten")

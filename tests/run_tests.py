@@ -10,7 +10,7 @@
   4. Same scripts in IN-PROJECT mode (legacy layout) from a different cwd — still resolve the root
   5. new_project.py: full + plugin-mode instantiation into temp dirs, --update keeps a local edit
   6. plugins/tksfw/ committed copy is up to date with the template (build --check)
-  7. Model routing: models.toml validates; route_model.py resolves Codex/Claude spawns (table
+  7. Model routing: config.toml validates; route_model.py resolves Codex/Claude spawns (table
      selection by CODEX_HOME model_provider, ANTHROPIC_BASE_URL, TKSFW_ROUTING), denies unknown
      roles and missing tables, ignores non-spawn tools, works from the plugin bundle;
      sync_harness.py --models renders Codex agent TOML (inline/strip) and Claude mirrors
@@ -227,9 +227,9 @@ def main():
         base_env = {k: v for k, v in base_env.items() if v} | {"CODEX_HOME": codex_home}
         rm = os.path.join(full, ".agents", "hooks", "route_model.py")
         r = run([PY, rm, "--check"], cwd=full, env=base_env)
-        check("routing: models.toml --check", r.returncode == 0 and "ok" in r.stdout, r.stdout + r.stderr)
+        check("routing: config.toml --check", r.returncode == 0 and "ok" in r.stdout, r.stdout + r.stderr)
         r = run([PY, rm, "--print", "--codex"], cwd=full, env=base_env)
-        check("routing: --print selects [routing.ibm] from CODEX_HOME", r.returncode == 0 and "routing='ibm'" in r.stdout, r.stdout)
+        check("routing: --print selects [routing.ibm-openai] from CODEX_HOME via match.codex_model_provider", r.returncode == 0 and "routing='ibm-openai'" in r.stdout and "(match)" in r.stdout, r.stdout)
         r, out = hook("spawn_agent", {"task_name": "sources-researcher_scan", "message": "m", "fork_turns": "none"},
                       env=base_env, extra={"turn_id": "t1"})
         hs = out.get("hookSpecificOutput", {})
@@ -257,8 +257,8 @@ def main():
         check("routing: non-spawn tool untouched", r.returncode == 0 and out == {}, r.stdout + r.stderr)
         jl = os.path.join(host_state(full), "routing.jsonl")
         check("routing: decisions journaled", os.path.isfile(jl) and sum(1 for _ in open(jl)) >= 4)
-        # plugin bundle: hook runs from the plugin dir against the plugin-mode project (has models.toml)
-        check("plugin-mode project carries models.toml", os.path.isfile(os.path.join(proj, ".agents", "models.toml")))
+        # plugin bundle: hook runs from the plugin dir against the plugin-mode project (has config.toml)
+        check("plugin-mode project carries config.toml", os.path.isfile(os.path.join(proj, ".agents", "config.toml")))
         r, out = hook("spawn_agent", {"agent_type": "output-validator"}, env=base_env | {"CLAUDE_PLUGIN_ROOT": plug},
                       cwd=proj, script=os.path.join(plug, "hooks", "route_model.py"), extra={"turn_id": "t4"})
         hs = out.get("hookSpecificOutput", {})
@@ -295,7 +295,7 @@ def main():
         r = run([PY, sync, "--models", "--routing", "openrouter"], cwd=full, env=base_env)
         t1 = open(os.path.join(codex_mirrors, "sources-researcher.toml")).read()
         check("sync --models --routing switches table", 'model = "google/gemini-3-flash"' in t1 and os.path.isfile(os.path.join(full, ".claude", "agents", "manual.md")), r.stdout + t1)
-        mt = os.path.join(full, ".agents", "models.toml")
+        mt = os.path.join(full, ".agents", "config.toml")
         mt_text = open(mt, encoding="utf-8").read().replace('codex_agent_files = "inline"', 'codex_agent_files = "strip"')
         with open(mt, "w", encoding="utf-8") as fh:
             fh.write(mt_text)
@@ -342,7 +342,7 @@ def main():
         am = os.path.join(full, ".claude", "agents", "pricing-reviewer.md")
         check("track_edits renders both mirrors after a validated write",
               os.path.isfile(cm) and os.path.isfile(am) and open(cm).read().startswith("# tksfw:mirror")
-              and 'model = ' not in open(cm).read()          # models.toml is in strip mode at this point
+              and 'model = ' not in open(cm).read()          # config.toml is in strip mode at this point
               and "model: gpt-5.6-sol" in open(am).read() and "tools: Read" in open(am).read(),
               f"cm={os.path.isfile(cm)} am={os.path.isfile(am)} out={r.stdout[-300:]} err={r.stderr[-300:]} ls={os.listdir(codex_mirrors) if os.path.isdir(codex_mirrors) else None}")
         probe3 = ("import sys; sys.path.insert(0, %r); import hooklib as H; "
@@ -422,7 +422,7 @@ def main():
         check("tksfw-init skill bundled with template, installer and VERSION",
               os.path.isfile(os.path.join(init, "SKILL.md")) and os.path.isfile(os.path.join(init, "assets", "new_project.py"))
               and os.path.isfile(os.path.join(init, "assets", "template", "AGENTS.md"))
-              and os.path.isfile(os.path.join(init, "assets", "template", ".agents", "models.toml"))
+              and os.path.isfile(os.path.join(init, "assets", "template", ".agents", "config.toml"))
               and open(os.path.join(init, "assets", "VERSION")).read().strip() == open(os.path.join(REPO, "VERSION")).read().strip()
               and not os.path.exists(os.path.join(init, "assets", "template", ".agents", "skills", "yaml-log-entry", "tests")))
         check("bootstrap stanzas bundled",
@@ -742,14 +742,14 @@ def main():
         r = run([PY, ks, "project", "disable"], cwd=kproj, env=kenv)
         r2 = run([PY, ks, "project", "enable"], cwd=kproj, env=kenv)
         check("ks project disable/enable", "DISARMED" in r.stdout and "ARMED" in r2.stdout, r.stdout + r2.stdout)
-        r = run([PY, ks, "routing", "use", "ibm"], cwd=kproj, env=kenv)
-        mt = open(os.path.join(kproj, ".agents", "models.toml")).read()
+        r = run([PY, ks, "routing", "use", "ibm-openai"], cwd=kproj, env=kenv)
+        mt = open(os.path.join(kproj, ".agents", "config.toml")).read()
         r2 = run([PY, ks, "routing", "show"], cwd=kproj, env=kenv | {"CODEX_HOME": os.path.join(tmp, "nocodex")})
-        check("ks routing use pins `selected` and the hook honours it", r.returncode == 0 and 'selected = "ibm"' in mt and "selected_by=selected" in r2.stdout, r.stdout + r2.stdout + r2.stderr)
+        check("ks routing use pins `selected` and the hook honours it", r.returncode == 0 and 'selected = "ibm-openai"' in mt and "selected_by=selected" in r2.stdout, r.stdout + r2.stdout + r2.stderr)
         r = run([PY, ks, "routing", "use", "nope"], cwd=kproj, env=kenv)
         check("ks routing use refuses an unknown table", r.returncode != 0 and "no [routing.nope]" in r.stderr, r.stderr)
         r = run([PY, ks, "routing", "use", "--clear"], cwd=kproj, env=kenv)
-        check("ks routing use --clear", r.returncode == 0 and not re.search(r"^selected\s*=", open(os.path.join(kproj, ".agents", "models.toml")).read(), re.M), r.stdout)
+        check("ks routing use --clear", r.returncode == 0 and not re.search(r"^selected\s*=", open(os.path.join(kproj, ".agents", "config.toml")).read(), re.M), r.stdout)
         r = run([PY, ks, "routing", "check"], cwd=kproj, env=kenv)
         r2 = run([PY, ks, "routing", "resolve", "sources-researcher"], cwd=kproj, env=kenv)
         check("ks routing check/resolve", r.returncode == 0 and '"model": "gpt-5.6-luna"' in r2.stdout, r.stdout + r2.stdout)
@@ -856,7 +856,7 @@ def main():
         check("ks routing use prints the effect line", r.returncode == 0 and "next subagent spawn" in r.stdout, r.stdout + r.stderr)
         r = lhook("track_edits.py", {"prompt": "hi"}, ["--phase", "prompt"])
         ctx = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"] if r.stdout.strip() else ""
-        check("prompt notice reports the routing switch", "routing.openrouter" in ctx and "was [routing.ibm]" in ctx, r.stdout[:300])
+        check("prompt notice reports the routing switch", "routing.openrouter" in ctx and "was [routing.ibm-openai]" in ctx, r.stdout[:300])
         r = lhook("track_edits.py", {"prompt": "hi"}, ["--phase", "prompt"])
         check("prompt notice reported once", r.stdout.strip() == "", r.stdout)
         r = lhook("track_edits.py", {"prompt": "hi"}, ["--phase", "prompt"])   # operator change via env
@@ -865,8 +865,8 @@ def main():
         check("prompt notice reports the operator change", "Operator now `bob`" in r.stdout, r.stdout[:300])
         # busy check
         lhook("subagent_track.py", {"hook_event_name": "SubagentStart", "agent_id": "z1", "agent_type": "x-builder"}, ["--start"])
-        r = run([PY, ks, "routing", "use", "ibm"], cwd=lproj, env=lenv)
-        r2 = run([PY, ks, "routing", "use", "ibm", "--force"], cwd=lproj, env=lenv)
+        r = run([PY, ks, "routing", "use", "ibm-openai"], cwd=lproj, env=lenv)
+        r2 = run([PY, ks, "routing", "use", "ibm-openai", "--force"], cwd=lproj, env=lenv)
         check("ks routing use refuses while a subagent runs, --force overrides", r.returncode != 0 and "subagent" in r.stderr and r2.returncode == 0, r.stderr + r2.stderr)
         r = run([PY, ks, "project", "update"], cwd=lproj, env=lenv)
         check("ks project update refuses while the project is busy", r.returncode != 0 and ("session" in r.stderr or "subagent" in r.stderr), r.stderr)
@@ -1054,7 +1054,7 @@ def main():
         r = run([PY, os.path.join(plug, "hooks", "track_edits.py"), "--phase", "prompt"], cwd=dgp, env=kenv, inp=json.dumps({"session_id": "SD", "turn_id": "d3", "cwd": dgp, "prompt": "x"}))
         check("prompt notice announces the new open issue and the failed gate", "New open issue Evis0002" in r.stdout and "Gate failed: AUDIT NON-CONFORMANT" in r.stdout, r.stdout[:400])
         # [state] limits honoured
-        mt = os.path.join(dgp, ".agents", "models.toml")
+        mt = os.path.join(dgp, ".agents", "config.toml")
         open(mt, "a").write("\n")
         txt = open(mt).read().replace("issues = 10", "issues = 1")
         open(mt, "w").write(txt)
@@ -1111,8 +1111,8 @@ def main():
         r = run([PY, ks, "hil", "set", "--mode", "advisory", "--logic", "or", "--impact", "medium"], cwd=hp, env=kenv)
         check("ks hil set validates, rewrites [hil] and prints the effect line", r.returncode == 0 and "Impact >= MEDIUM OR Reversibility >= HARD (advisory)" in r.stdout and "→ applies to the next decision entry" in r.stdout, r.stdout)
         import tomllib as _tl
-        hil_tbl = _tl.load(open(os.path.join(hp, ".agents", "models.toml"), "rb"))["hil"]
-        check("[hil] table rewritten in place and models.toml still parses", hil_tbl == {"impact": "MEDIUM", "reversibility": "HARD", "logic": "or", "mode": "advisory"}, str(hil_tbl))
+        hil_tbl = _tl.load(open(os.path.join(hp, ".agents", "config.toml"), "rb"))["hil"]
+        check("[hil] table rewritten in place and config.toml still parses", hil_tbl == {"impact": "MEDIUM", "reversibility": "HARD", "logic": "or", "mode": "advisory"}, str(hil_tbl))
         r = run([PY, ks, "hil", "set", "--impact", "bogus"], cwd=hp, env=kenv)
         check("ks hil set rejects a bad level", r.returncode != 0 and "not in" in r.stderr + r.stdout, r.stderr)
         r = run([PY, os.path.join(plug, "hooks", "track_edits.py"), "--phase", "prompt"], cwd=hp, env=kenv, inp=json.dumps({"session_id": "SH", "turn_id": "h4", "cwd": hp, "prompt": "x"}))
@@ -1175,6 +1175,42 @@ def main():
         fp2 = os.path.join(tmp, "instfull")
         r = run([PY, ks, "project", "init", fp2, "--full"], cwd=tmp, env=kenv)
         check("post-init in full mode: /hooks trust + retrust --ack steps", "type /hooks and trust them" in r.stdout and "ks harness retrust --ack" in r.stdout, r.stdout[-600:])
+
+        # 24 — config.toml, routing tables, ks routing list, ks help
+        cp3 = os.path.join(tmp, "cfg3")
+        run([PY, ks, "project", "init", cp3], cwd=tmp, env=kenv)
+        check("project ships .agents/config.toml (no models.toml)", os.path.isfile(os.path.join(cp3, ".agents", "config.toml")) and not os.path.exists(os.path.join(cp3, ".agents", "models.toml")))
+        r = run([PY, ks, "routing", "list"], cwd=cp3, env=kenv)
+        check("ks routing list: four tables, ibm-openai active via match, models per tier",
+              r.returncode == 0 and "4 routing table(s)" in r.stdout and "ibm-openai" in r.stdout and "[active (codex model_provider (match))]" in r.stdout
+              and "claude-sonnet-5[1m]" in r.stdout and "claude-opus-5 " in r.stdout and "match: codex_model_provider=ibm" in r.stdout, r.stdout)
+        r = run([PY, ks, "routing", "use", "ibm-anthropic-cc"], cwd=cp3, env=kenv)
+        r = run([PY, ks, "routing", "list"], cwd=cp3, env=kenv)
+        check("ks routing list marks the pinned table", "ibm-anthropic-cc  [pinned, active (selected (config.toml))]" in r.stdout, r.stdout)
+        r = run([PY, ks, "routing", "resolve", "x-builder"], cwd=cp3, env=kenv)
+        check("resolve under the pinned anthropic-cc table gives the 1M sonnet", "claude-sonnet-5[1m]" in r.stdout, r.stdout)
+        # legacy file name: readers accept models.toml; update renames it and keeps the pin
+        os.replace(os.path.join(cp3, ".agents", "config.toml"), os.path.join(cp3, ".agents", "models.toml"))
+        r = run([PY, ks, "routing", "show"], cwd=cp3, env=kenv)
+        check("legacy .agents/models.toml is still read", "routing='ibm-anthropic-cc'" in r.stdout and "models.toml" in r.stdout, r.stdout)
+        r = run([PY, ks, "project", "update", cp3, "--force"], cwd=tmp, env=kenv)
+        check("ks project update renames models.toml → config.toml keeping the operator's content (pin survives)",
+              "renamed: .agents/models.toml → .agents/config.toml" in r.stdout and os.path.isfile(os.path.join(cp3, ".agents", "config.toml"))
+              and not os.path.exists(os.path.join(cp3, ".agents", "models.toml")) and 'selected = "ibm-anthropic-cc"' in open(os.path.join(cp3, ".agents", "config.toml")).read(), r.stdout)
+        r = run([PY, ks, "help"], cwd=cp3, env=kenv)
+        r2 = run([PY, ks, "help", "routing"], cwd=cp3, env=kenv)
+        r3 = run([PY, ks, "ledger", "--help"], cwd=cp3, env=kenv)
+        r4 = run([PY, ks, "help", "bogus"], cwd=cp3, env=kenv)
+        check("ks help lists commands; ks help routing / ks ledger --help print the guides; unknown → error",
+              "Run `ks help <command>`" in r.stdout and "ks routing list" in r2.stdout and "Selection order at spawn" in r2.stdout
+              and "ks ledger digest" in r3.stdout and r4.returncode != 0, r.stdout[-200:] + r2.stdout[:200])
+        for c in ("self", "operator", "project", "routing", "hil", "layers", "ledger", "harness", "doctor", "dev"):
+            rr = run([PY, ks, "help", c], cwd=cp3, env=kenv)
+            if rr.returncode != 0 or f"ks {c}" not in rr.stdout:
+                check(f"ks help {c}", False, rr.stdout + rr.stderr)
+                break
+        else:
+            check("ks help has a guide for every command", True)
 
         agents_md = open(os.path.join(full, "AGENTS.md"), encoding="utf-8").read()
         check("AGENTS.md keeps the naming kernel and points to define-agent",

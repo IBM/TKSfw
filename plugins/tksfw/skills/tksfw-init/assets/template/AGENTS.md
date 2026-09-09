@@ -60,7 +60,7 @@
 - Before delegating any plan step, check `.agents/agents/` (harness-neutral agent definitions; the hooks render the harness-specific copies) for a matching agent by role.
 	- If an existing agent's scope partially matches, update its definition rather than reuse or duplicate.
 	- Agent definitions should never carry task history. History lives only in the ledger.
-- If none exists, create `.agents/agents/<agent-name>.toml` — **load the `define-agent` skill first** (it owns the field rules, the naming convention and the validator; the PostToolUse hook blocks a non-conforming file). Never write `model`/`model_reasoning_effort`: models are routed by **tier** from `.agents/models.toml` (`research` = search/read-only, `build` = implementation, `judge` = planning/architecture/judgement/validation); the agent's `-<role>` suffix selects the tier via `[roles]`; the hooks render the model into the harness copies and apply the tier at every spawn (unknown role → spawn refused).
+- If none exists, create `.agents/agents/<agent-name>.toml` — **load the `define-agent` skill first** (it owns the field rules, the naming convention and the validator; the PostToolUse hook blocks a non-conforming file). Never write `model`/`model_reasoning_effort`: models are routed by **tier** from `.agents/config.toml` (`research` = search/read-only, `build` = implementation, `judge` = planning/architecture/judgement/validation); the agent's `-<role>` suffix selects the tier via `[roles]`; the hooks render the model into the harness copies and apply the tier at every spawn (unknown role → spawn refused).
 - Never delegate to the `judge` tier unless the task involves planning or architectural thinking, or judgment/validation.
 - Never write a model ID in an agent file or in this document (change procedure: `delegate-work` skill); record the model the hook reports in the Handoff/Event `Model` field.
 - Try to constrain each subagent to just one task for focused execution, improved traceability, and optimized handoffs.
@@ -74,7 +74,7 @@
 
 #### Agent Naming
 
-- Pattern `<family>-<role>`: lowercase, hyphens, ≤ 3 tokens; `<role>` is mandatory and MUST be a key of `[roles]` in `.agents/models.toml` (`planner`, `builder`, `reviewer`, `validator`, `researcher`, `fetcher`, `writer`); `<family>` only to disambiguate. Function, not identity — never names or codenames. Full convention and examples: `define-agent` skill, `references/naming.md`.
+- Pattern `<family>-<role>`: lowercase, hyphens, ≤ 3 tokens; `<role>` is mandatory and MUST be a key of `[roles]` in `.agents/config.toml` (`planner`, `builder`, `reviewer`, `validator`, `researcher`, `fetcher`, `writer`); `<family>` only to disambiguate. Function, not identity — never names or codenames. Full convention and examples: `define-agent` skill, `references/naming.md`.
 - Reserved name `main`: the root session — the only non-subagent and the sole spawner — is `main` in all logs (`AuthorAgent`/`TargetAgent`); no agent definition may use it. When `main` acts as orchestrator it still logs as `main`.
 - Names key the Handoff and Event logs (`AgentName`): a rename is a logged change (`changes.yaml`), never a casual edit.
 
@@ -93,7 +93,7 @@
 
 ### Human in the Loop
 - A decision at or above the **HIL threshold** is confirmed by the operator **before it takes effect** (ask, then `ConfirmationType: OPERATOR`); below it `AUTO-MODE` is allowed and still logged.
-- Threshold = configuration: `[hil]` in `.agents/models.toml`, default `Impact ≥ HIGH` **or** `Reversibility ≥ HARD`, `mode = enforce` (a non-compliant new entry is rejected). `ks hil set …` changes it live.
+- Threshold = configuration: `[hil]` in `.agents/config.toml`, default `Impact ≥ HIGH` **or** `Reversibility ≥ HARD`, `mode = enforce` (a non-compliant new entry is rejected). `ks hil set …` changes it live.
 - Workers never accept above-threshold decisions: leave `Status: OPEN` and return; `main` asks the operator and logs the `ACCEPTED` transition. STATE.md marks them "NEEDS OPERATOR CONFIRMATION".
 
 ### Tools

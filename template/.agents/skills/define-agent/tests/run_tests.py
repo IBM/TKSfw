@@ -4,7 +4,7 @@ import os, sys, subprocess
 HERE = os.path.dirname(os.path.abspath(__file__))
 V = os.path.join(HERE, "..", "assets", "validate_agent.py")
 FX = os.path.join(HERE, "fixtures")
-MODELS = os.path.join(HERE, "..", "..", "..", "models.toml")
+MODELS = os.path.join(HERE, "..", "..", "..", "config.toml")
 CASES = [  # (fixture, expected exit, substring expected in output)
     ("good/sources-researcher.toml", 0, "ok"),
     ("bad/atlas.toml", 2, "not in the vocabulary"),
@@ -28,7 +28,7 @@ for fx, code, needle in CASES:
 import tempfile
 with tempfile.TemporaryDirectory() as td:
     m = open(MODELS, encoding="utf-8").read().replace('codex_agent_files = "inline"', 'codex_agent_files = "strip"')
-    mp = os.path.join(td, "models.toml"); open(mp, "w").write(m)
+    mp = os.path.join(td, "config.toml"); open(mp, "w").write(m)
     r = subprocess.run([sys.executable, V, os.path.join(FX, "warn", "report-builder.toml"), "--models", mp], capture_output=True, text=True)
     ok = r.returncode == 2 and "must not be hand-written" in r.stdout
     print(f"[{'PASS' if ok else 'FAIL'}] strip mode: hand-written model is an error")

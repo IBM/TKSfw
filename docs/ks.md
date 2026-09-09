@@ -30,9 +30,10 @@ In a full-mode project the in-project hooks and skills (the pinned version) are 
 | `ks project status` | version vs installed, mode, armed, drift counts, active sessions, project layers, plan focus, isolation spaces | manifest, `--drift --json`, STATE.md, `workarea.py status` |
 | `ks project drift [--json]` | unchanged / outdated / edited / missing per file; exit 1 on drift; writes nothing | `new_project.py --drift` |
 | `ks project reset [--archive [--label L]] [--keep-agents] [--registry] [--dry-run] [--yes] [--force]` | start over: clears ledgers (all shards + legacy), archives, `tasks.md`, STATE.md, exports, hook state (all hosts), work areas, worktrees, agent definitions + mirrors. `--archive` moves ledgers/plan/archives/exports/work areas/agents to `.agents/history/<stamp>[-label]/` instead (hook state is always deleted; worktree branches kept). Registry kept unless `--registry`; agents kept with `--keep-agents`. Refuses while sessions are active, without `--yes` (non-interactive) or with unmerged worktree branches (`--force`). Records the generation in `.agents/.tksfw.json` → SessionStart and STATE.md announce "Generation N" | — |
+| `ks routing list` | every routing table with match rule, models per tier, pinned/active markers — the menu for `ks routing use` | `config.toml` |
 | `ks routing show` / `check` / `resolve <agent>` | resolved table, validation, one agent's model | `route_model.py --print/--check/--resolve` |
-| `ks routing use <table>` / `use --clear` | pin a routing table (`selected = "<table>"` in `models.toml`, read after `TKSFW_ROUTING`, before the provider match) | edits `models.toml`, then `--check` |
-| `ks hil show` | effective Human-in-the-Loop threshold (`[hil]` in `models.toml`) | — |
+| `ks routing use <table>` / `use --clear` | pin a routing table (`selected = "<table>"` in `config.toml`, read after `TKSFW_ROUTING`, before the provider match) | edits `config.toml`, then `--check` |
+| `ks hil show` | effective Human-in-the-Loop threshold (`[hil]` in `config.toml`) | — |
 | `ks hil set [--impact L] [--reversibility L] [--logic and\|or] [--mode enforce\|advisory]` | change the threshold live: validated, `[hil]` rewritten in place, effect line; the session is told at its next prompt | — |
 | `ks layers resolve [--l3 P] [--l4 P] [--json]` | where the L3/L4 project layers are and their status: `KS_PROJECT.md` / `KS_SPEC.md` at the root (convention), paths pinned in `.agents/.tksfw.json` `layers`, or the arguments (win per key); `new` / `unchanged` / `changed` (re-read) / `missing` (declared but absent). Exit 0 resolved, 3 nothing, 4 missing | `layers.py` |
 | `ks layers pin --l3 P \| --l4 P` / `pin --clear` | declare non-conventional paths (relative, inside the project, `.md`; either key alone) / return to the convention; refuses while subagents run | edits `.agents/.tksfw.json` |
@@ -46,6 +47,7 @@ In a full-mode project the in-project hooks and skills (the pinned version) are 
 | `ks ledger archive <ledger|all> --before YYYY-MM-DD [--dry-run]` | move closed history to `archive/<ledger>.yaml` (see eligibility) | `archive_ledger.py` |
 | `ks harness sync [--check]` | render harness mirrors in a full-mode project | `sync_harness.py` |
 | `ks harness retrust [--ack]` | compare hook-file hashes with the last acknowledgement; exit 1 and instructions when Codex `/hooks` re-trust is needed; `--ack` records | `~/.config/tksfw/trust.json` |
+| `ks help [<command>]` | the command list, or the full guide of one command (`self`, `operator`, `project`, `routing`, `hil`, `layers`, `ledger`, `harness`, `doctor`, `dev`); `ks <command> --help` is the same | — |
 | `ks doctor` | runtime, home, operator, harness settings, project state, cloud-sync warning, routing, sessions, trust; exit 1 on FAIL | — |
 | `ks dev build` / `test` / `release <v>` | repository checkout only | `build_plugin.py`, `tests/run_tests.py`, `release.sh` |
 

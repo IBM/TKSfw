@@ -1,4 +1,4 @@
-# Model routing (`.agents/models.toml`)
+# Model routing (`.agents/config.toml`)
 
 Model IDs are configuration, not method. `AGENTS.md` speaks only in **tiers**; one file per project
 maps tiers to the models of the provider the session is connected to; a hook applies the mapping at
@@ -10,7 +10,7 @@ every subagent spawn.
 |---|---|---|
 | tier | capability class: `research`, `build`, `judge` | `AGENTS.md`, `[tiers]`, `# tksfw-tier:` comments |
 | role | the `-<role>` suffix of an agent name (`sources-researcher` → `researcher`) | `[roles]` → tier |
-| routing | one `[routing.<key>]` table per provider: tier → `{ model, reasoning_effort }` | `models.toml` |
+| routing | one `[routing.<key>]` table per provider: tier → `{ model, reasoning_effort }` | `config.toml` |
 
 No word is shared with a harness setting: not `profile`, not `model_provider`. The file is read only
 by `route_model.py` and `sync_harness.py`; Codex and Claude Code never open it.
@@ -19,11 +19,25 @@ by `route_model.py` and `sync_harness.py`; Codex and Claude Code never open it.
 
 | Order | Source | Note |
 |---|---|---|
-| 1 | `$TKSFW_ROUTING=<key>` | operator override |
-| 2 | Codex: `model_provider` in `$CODEX_HOME/config.toml` | the provider this session actually uses ([config reference](https://learn.chatgpt.com/docs/config-file/config-reference)) |
-| 3 | Claude Code: `$ANTHROPIC_BASE_URL` starts with `match.claude_base_url` | gateway detection |
-| 4 | `[routing.default]` | optional catch-all |
+| 1 | `$TKSFW_ROUTING=<table>` | operator override for one shell |
+| 2 | `selected = "<table>"` in `config.toml` | `ks routing use <table>`; `ks routing use --clear` unpins |
+| 3 | Codex: `model_provider` in `$CODEX_HOME/config.toml` | a table whose `match.codex_model_provider` equals it, else a table keyed by it ([config reference](https://developers.openai.com/codex/config-reference)) |
+| 4 | Claude Code: `$ANTHROPIC_BASE_URL` starts with `match.claude_base_url` | gateway detection |
+| 5 | `[routing.default]` | optional catch-all |
 | — | none | spawn **denied** with the list of available tables |
+
+`ks routing list` prints every table with its match rule and models and marks the pinned and the active one.
+
+## Tables shipped in the template (3.0.0)
+
+| Table | Harness / endpoint | research | build | judge | Selected by |
+|---|---|---|---|---|---|
+| `ibm-openai` | Codex, IBM endpoint (`model_provider = "ibm"`) | gpt-5.6-luna | gpt-5.6-terra | gpt-5.6-sol | `match.codex_model_provider = "ibm"` |
+| `ibm-anthropic` | Codex, IBM endpoint, Anthropic models | claude-haiku-4-5 | claude-sonnet-5 | claude-opus-5 | `ks routing use ibm-anthropic`, or add `match.codex_model_provider` for the provider id you use |
+| `ibm-anthropic-cc` | Claude Code, IBM endpoint, 1M-context variants | claude-haiku-4-5 | claude-sonnet-5[1m] | claude-opus-5[1m] | `ks routing use ibm-anthropic-cc`, or add `match.claude_base_url = "<your ANTHROPIC_BASE_URL>"` |
+| `openrouter` | example gateway | google/gemini-3-flash | openai/gpt-5.6-terra | anthropic/claude-opus-5 | `match.claude_base_url` |
+
+Before 3.0.0 the first table was `[routing.ibm]`, selected because its key equalled the provider id; the explicit `match` keeps that behaviour under the new name. `TKSFW_ROUTING=ibm` in a shell profile must become `ibm-openai`.
 
 ## What happens at a spawn
 
@@ -36,7 +50,7 @@ Both also receive `additionalContext` naming the model, so the orchestrator reco
 Handoff/Event ledgers from fact; every decision is appended to `.hook-state/routing.jsonl`.
 
 Refusals: unknown role (`on_unknown_role = "deny"`, or `"inherit"` to let the child inherit the
-parent's model), no routing table for the provider, unparsable `models.toml`.
+parent's model), no routing table for the provider, unparsable `config.toml`.
 
 ## Agent definition files
 
@@ -56,7 +70,7 @@ file at a mirror path is reported as a conflict and never touched; deleting a so
 ## Changing models mid-session
 
 1. Wait for running subagents to finish.
-2. Edit `.agents/models.toml` (the hash hook journals this as a METHOD edit → `changes.yaml`).
+2. Edit `.agents/config.toml` (the hash hook journals this as a METHOD edit → `changes.yaml`).
 3. `python3 .agents/hooks/sync_harness.py --models` to re-render every agent mirror with the new
    models (in plugin-mode projects, re-save each `.agents/agents/*.toml` instead — the hook renders).
 4. Next spawn uses the new mapping. No restart; the hook **script** is unchanged, so Codex needs no

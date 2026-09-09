@@ -16,7 +16,7 @@ set (hooklib.classify), so only the source counts as a framework edit.
 
 Rendering is triggered (a) by track_edits.py right after a changed source passes the define-agent
 validator — no manual step, works in plugin mode too — and (b) in bulk by sync_harness.py --models
-(after editing models.toml) and --check. Standard library only.
+(after editing config.toml) and --check. Standard library only.
 """
 import sys
 sys.dont_write_bytecode = True
@@ -191,7 +191,7 @@ def sync(check=False, only=None):
     except Exception as e:
         return [("conflict", rel(RM.models_path()), f"cannot parse: {e}")]
     if table is None:
-        return [("skipped", rel(RM.models_path()), "no models.toml (routing not configured)")]
+        return [("skipped", rel(RM.models_path()), "no config.toml (routing not configured)")]
     problems = RM.validate(table)
     if problems:
         return [("conflict", rel(RM.models_path()), "; ".join(problems))]

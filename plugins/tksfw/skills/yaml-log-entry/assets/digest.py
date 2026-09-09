@@ -17,7 +17,7 @@ never by similarity, so what an agent is shown is auditable. Sections, in priori
 `--task T` narrows every section to entries that reference T (events.TaskID, handoffs.TaskID,
 decisions.RelatedTo.Tasks, lessons/changes mentioning T) and adds the task line and its evidence chain.
 `--agent A` (SubagentStart briefing) adds the latest open handoff BEGIN addressed to A, then narrows by its
-TaskID. Limits come from `[state]` in .agents/models.toml (defaults below); `format_digest` truncates to
+TaskID. Limits come from `[state]` in .agents/config.toml (defaults below); `format_digest` truncates to
 `budget_chars`, dropping lowest-priority items first. Std lib only; readers merge every shard + legacy
 (+ archive for evidence chains).
 """
@@ -59,7 +59,11 @@ def limits(wa):
     out = dict(DEFAULT_LIMITS)
     try:
         import tomllib
-        with open(os.path.join(os.path.dirname(os.path.dirname(wa)), ".agents", "models.toml"), "rb") as fh:
+        ag = os.path.join(os.path.dirname(os.path.dirname(wa)), ".agents")
+        cp = os.path.join(ag, "config.toml")
+        if not os.path.isfile(cp):
+            cp = os.path.join(ag, "config.toml")                 # legacy name (< 3.0.0)
+        with open(cp, "rb") as fh:
             st = tomllib.load(fh).get("state") or {}
         for k in out:
             if isinstance(st.get(k), int) and st[k] >= 0:

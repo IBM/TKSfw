@@ -27,7 +27,7 @@ Both unpack to `~/tksfw`, which is also the folder you register as marketplace. 
 
 | Level | Command | How it works | Choose it when |
 |---|---|---|---|
-| **User level — plugin mode** (recommended) | `ks project init` | Hooks and skills run from the plugin installed in each harness (Codex `/plugins`, `claude plugin install`). A project gets only the thin layer: `AGENTS.md`, `CLAUDE.local.md` (Claude Code entry, `@AGENTS.md`), `.agents/{workarea,agents,models.toml}`, `.codex/config.toml` (permission profile), `.claude/settings.json` (the same deny rules for Claude Code). No `.claude/skills` or hooks in the project: they come from the plugin; `.codex/agents/` and `.claude/agents/` appear when the first agent is defined. Updating the plugin updates every project at once; the guard in `.agents/.tksfw.json` arms/disarms per project | You work on your own machine(s); you want one install and one update path; projects should stay small and free of framework code |
+| **User level — plugin mode** (recommended) | `ks project init` | Hooks and skills run from the plugin installed in each harness (Codex `/plugins`, `claude plugin install`). A project gets only the thin layer: `AGENTS.md`, `CLAUDE.local.md` (Claude Code entry, `@AGENTS.md`), `.agents/{workarea,agents,config.toml}`, `.codex/config.toml` (permission profile), `.claude/settings.json` (the same deny rules for Claude Code). No `.claude/skills` or hooks in the project: they come from the plugin; `.codex/agents/` and `.claude/agents/` appear when the first agent is defined. Updating the plugin updates every project at once; the guard in `.agents/.tksfw.json` arms/disarms per project | You work on your own machine(s); you want one install and one update path; projects should stay small and free of framework code |
 | **Project level — full mode** | `ks project init --full` | Hooks and skills are copied into the project (`.agents/hooks/`, `.agents/skills/`) and pinned to that version; the plugin, if installed, yields to them. Everything a session needs travels with the repository | The repository is shared with people who will not install the plugin (customer teams, CI, air-gapped machines), or the project must be frozen at a framework version regardless of what is installed on the machine |
 
 Rationale: the method (AGENTS.md, ledgers, plan) is always project-local — that never changes. What moves is the **tooling**: keeping it in the plugin avoids ~45 framework files in every repo and gives one place to update and re-trust; copying it in makes the repo self-sufficient at the price of per-project updates (`ks project update`) and per-project hook trust in Codex. Both modes are managed by the same `ks` commands. Switching later is a re-initialisation, not an update: plugin → full is `rm .agents/.tksfw.json && ks project init --full` (existing ledgers, plan and agents are kept — only the missing tooling files are added); full → plugin is the same with `ks project init`, then delete `.agents/hooks/`, `.agents/skills/` and the `.claude/skills/` mirror by hand. `ks` itself is always installed at user level (step 2), even if your projects are full mode.
@@ -70,12 +70,12 @@ If you ever run `ks` from a place it cannot resolve, set `TKSFW_HOME=<home>` (th
 
 | Need | Command |
 |---|---|
-| Check the model routing this machine will use | `ks routing show` — the provider table (`[routing.<provider>]` in `.agents/models.toml`) must match your endpoint; pin one with `ks routing use <table>` |
+| Check the model routing this machine will use | `ks routing list` shows the tables (`ibm-openai`, `ibm-anthropic`, `ibm-anthropic-cc`, …) and which one is active; `ks routing show` the effective one; pin with `ks routing use <table>` |
 | See where a project stands | `ks project status` |
 | Change or move the L3/L4 files | edit them (Layer ARCHETYPE / PROJECT in `changes.yaml`); the next start reports *changed*; `ks layers resolve` at any time; `ks layers pin` for other paths |
 | Upgrade the framework | A: `rm -rf ~/tksfw && unzip tksfw-<v>.zip -d ~` (replace the folder; `ks`, `user.toml` and the marketplace registration all point at `~/tksfw`, so nothing else moves) · B: `git -C ~/tksfw pull`. Then: restart Codex (Claude: `claude plugin marketplace update tksfw && claude plugin update tksfw@tksfw`), `ks harness retrust` (re-trust in `/hooks` if asked, then `--ack`), `ks doctor`, and `ks project update` in each project (required in full mode, refreshes the thin layer in plugin mode) — `docs/operations.md` |
 | Everyday operations (switch routing, archive, second session, reset) | `docs/operations.md` |
-| All commands | `docs/ks.md` |
+| All commands | `ks help`, `ks help <command>`; `docs/ks.md` |
 
 ## Uninstall
 

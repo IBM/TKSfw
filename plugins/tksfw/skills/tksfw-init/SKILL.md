@@ -3,7 +3,7 @@ name: tksfw-init
 description: >
   Initialise, update, arm or disarm the TKS method in the CURRENT project folder from the installed tksfw
   plugin (no repository checkout needed): writes AGENTS.md, CLAUDE.local.md, .agents/workarea/,
-  .agents/models.toml, .agents/agents/, .codex/config.toml and the arming manifest .agents/.tksfw.json.
+  .agents/config.toml, .agents/agents/, .codex/config.toml and the arming manifest .agents/.tksfw.json.
   Use when the user asks to apply/initialise/set up the TKS framework or method in a project, to update a
   project to the installed framework version (SessionStart reports "version skew"), or to disable/enable
   the framework for this project. Never run it unasked: a folder without .agents/.tksfw.json is
@@ -49,5 +49,5 @@ Everything it writes is plain files inside the project; the plugin directory its
 - Operator name: ledger entries record `OwnerSessionUserName`. If the SessionStart line shows
   "UNKNOWN" or "(from git config — set it)", run `… --set-operator "<name>"` once on this machine
   (writes `~/.config/tksfw/user.toml`); `TKSFW_USER` overrides it.
-- Provider routing: review `.agents/models.toml` after the first install (`[routing.<provider>]` must
+- Provider routing: review `.agents/config.toml` after the first install (`[routing.<provider>]` must
   match the provider this machine uses; `route_model.py --print` shows the resolution).

@@ -7,13 +7,13 @@
                                                                 symlink (`../../.agents/skills/<name>`)
                                                                 or a managed copy (see --mode)
   .agents/agents/<name>.toml ──►  .codex/agents/<name>.toml    Codex mirror (model lines rendered
-                                                                from the tier in .agents/models.toml)
+                                                                from the tier in .agents/config.toml)
                              ──►  .claude/agents/<name>.md     Claude Code mirror (frontmatter: name,
                                                                 description, model, effort, tools).
                                                                 Both are managed by agentlib.py; the
                                                                 PostToolUse hook renders them on every
                                                                 validated write, --models re-renders all
-                                                                (after editing models.toml)
+                                                                (after editing config.toml)
 
 Why per-skill entries and not one link for the whole directory: Claude Code documents that a
 `<skill-name>` entry may be a symlink, while a symlinked `.claude/skills` directory is not

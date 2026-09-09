@@ -123,7 +123,7 @@ def lost_updates(changed, token):
 
 def prompt_notice(payload, changed):
     """UserPromptSubmit: tell the model what changed since it last looked — configuration switched with
-    `ks` (routing, operator, armed flag, models.toml) and files changed outside this session's tool
+    `ks` (routing, operator, armed flag, config.toml) and files changed outside this session's tool
     calls (another session, `ks ledger archive`, an editor). '' when nothing happened."""
     lines = []
     try:

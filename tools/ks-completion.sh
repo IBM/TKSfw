@@ -12,7 +12,7 @@ _ks_complete() {
       self)     words="install version home" ;;
       operator) words="set show" ;;
       project)  words="init update enable disable status drift reset --full --json --archive --label --keep-agents --registry --dry-run --yes --force" ;;
-      routing)  words="show check resolve use --clear" ;;
+      routing)  words="list show check resolve use --clear" ;;
       hil)      words="show set --impact --reversibility --logic --mode" ;;
       layers)   words="resolve pin journal section --l3 --l4 --json --clear" ;;
       ledger)   words="check find digest export archive-plan archive --refs --json --prefix --task --agent --before --dry-run --out --archive --session --csv changes lessons events handoffs decisions deliverables tasks all" ;;

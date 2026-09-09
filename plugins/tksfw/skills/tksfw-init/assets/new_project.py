@@ -169,6 +169,16 @@ def main():
         plugin_mode = a.plugin_mode
     prev_hashes = (prev or {}).get("files", {})
 
+    # 3.0.0: .agents/models.toml → .agents/config.toml. Rename the operator's file (content untouched, so
+    # pins, HIL and limits survive) and carry its recorded hash over, then let the normal loop classify it.
+    old_cfg, new_cfg = os.path.join(target, ".agents", "models.toml"), os.path.join(target, ".agents", "config.toml")
+    migrated_cfg = False
+    if os.path.isfile(old_cfg) and not os.path.exists(new_cfg):
+        os.replace(old_cfg, new_cfg)
+        if ".agents/models.toml" in prev_hashes:
+            prev_hashes[".agents/config.toml"] = prev_hashes.pop(".agents/models.toml")
+        migrated_cfg = True
+
     installed, refreshed, kept, unchanged = [], [], [], []
     new_hashes = {}
     for rel in template_files(plugin_mode):
@@ -226,6 +236,8 @@ def main():
         fh.write("\n")
 
     print(f"TKSfw v{manifest['version']} → {target}  ({'plugin' if plugin_mode else 'full'} mode)")
+    if migrated_cfg:
+        print("  renamed: .agents/models.toml → .agents/config.toml (content kept; routing pin, HIL and limits survive)")
     for label, items in (("installed", installed), ("refreshed", refreshed), ("kept (edited locally)", kept),
                          ("removed (retired by the template, pristine)", removed), ("retired but edited locally — delete by hand", retired_kept)):
         if items:
