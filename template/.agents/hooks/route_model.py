@@ -82,6 +82,9 @@ def validate(table, harness=None):
     sel = table.get("selected")
     if sel and str(sel) not in routing:
         problems.append(f"selected = {sel!r} names no [routing.{sel}] table")
+    dr = table.get("default_routing")
+    if dr and str(dr) not in routing:
+        problems.append(f"default_routing = {dr!r} names no [routing.{dr}] table")
     allowed = set(EFFORTS[harness]) if harness in EFFORTS else set(EFFORTS["codex"]) | set(EFFORTS["claude"])
     for key, tab in routing.items():
         for tier in tiers:
@@ -159,6 +162,9 @@ def select_routing(table, harness):
                 want = str(m.get("claude_base_url") or "").rstrip("/")
                 if want and base.startswith(want):
                     return key, tab, "ANTHROPIC_BASE_URL"
+    dr = table.get("default_routing")                    # 3.1.0: named default table
+    if dr and str(dr) in routing:
+        return str(dr), routing[str(dr)], "default_routing"
     if "default" in routing:
         return "default", routing["default"], "default"
     return None, None, "none"

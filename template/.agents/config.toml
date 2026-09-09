@@ -35,8 +35,10 @@ on_unknown_role = "deny"
 #                        files must stay model-free, e.g. shared across providers).
 codex_agent_files = "inline"
 
-# selected = "ibm-openai"         # optional: pin the routing table (`ks routing use <table>`; `ks routing use --clear`
-                                 # removes it). Order: TKSFW_ROUTING → selected → provider match → [routing.default]
+# selected = "ibm-anthropic-cc"   # optional: pin the routing table (`ks routing use <table>`; `ks routing use --clear`
+                                 # removes it). Order: TKSFW_ROUTING → selected → provider match → default_routing
+default_routing = "ibm-anthropic-cc"   # table used when nothing matches (e.g. Claude Code without a base-URL match);
+                                       # Claude Code is the preferred harness, so its IBM table is the default
 
 [hil]                            # Human in the Loop threshold (AGENTS.md § Human in the Loop) — `ks hil show|set`
 impact = "HIGH"                  # VERY LOW | LOW | MEDIUM | HIGH | VERY HIGH
@@ -85,14 +87,25 @@ builtin_agents = ["explorer", "worker", "default", "general-purpose", "Explore",
 
 # ---------------------------------------------------------------------------------------------
 # Routing tables — `ks routing list` shows them, `ks routing use <table>` pins one.
+# Preferred harness for TKSfw: Claude Code; hence the default table below is the Claude Code one.
 # Selection order at spawn time (first match wins):
 #   1. $TKSFW_ROUTING=<table>                                 operator override for one shell
 #   2. `selected = "<table>"` above                           `ks routing use`
-#   3. Codex: a table whose `match.codex_model_provider` equals `model_provider` in
-#      $CODEX_HOME/config.toml (default ~/.codex) — or whose key equals it
-#   4. Claude Code: a table whose `match.claude_base_url` is a prefix of $ANTHROPIC_BASE_URL
-#   5. [routing.default] when present — otherwise the spawn is DENIED with a clear reason
+#   3. Codex: the FIRST table (file order) whose `match.codex_model_provider` equals `model_provider`
+#      in $CODEX_HOME/config.toml (default ~/.codex) — or whose key equals it
+#   4. Claude Code: the first table whose `match.claude_base_url` is a prefix of $ANTHROPIC_BASE_URL
+#   5. `default_routing` (top of file) — otherwise [routing.default] — otherwise the spawn is DENIED
 # ---------------------------------------------------------------------------------------------
+[routing.ibm-anthropic-cc]       # Claude Code against the IBM endpoint (provider "ibm"): 1M-context variants — the default
+research = { model = "claude-haiku-4-5",    reasoning_effort = "low" }
+build    = { model = "claude-sonnet-5[1m]", reasoning_effort = "medium" }
+judge    = { model = "claude-opus-5[1m]",   reasoning_effort = "high" }
+
+[routing.ibm-anthropic]          # Codex against the IBM endpoint (model_provider = "ibm"): Anthropic models.
+match    = { codex_model_provider = "ibm" }   # listed before ibm-openai → wins the provider match; `ks routing use ibm-openai` to switch
+research = { model = "claude-haiku-4-5", reasoning_effort = "low" }
+build    = { model = "claude-sonnet-5",  reasoning_effort = "medium" }
+judge    = { model = "claude-opus-5",    reasoning_effort = "high" }
 
 [routing.ibm-openai]             # Codex against the IBM endpoint (model_provider = "ibm"): OpenAI models
 match    = { codex_model_provider = "ibm" }
@@ -100,20 +113,8 @@ research = { model = "gpt-5.6-luna",  reasoning_effort = "low" }
 build    = { model = "gpt-5.6-terra", reasoning_effort = "medium" }
 judge    = { model = "gpt-5.6-sol",   reasoning_effort = "high" }
 
-[routing.ibm-anthropic]          # Codex against the IBM endpoint: Anthropic models (pin with `ks routing use ibm-anthropic`,
-                                 # or set match.codex_model_provider to the provider id you use for it)
-research = { model = "claude-haiku-4-5", reasoning_effort = "low" }
-build    = { model = "claude-sonnet-5",  reasoning_effort = "medium" }
-judge    = { model = "claude-opus-5",    reasoning_effort = "high" }
-
-[routing.ibm-anthropic-cc]       # Claude Code against the IBM endpoint: 1M-context variants where they exist.
-                                 # Add match = { claude_base_url = "<your ANTHROPIC_BASE_URL>" } for automatic selection.
-research = { model = "claude-haiku-4-5",    reasoning_effort = "low" }
-build    = { model = "claude-sonnet-5[1m]", reasoning_effort = "medium" }
-judge    = { model = "claude-opus-5[1m]",   reasoning_effort = "high" }
-
 [routing.openrouter]             # example: one endpoint fronting several vendors
 match    = { claude_base_url = "https://openrouter.ai/api" }
-research = { model = "google/gemini-3-flash",   reasoning_effort = "low" }
-build    = { model = "openai/gpt-5.6-terra",    reasoning_effort = "medium" }
-judge    = { model = "anthropic/claude-opus-5", reasoning_effort = "high" }
+research = { model = "google/gemini-flash-latest",    reasoning_effort = "low" }
+build    = { model = "anthropic/claude-sonnet-latest", reasoning_effort = "medium" }
+judge    = { model = "anthropic/claude-opus-latest",   reasoning_effort = "high" }

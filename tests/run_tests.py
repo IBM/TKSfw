@@ -229,27 +229,29 @@ def main():
         r = run([PY, rm, "--check"], cwd=full, env=base_env)
         check("routing: config.toml --check", r.returncode == 0 and "ok" in r.stdout, r.stdout + r.stderr)
         r = run([PY, rm, "--print", "--codex"], cwd=full, env=base_env)
-        check("routing: --print selects [routing.ibm-openai] from CODEX_HOME via match.codex_model_provider", r.returncode == 0 and "routing='ibm-openai'" in r.stdout and "(match)" in r.stdout, r.stdout)
+        check("routing: --print selects [routing.ibm-anthropic] from CODEX_HOME (first table matching provider ibm)", r.returncode == 0 and "routing='ibm-anthropic'" in r.stdout and "(match)" in r.stdout, r.stdout)
+        r = run([PY, rm, "--print", "--claude"], cwd=full, env={k: v for k, v in base_env.items() if k != "CODEX_HOME"} | {"CODEX_HOME": os.path.join(tmp, "nocodex")})
+        check("routing: Claude Code without a base-URL match falls to default_routing = ibm-anthropic-cc", "routing='ibm-anthropic-cc'" in r.stdout and "selected_by=default_routing" in r.stdout, r.stdout)
         r, out = hook("spawn_agent", {"task_name": "sources-researcher_scan", "message": "m", "fork_turns": "none"},
                       env=base_env, extra={"turn_id": "t1"})
         hs = out.get("hookSpecificOutput", {})
-        check("routing codex: researcher → luna/low via updatedInput",
-              hs.get("permissionDecision") == "allow" and hs.get("updatedInput", {}).get("model") == "gpt-5.6-luna"
+        check("routing codex: researcher → haiku/low via updatedInput (ibm-anthropic wins the provider match)",
+              hs.get("permissionDecision") == "allow" and hs.get("updatedInput", {}).get("model") == "claude-haiku-4-5"
               and hs["updatedInput"].get("reasoning_effort") == "low" and hs["updatedInput"].get("task_name") == "sources-researcher_scan"
-              and "gpt-5.6-luna" in hs.get("additionalContext", ""), r.stdout + r.stderr)
+              and "claude-haiku-4-5" in hs.get("additionalContext", ""), r.stdout + r.stderr)
         r, out = hook("Agent", {"subagent_type": "report-builder", "prompt": "p", "description": "d"},
                       env=base_env | {"ANTHROPIC_BASE_URL": "https://openrouter.ai/api/v1"}, extra={"prompt_id": "p1"})
         hs = out.get("hookSpecificOutput", {})
         check("routing claude: builder → openrouter table by ANTHROPIC_BASE_URL, model only",
-              hs.get("permissionDecision") == "allow" and hs.get("updatedInput", {}).get("model") == "openai/gpt-5.6-terra"
+              hs.get("permissionDecision") == "allow" and hs.get("updatedInput", {}).get("model") == "anthropic/claude-sonnet-latest"
               and "reasoning_effort" not in hs.get("updatedInput", {}), r.stdout + r.stderr)
         r, out = hook("Agent", {"subagent_type": "x-planner", "prompt": "p"}, env=base_env, extra={"prompt_id": "p2"})
         hs = out.get("hookSpecificOutput", {})
         check("routing: TKSFW_ROUTING override", hook("Agent", {"subagent_type": "x-planner", "prompt": "p"},
               env=base_env | {"TKSFW_ROUTING": "openrouter"}, extra={"prompt_id": "p3"})[1]
-              .get("hookSpecificOutput", {}).get("updatedInput", {}).get("model") == "anthropic/claude-opus-5")
-        check("routing claude without base URL: falls back to codex provider? no — denied (no default table)",
-              hs.get("permissionDecision") == "deny" and "no [routing.*] table" in hs.get("permissionDecisionReason", ""), r.stdout)
+              .get("hookSpecificOutput", {}).get("updatedInput", {}).get("model") == "anthropic/claude-opus-latest")
+        check("routing claude without base URL: default_routing → ibm-anthropic-cc (1M sonnet/opus)",
+              hs.get("permissionDecision") == "allow" and hs.get("updatedInput", {}).get("model") == "claude-opus-5[1m]" and "[routing.ibm-anthropic-cc]" in hs.get("additionalContext", ""), r.stdout)
         r, out = hook("spawn_agent", {"agent_type": "atlas"}, env=base_env, extra={"turn_id": "t2"})
         hs = out.get("hookSpecificOutput", {})
         check("routing: unknown role denied", hs.get("permissionDecision") == "deny" and "atlas" in hs.get("permissionDecisionReason", ""), r.stdout)
@@ -262,8 +264,8 @@ def main():
         r, out = hook("spawn_agent", {"agent_type": "output-validator"}, env=base_env | {"CLAUDE_PLUGIN_ROOT": plug},
                       cwd=proj, script=os.path.join(plug, "hooks", "route_model.py"), extra={"turn_id": "t4"})
         hs = out.get("hookSpecificOutput", {})
-        check("routing from plugin bundle: validator → sol/high",
-              hs.get("updatedInput", {}).get("model") == "gpt-5.6-sol" and hs["updatedInput"].get("reasoning_effort") == "high", r.stdout + r.stderr)
+        check("routing from plugin bundle: validator → opus/high",
+              hs.get("updatedInput", {}).get("model") == "claude-opus-5" and hs["updatedInput"].get("reasoning_effort") == "high", r.stdout + r.stderr)
         # sync --models
         agents = os.path.join(full, ".agents", "agents")
         codex_mirrors = os.path.join(full, ".codex", "agents")
@@ -281,20 +283,20 @@ def main():
         t2 = open(os.path.join(codex_mirrors, "final-writer.toml")).read()
         src1 = open(os.path.join(agents, "sources-researcher.toml")).read()
         check("sync --models renders Codex mirrors (name role + tier comment overrides), source untouched",
-              r.returncode == 0 and 'model = "gpt-5.6-luna"' in t1 and 'model_reasoning_effort = "low"' in t1
-              and 'model = "gpt-5.6-sol"' in t2 and "Find sources." in t1 and t1.startswith("# tksfw:mirror")
+              r.returncode == 0 and 'model = "claude-haiku-4-5"' in t1 and 'model_reasoning_effort = "low"' in t1
+              and 'model = "claude-opus-5"' in t2 and "Find sources." in t1 and t1.startswith("# tksfw:mirror")
               and 'model = "stale"' in src1, r.stdout + r.stderr + t1 + t2)
         md = os.path.join(full, ".claude", "agents", "sources-researcher.md")
         m = open(md).read() if os.path.isfile(md) else ""
         check("sync --models writes Claude mirror with model/effort/tools",
-              "model: gpt-5.6-luna" in m and "effort: low" in m and "tools: Read" in m and "tksfw:mirror" in m and "Find sources." in m, m)
+              "model: claude-haiku-4-5" in m and "effort: low" in m and "tools: Read" in m and "tksfw:mirror" in m and "Find sources." in m, m)
         r = run([PY, sync, "--models", "--check"], cwd=full, env=base_env)
         check("sync --models idempotent", r.returncode == 0 and r.stdout.strip().endswith("ok"), r.stdout)
         with open(os.path.join(full, ".claude", "agents", "manual.md"), "w") as fh:
             fh.write("---\nname: manual\ndescription: x\n---\nhand made\n")
         r = run([PY, sync, "--models", "--routing", "openrouter"], cwd=full, env=base_env)
         t1 = open(os.path.join(codex_mirrors, "sources-researcher.toml")).read()
-        check("sync --models --routing switches table", 'model = "google/gemini-3-flash"' in t1 and os.path.isfile(os.path.join(full, ".claude", "agents", "manual.md")), r.stdout + t1)
+        check("sync --models --routing switches table", 'model = "google/gemini-flash-latest"' in t1 and os.path.isfile(os.path.join(full, ".claude", "agents", "manual.md")), r.stdout + t1)
         mt = os.path.join(full, ".agents", "config.toml")
         mt_text = open(mt, encoding="utf-8").read().replace('codex_agent_files = "inline"', 'codex_agent_files = "strip"')
         with open(mt, "w", encoding="utf-8") as fh:
@@ -343,7 +345,7 @@ def main():
         check("track_edits renders both mirrors after a validated write",
               os.path.isfile(cm) and os.path.isfile(am) and open(cm).read().startswith("# tksfw:mirror")
               and 'model = ' not in open(cm).read()          # config.toml is in strip mode at this point
-              and "model: gpt-5.6-sol" in open(am).read() and "tools: Read" in open(am).read(),
+              and "model: claude-opus-5" in open(am).read() and "tools: Read" in open(am).read(),
               f"cm={os.path.isfile(cm)} am={os.path.isfile(am)} out={r.stdout[-300:]} err={r.stderr[-300:]} ls={os.listdir(codex_mirrors) if os.path.isdir(codex_mirrors) else None}")
         probe3 = ("import sys; sys.path.insert(0, %r); import hooklib as H; "
                   "print(H.classify('.codex/agents/pricing-reviewer.toml'), H.classify('.claude/agents/pricing-reviewer.md'), "
@@ -365,7 +367,7 @@ def main():
                 inp=json.dumps({"session_id": "p9", "turn_id": "t", "hook_event_name": "PostToolUse", "tool_name": "Write", "tool_use_id": "u", "cwd": proj, "tool_input": {}}))
         pcm = os.path.join(proj, ".codex", "agents", "data-fetcher.toml")
         check("plugin mode: hook renders agent mirrors into the project",
-              r.returncode == 0 and os.path.isfile(pcm) and 'model = "gpt-5.6-luna"' in open(pcm).read()   # fetcher → research tier
+              r.returncode == 0 and os.path.isfile(pcm) and 'model = "claude-haiku-4-5"' in open(pcm).read()   # fetcher → research tier
               and os.path.isfile(os.path.join(proj, ".claude", "agents", "data-fetcher.md")),
               f"rc={r.returncode} exists={os.path.isfile(pcm)} content={open(pcm).read()[:300] if os.path.isfile(pcm) else ''} out={r.stdout[-300:]} err={r.stderr[-300:]} "
               f"log={open(os.path.join(proj, '.agents', 'workarea', '.hook-state', 'hooks.log')).read()[-500:] if os.path.isfile(os.path.join(proj, '.agents', 'workarea', '.hook-state', 'hooks.log')) else ''}")
@@ -397,7 +399,7 @@ def main():
         r = run([PY, os.path.join(work, "tools", "new_project.py"), proj, "--enable"])
         r2 = run([PY, os.path.join(plug, "hooks", "route_model.py")], cwd=proj, env=penv,
                  inp=json.dumps({"session_id": "d", "turn_id": "t", "hook_event_name": "PreToolUse", "tool_name": "spawn_agent", "tool_input": {"agent_type": "x-planner"}, "cwd": proj}))
-        check("re-enabled project: routing active again", r.returncode == 0 and '"model": "gpt-5.6-sol"' in r2.stdout, r.stdout + r2.stdout)
+        check("re-enabled project: routing active again", r.returncode == 0 and '"model": "claude-opus-5"' in r2.stdout, r.stdout + r2.stdout)
         # yield: plugin instance in a full-mode project
         probe = ("import sys; sys.path.insert(0, %r); import hooklib as H; print(H.armed())")
         r = run([PY, "-c", probe % os.path.join(plug, "hooks")], cwd=full, env=penv)
@@ -437,7 +439,7 @@ def main():
               and not os.path.exists(os.path.join(np2, ".agents", "hooks")), r.stdout + r.stderr)
         r = run([PY, os.path.join(plug, "hooks", "route_model.py")], cwd=np2, env=penv,
                 inp=json.dumps({"session_id": "n", "turn_id": "t", "hook_event_name": "PreToolUse", "tool_name": "spawn_agent", "tool_input": {"agent_type": "sources-researcher"}, "cwd": np2}))
-        check("plugin hooks serve the bundle-created project", '"model": "gpt-5.6-luna"' in r.stdout, r.stdout + r.stderr)
+        check("plugin hooks serve the bundle-created project", '"model": "claude-haiku-4-5"' in r.stdout, r.stdout + r.stderr)
         r = run([PY, os.path.join(init, "assets", "new_project.py"), np2, "--disable"])
         r2 = run([PY, os.path.join(init, "assets", "new_project.py"), np2, "--update"])
         check("bundle installer: --disable then --update keeps enabled=false",
@@ -752,7 +754,7 @@ def main():
         check("ks routing use --clear", r.returncode == 0 and not re.search(r"^selected\s*=", open(os.path.join(kproj, ".agents", "config.toml")).read(), re.M), r.stdout)
         r = run([PY, ks, "routing", "check"], cwd=kproj, env=kenv)
         r2 = run([PY, ks, "routing", "resolve", "sources-researcher"], cwd=kproj, env=kenv)
-        check("ks routing check/resolve", r.returncode == 0 and '"model": "gpt-5.6-luna"' in r2.stdout, r.stdout + r2.stdout)
+        check("ks routing check/resolve", r.returncode == 0 and '"model": "claude-haiku-4-5"' in r2.stdout, r.stdout + r2.stdout)
         # archives
         kwa = os.path.join(kproj, ".agents", "workarea")
         def ev(eid, task, ts, status):
@@ -856,7 +858,7 @@ def main():
         check("ks routing use prints the effect line", r.returncode == 0 and "next subagent spawn" in r.stdout, r.stdout + r.stderr)
         r = lhook("track_edits.py", {"prompt": "hi"}, ["--phase", "prompt"])
         ctx = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"] if r.stdout.strip() else ""
-        check("prompt notice reports the routing switch", "routing.openrouter" in ctx and "was [routing.ibm-openai]" in ctx, r.stdout[:300])
+        check("prompt notice reports the routing switch", "routing.openrouter" in ctx and "was [routing.ibm-anthropic]" in ctx, r.stdout[:300])
         r = lhook("track_edits.py", {"prompt": "hi"}, ["--phase", "prompt"])
         check("prompt notice reported once", r.stdout.strip() == "", r.stdout)
         r = lhook("track_edits.py", {"prompt": "hi"}, ["--phase", "prompt"])   # operator change via env
@@ -1181,12 +1183,18 @@ def main():
         run([PY, ks, "project", "init", cp3], cwd=tmp, env=kenv)
         check("project ships .agents/config.toml (no models.toml)", os.path.isfile(os.path.join(cp3, ".agents", "config.toml")) and not os.path.exists(os.path.join(cp3, ".agents", "models.toml")))
         r = run([PY, ks, "routing", "list"], cwd=cp3, env=kenv)
-        check("ks routing list: four tables, ibm-openai active via match, models per tier",
-              r.returncode == 0 and "4 routing table(s)" in r.stdout and "ibm-openai" in r.stdout and "[active (codex model_provider (match))]" in r.stdout
-              and "claude-sonnet-5[1m]" in r.stdout and "claude-opus-5 " in r.stdout and "match: codex_model_provider=ibm" in r.stdout, r.stdout)
+        check("ks routing list: four tables, ibm-anthropic active via match, ibm-anthropic-cc marked default, models per tier",
+              r.returncode == 0 and "4 routing table(s)" in r.stdout and "ibm-anthropic     [active (codex model_provider (match))]" in r.stdout
+              and "ibm-anthropic-cc  [default]" in r.stdout and "claude-sonnet-5[1m]" in r.stdout and "gpt-5.6-terra" in r.stdout
+              and "google/gemini-flash-latest" in r.stdout and "anthropic/claude-opus-latest" in r.stdout and "match: codex_model_provider=ibm" in r.stdout, r.stdout)
+        bad = open(os.path.join(cp3, ".agents", "config.toml")).read().replace('default_routing = "ibm-anthropic-cc"', 'default_routing = "nope"')
+        open(os.path.join(cp3, ".agents", "config.toml.bad"), "w").write(bad)
+        r = run([PY, os.path.join(plug, "hooks", "route_model.py"), "--check"], cwd=cp3, env=kenv | {"TKSFW_MODELS_FILE": os.path.join(cp3, ".agents", "config.toml.bad")})
+        check("routing check rejects a default_routing that names no table", r.returncode != 0 and "default_routing = 'nope' names no" in r.stdout, r.stdout)
+        os.remove(os.path.join(cp3, ".agents", "config.toml.bad"))
         r = run([PY, ks, "routing", "use", "ibm-anthropic-cc"], cwd=cp3, env=kenv)
         r = run([PY, ks, "routing", "list"], cwd=cp3, env=kenv)
-        check("ks routing list marks the pinned table", "ibm-anthropic-cc  [pinned, active (selected (config.toml))]" in r.stdout, r.stdout)
+        check("ks routing list marks the pinned table", "ibm-anthropic-cc  [pinned, default, active (selected (config.toml))]" in r.stdout, r.stdout)
         r = run([PY, ks, "routing", "resolve", "x-builder"], cwd=cp3, env=kenv)
         check("resolve under the pinned anthropic-cc table gives the 1M sonnet", "claude-sonnet-5[1m]" in r.stdout, r.stdout)
         # legacy file name: readers accept models.toml; update renames it and keeps the pin

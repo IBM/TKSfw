@@ -2,6 +2,14 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [3.1.0] — 2026-09-09
+
+### Changed
+- Preferred harness is Claude Code: new top-level `default_routing = "ibm-anthropic-cc"` in `config.toml` (selection step 5, before the legacy `[routing.default]` table); validated by `ks routing check`; `ks routing list` marks it `[default]`.
+- The IBM endpoint is one Codex provider for both model families: `[routing.ibm-anthropic]` now carries `match = { codex_model_provider = "ibm" }` like `ibm-openai`, and is listed first so a Codex session on `model_provider = "ibm"` gets Anthropic models; `ks routing use ibm-openai` (or `TKSFW_ROUTING=ibm-openai`) switches. Rule made explicit: when several tables match, the first in file order wins.
+- OpenRouter example table: research `google/gemini-flash-latest`, build `anthropic/claude-sonnet-latest`, judge `anthropic/claude-opus-latest`.
+- `docs/model-routing.md` selection order and shipped-tables table, `ks help routing`, getting-started row; tests updated (274 total).
+
 ## [3.0.0] — 2026-09-09
 
 Configuration file renamed and routing tables made explicit. Major version because both were part of the 2.x compatibility promise; migration is automatic.

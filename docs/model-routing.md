@@ -21,23 +21,26 @@ by `route_model.py` and `sync_harness.py`; Codex and Claude Code never open it.
 |---|---|---|
 | 1 | `$TKSFW_ROUTING=<table>` | operator override for one shell |
 | 2 | `selected = "<table>"` in `config.toml` | `ks routing use <table>`; `ks routing use --clear` unpins |
-| 3 | Codex: `model_provider` in `$CODEX_HOME/config.toml` | a table whose `match.codex_model_provider` equals it, else a table keyed by it ([config reference](https://developers.openai.com/codex/config-reference)) |
+| 3 | Codex: `model_provider` in `$CODEX_HOME/config.toml` | the **first table in file order** whose `match.codex_model_provider` equals it, else a table keyed by it ([config reference](https://developers.openai.com/codex/config-reference)) |
 | 4 | Claude Code: `$ANTHROPIC_BASE_URL` starts with `match.claude_base_url` | gateway detection |
-| 5 | `[routing.default]` | optional catch-all |
+| 5 | `default_routing = "<table>"` (top of `config.toml`) | the named default — `ibm-anthropic-cc` in the template, because Claude Code is the preferred harness |
+| 6 | `[routing.default]` | legacy catch-all table |
 | — | none | spawn **denied** with the list of available tables |
 
 `ks routing list` prints every table with its match rule and models and marks the pinned and the active one.
 
-## Tables shipped in the template (3.0.0)
+## Tables shipped in the template (3.1.0)
 
-| Table | Harness / endpoint | research | build | judge | Selected by |
+Preferred harness: **Claude Code**. The IBM endpoint is one Codex provider (`model_provider = "ibm"`) for both model families.
+
+| Table | Harness | research | build | judge | Selected by |
 |---|---|---|---|---|---|
-| `ibm-openai` | Codex, IBM endpoint (`model_provider = "ibm"`) | gpt-5.6-luna | gpt-5.6-terra | gpt-5.6-sol | `match.codex_model_provider = "ibm"` |
-| `ibm-anthropic` | Codex, IBM endpoint, Anthropic models | claude-haiku-4-5 | claude-sonnet-5 | claude-opus-5 | `ks routing use ibm-anthropic`, or add `match.codex_model_provider` for the provider id you use |
-| `ibm-anthropic-cc` | Claude Code, IBM endpoint, 1M-context variants | claude-haiku-4-5 | claude-sonnet-5[1m] | claude-opus-5[1m] | `ks routing use ibm-anthropic-cc`, or add `match.claude_base_url = "<your ANTHROPIC_BASE_URL>"` |
-| `openrouter` | example gateway | google/gemini-3-flash | openai/gpt-5.6-terra | anthropic/claude-opus-5 | `match.claude_base_url` |
+| `ibm-anthropic-cc` | Claude Code — **default** | claude-haiku-4-5 | claude-sonnet-5[1m] | claude-opus-5[1m] | `default_routing` (any Claude Code session without a gateway match) |
+| `ibm-anthropic` | Codex | claude-haiku-4-5 | claude-sonnet-5 | claude-opus-5 | `match.codex_model_provider = "ibm"` — listed first, so it wins the provider match |
+| `ibm-openai` | Codex | gpt-5.6-luna | gpt-5.6-terra | gpt-5.6-sol | same match rule, listed second → `ks routing use ibm-openai` (or `TKSFW_ROUTING=ibm-openai`) to use it |
+| `openrouter` | Claude Code via gateway (example) | google/gemini-flash-latest | anthropic/claude-sonnet-latest | anthropic/claude-opus-latest | `match.claude_base_url = "https://openrouter.ai/api"` |
 
-Before 3.0.0 the first table was `[routing.ibm]`, selected because its key equalled the provider id; the explicit `match` keeps that behaviour under the new name. `TKSFW_ROUTING=ibm` in a shell profile must become `ibm-openai`.
+Before 3.0.0 the only IBM table was `[routing.ibm]`, selected because its key equalled the provider id. `TKSFW_ROUTING=ibm` in a shell profile must become one of the names above.
 
 ## What happens at a spawn
 

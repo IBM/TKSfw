@@ -545,12 +545,15 @@ def cmd_routing(home, args):
         m = re.search(r"routing='([^']+)'\s+selected_by=(.+)", eff.stdout or "")
         cur, how = (m.group(1), m.group(2).strip()) if m else (None, None)
         pinned = cfg.get("selected")
+        dflt = cfg.get("default_routing")
         print(f"{os.path.relpath(path, proj.root)} — {len(routing)} routing table(s); `ks routing use <table>` pins one, `--clear` unpins")
         w = max(len(k) for k in routing)
         for key, tab in routing.items():
             marks = []
             if key == pinned:
                 marks.append("pinned")
+            if key == dflt:
+                marks.append("default")
             if key == cur:
                 marks.append(f"active ({how})")
             mt = tab.get("match") or {}
@@ -1002,10 +1005,12 @@ changes.yaml (Layer METHOD) — nothing to write by hand.
                                     restart. Refuses while agents are live (--force).
   ks routing use --clear            unpin → automatic selection.
 
-Selection order at spawn: TKSFW_ROUTING → `selected` → Codex `model_provider` (match.codex_model_provider
-or table key) → Claude Code ANTHROPIC_BASE_URL prefix (match.claude_base_url) → [routing.default] → deny.
-Tables ship for the IBM endpoint: ibm-openai (gpt-5.6-*), ibm-anthropic (claude-*-5), ibm-anthropic-cc
-(1M-context variants for Claude Code), plus an openrouter example.
+Selection order at spawn: TKSFW_ROUTING → `selected` → Codex `model_provider` (first table in file order
+with match.codex_model_provider, else table key) → Claude Code ANTHROPIC_BASE_URL prefix
+(match.claude_base_url) → `default_routing` → [routing.default] → deny.
+Shipped tables (IBM endpoint, provider "ibm"): ibm-anthropic-cc (Claude Code, 1M-context; the default),
+ibm-anthropic (Codex, Anthropic models; wins the provider match), ibm-openai (Codex, gpt-5.6-*), plus an
+openrouter example. Preferred harness: Claude Code.
 """,
     "hil": """ks hil — the Human-in-the-Loop threshold ([hil] in .agents/config.toml; AGENTS.md § Human in the Loop)
 
