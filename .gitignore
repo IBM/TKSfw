@@ -1,5 +1,5 @@
 # build output (release ZIPs); plugins/tksfw/ IS committed (refreshed by tools/build_plugin.py)
-dist/
+# dist/
 # python
 __pycache__/
 *.pyc
