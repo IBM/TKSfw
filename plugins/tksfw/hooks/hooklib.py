@@ -342,9 +342,33 @@ def session_token(payload, create=False):
     ensure_state_dir()
     os.makedirs(SESSIONS_DIR, exist_ok=True)
     rec = {"token": tok, "harness_session_id": payload["session_id"], "harness": harness(payload),
-           "operator": operator() or "", "started": time.time(), "last_seen": time.time()}
+           "operator": operator() or "", "host": HOSTNAME, "started": time.time(), "last_seen": time.time()}
     atomic_write(os.path.join(SESSIONS_DIR, tok + ".json"), json.dumps(rec, indent=1))
+    export_session_env(tok)
     return tok
+
+
+def export_session_env(tok):
+    """Claude Code hands SessionStart hooks $CLAUDE_ENV_FILE — variables appended there reach every later
+    Bash-tool command of the session. Export the token so `ks … --session` (no id) resolves exactly (3.4.0).
+    Codex has no equivalent; the model passes its token from the SessionStart block."""
+    path = os.environ.get("CLAUDE_ENV_FILE")
+    if not path or not tok:
+        return
+    try:
+        cur = open(path, encoding="utf-8").read() if os.path.isfile(path) else ""
+        if f"TKSFW_SESSION={tok}" not in cur:
+            with open(path, "a", encoding="utf-8") as fh:
+                fh.write(f"\nexport TKSFW_SESSION={tok}\n")
+    except Exception as e:
+        log(f"export_session_env: {e}")
+
+
+def session_routing(payload):
+    """Session-scoped routing override (`ks routing use <table> --session`): the `routing` key of this
+    session's record, or None (3.4.0)."""
+    rec = session_record(payload)
+    return (rec or {}).get("routing") or None
 
 
 def touch_session(payload):
@@ -353,6 +377,8 @@ def touch_session(payload):
     if not rec:
         return
     rec["last_seen"] = time.time()
+    rec.setdefault("host", HOSTNAME)
+    export_session_env(rec["token"])                      # resume / compaction: the env file may be fresh
     try:
         atomic_write(os.path.join(SESSIONS_DIR, rec["token"] + ".json"), json.dumps(rec, indent=1))
     except Exception:
@@ -456,7 +482,7 @@ def config_view(payload):
             import route_model as RM
             table = RM.load_table()
             if table:
-                key, _tab, how = RM.select_routing(table, RM.detect_harness(payload, None))
+                key, _tab, how = RM.select_routing(table, RM.detect_harness(payload, None), payload)
                 view["routing"], view["routing_how"], view["selected"] = key, how, table.get("selected")
                 view["main_model"] = ((_tab or {}).get(RM.MAIN_TIER) or {}).get("model") if _tab else None
     except Exception as e:
@@ -476,7 +502,8 @@ def config_changes(payload, update=True):
     if old is not None:
         if now["routing"] != old.get("routing") or now["selected"] != old.get("selected"):
             lines.append(f"Model routing now [routing.{now['routing']}] via {now['routing_how']}"
-                         + (f" (pinned: selected = \"{now['selected']}\")" if now.get("selected") else "")
+                         + (" — THIS SESSION ONLY (`ks routing use … --session`); other sessions keep the project routing" if now.get("routing_how") == "session override" else "")
+                         + (f" (pinned: selected = \"{now['selected']}\")" if now.get("selected") and now.get("routing_how") != "session override" else "")
                          + f" — was [routing.{old.get('routing')}]. Applies to the next spawn; record the model the hook reports."
                          + (f" Main session: this session keeps the model it was launched with; the judge-tier model of the new table is `{now['main_model']}` — "
                             f"tell the operator to switch now with `/model {now['main_model']}` (Claude Code) or `/model` (Codex); `ks` has already written it for the next launch."

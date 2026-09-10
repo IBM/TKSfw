@@ -137,9 +137,13 @@ def codex_model_provider():
     return None
 
 
-def select_routing(table, harness):
-    """(key, table_or_None, how). Order: env → Codex provider → Claude base URL → default."""
+def select_routing(table, harness, payload=None, session_override=None):
+    """(key, table_or_None, how). Order: session override (`ks routing use --session`, 3.4.0) → TKSFW_ROUTING →
+    `selected` → Codex provider match → Claude base URL → default_routing → [routing.default]."""
     routing = table.get("routing") or {}
+    so = session_override or (H.session_routing(payload) if payload else None) or os.environ.get("TKSFW_SESSION_ROUTING")
+    if so:
+        return str(so), routing.get(str(so)), "session override"
     forced = os.environ.get("TKSFW_ROUTING")
     if forced:
         return forced, routing.get(forced), "TKSFW_ROUTING"
@@ -204,9 +208,9 @@ def resolve_role(table, name):
     return None, None, name
 
 
-def resolve(table, name, harness):
+def resolve(table, name, harness, payload=None):
     """Full resolution → dict(ok, ...). Never raises for data problems."""
-    key, tab, how = select_routing(table, harness)
+    key, tab, how = select_routing(table, harness, payload)
     if tab is None:
         avail = sorted((table.get("routing") or {}).keys())
         return {"ok": False, "reason": (f"TKSfw routing: no [routing.*] table for this provider "
@@ -288,12 +292,12 @@ def journal(entry):
 
 
 # ----------------------------------------------------------------------------- cli
-def print_table(harness):
+def print_table(harness, session_override=None):
     table = load_table()
     if table is None:
         print(f"no routing: {models_path()} not found" + (" (tomllib unavailable)" if tomllib is None else ""))
         return 1
-    key, tab, how = select_routing(table, harness)
+    key, tab, how = select_routing(table, harness, session_override=session_override)
     print(f"config: {models_path()}")
     print(f"harness={harness}  routing={key!r}  selected_by={how}")
     if tab is None:
@@ -320,13 +324,13 @@ def claude_alias(table, tier):
     return a if a in ("sonnet", "opus", "haiku", "fable") else None
 
 
-def main_model(harness):
+def main_model(harness, session_override=None):
     """{harness, routing, selected_by, tier, model, reasoning_effort} for the MAIN session of `harness`
     (3.2.0): the judge-tier entry of the table that harness would select. None when no table resolves."""
     table = load_table()
     if table is None:
         return None
-    key, tab, how = select_routing(table, harness)
+    key, tab, how = select_routing(table, harness, session_override=session_override)
     if tab is None:
         return {"harness": harness, "routing": None, "selected_by": how, "tier": MAIN_TIER, "model": None, "reasoning_effort": None}
     e = tab.get(MAIN_TIER) or {}
@@ -341,8 +345,9 @@ def main_model(harness):
 def main():
     args = sys.argv[1:]
     harness_arg = "codex" if "--codex" in args else "claude" if "--claude" in args else None
+    so = args[args.index("--session-routing") + 1] if "--session-routing" in args else None   # ks: a session's override
     if "--main" in args:
-        out = {h: main_model(h) for h in ("codex", "claude")} if not harness_arg else main_model(harness_arg)
+        out = {h: main_model(h, so) for h in ("codex", "claude")} if not harness_arg else main_model(harness_arg, so)
         print(json.dumps(out, indent=2))
         sys.exit(0)
     if "--check" in args:
@@ -353,10 +358,12 @@ def main():
         print("\n".join(probs) if probs else "config.toml ok")
         sys.exit(1 if probs else 0)
     if "--print" in args:
-        sys.exit(print_table(harness_arg or ("codex" if codex_model_provider() else "claude")))
+        sys.exit(print_table(harness_arg or ("codex" if codex_model_provider() else "claude"), so))
     if "--resolve" in args:
         name = args[args.index("--resolve") + 1]
         table = load_table()
+        if so:
+            os.environ["TKSFW_SESSION_ROUTING"] = so
         print(json.dumps(resolve(table, name, harness_arg or "codex"), indent=2))
         sys.exit(0)
 
@@ -400,7 +407,7 @@ def main():
         deny("TKSfw routing: spawn has no agent identity (subagent_type / agent_type / task_name). "
              "Name the agent <family>-<role> so it can be routed.")
         sys.exit(0)
-    res = resolve(table, name, harness)
+    res = resolve(table, name, harness, payload)
     journal({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "turn": H.turn_key(payload), "harness": harness,
              "tool": tool_name, **{k: v for k, v in res.items() if k != "ok"}, "allowed": res["ok"]
              or (res.get("unknown_role") and table.get("on_unknown_role") == "inherit")})

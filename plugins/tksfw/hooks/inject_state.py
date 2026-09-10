@@ -60,7 +60,7 @@ def routing_summary(payload):
         harness = H.harness(payload)
         if harness == "unknown":
             harness = "codex" if route_model.codex_model_provider() else "claude"
-        key, tab, how = route_model.select_routing(table, harness)
+        key, tab, how = route_model.select_routing(table, harness, payload)
         if tab is None:
             return ("Model routing: NO [routing.*] table matches this provider — subagent spawns will be "
                     "denied until .agents/config.toml has one (or TKSFW_ROUTING is set).\n")

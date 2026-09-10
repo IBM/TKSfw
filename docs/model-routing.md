@@ -19,7 +19,8 @@ by `route_model.py` and `sync_harness.py`; Codex and Claude Code never open it.
 
 | Order | Source | Note |
 |---|---|---|
-| 1 | `$TKSFW_ROUTING=<table>` | operator override for one shell |
+| 0 | session override (`ks routing use <table> --session [token]`) | one session only; stored in its record under `.hook-state/sessions/`, dies with the session (3.4.0) |
+| 1 | `$TKSFW_ROUTING=<table>` | operator override for one shell (launch time) |
 | 2 | `selected = "<table>"` in `config.toml` | `ks routing use <table>`; `ks routing use --clear` unpins |
 | 3 | Codex: `model_provider` in `$CODEX_HOME/config.toml` | the **first table in file order** whose `match.codex_model_provider` equals it, else a table keyed by it ([config reference](https://developers.openai.com/codex/config-reference)) |
 | 4 | Claude Code: `$ANTHROPIC_BASE_URL` starts with `match.claude_base_url` | gateway detection |
@@ -70,6 +71,19 @@ role) and render two managed mirrors:
 
 Mirrors are never watched by the edit-hash hook (only the source is a framework edit); a hand-made
 file at a mirror path is reported as a conflict and never touched; deleting a source prunes its mirrors.
+
+## Project-wide vs session-scoped switching (3.4.0)
+
+| | `ks routing use <table>` | `ks routing use <table> --session [token]` |
+|---|---|---|
+| Scope | every session of the project, at its next spawn | one session, at its next spawn |
+| Storage | `selected` in `.agents/config.toml` | `routing` in that session's record |
+| Guard | refuses while other sessions are active or agents are live; `--force` switches them all | none needed |
+| Notice | every other session: "Model routing now X — was Y" | that session only: "… via session override — THIS SESSION ONLY" |
+| Main-session model | written to `.claude/settings.local.json` / `.codex/config.toml` for the next launch, `/model` line printed | `/model` line printed; launch defaults untouched |
+| Claude Code custom agents | mirrors re-rendered with the new ids | keep the project-wide frontmatter model (the spawn alias cannot override frontmatter); built-ins follow via alias. For an exact session launch with `TKSFW_ROUTING=<table> claude` |
+
+How `--session` without a token finds yours: `$TKSFW_SESSION` — exported into every Bash-tool command of a Claude Code session by the SessionStart hook through `CLAUDE_ENV_FILE` ([Claude Code hooks](https://code.claude.com/docs/en/hooks)) — then the only active session on this host by this operator, otherwise the candidates are listed. In Codex the model passes its own token (shown in the SessionStart block); `ks project status` prints the sessions table.
 
 ## The main session's model (3.2.0)
 

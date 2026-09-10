@@ -54,6 +54,7 @@ def die(msg, rc=1):
 
 
 def run(cmd, cwd=None, env=None, check=False, capture=False):
+    sys.stdout.flush()                                     # keep our lines before the child's
     r = subprocess.run(cmd, cwd=cwd, env=env, text=True, capture_output=capture)
     if check and r.returncode:
         sys.exit(r.returncode)
@@ -223,6 +224,100 @@ def refuse_if_busy(proj, what, args, sessions=False):
                 + ") — finish them first, or --force")
 
 
+# ----------------------------------------------------------------------------- sessions (3.4.0)
+def _host():
+    import socket
+    return re.sub(r"[^A-Za-z0-9._-]", "_", os.environ.get("TKSFW_HOST") or socket.gethostname().split(".")[0] or "host")
+
+
+def _operator_name(home):
+    r = run([PY, home.new_project, "--show-operator"], capture=True)
+    m = re.search(r"operator:\s*(.*?)\s+\(source", r.stdout or "")
+    return m.group(1).strip() if m else ""
+
+
+def session_arg(args):
+    """('present', token_or_None) for `--session [token]`; ('absent', None) otherwise."""
+    if "--session" not in args:
+        return "absent", None
+    i = args.index("--session")
+    nxt = args[i + 1] if i + 1 < len(args) else None
+    tok = nxt if nxt and not nxt.startswith("--") and re.fullmatch(r"[0-9A-Za-z]{8}", nxt) else None
+    return "present", tok
+
+
+def current_session(proj, home, sessions=None):
+    """(record, how) for the session `ks` is running in: $TKSFW_SESSION (exported by the SessionStart hook
+    through CLAUDE_ENV_FILE, or set by hand) → the only active session on this host by this operator →
+    (None, reason)."""
+    sessions = active_sessions(proj) if sessions is None else sessions
+    env_tok = os.environ.get("TKSFW_SESSION")
+    if env_tok:
+        for s in sessions:
+            if s.get("token") == env_tok:
+                return s, "TKSFW_SESSION"
+        return None, f"TKSFW_SESSION={env_tok} names no active session"
+    me = _operator_name(home)
+    mine = [s for s in sessions if s.get("host") == _host() and (not me or s.get("operator") == me)]
+    if len(mine) == 1:
+        return mine[0], "only session on this host by you"
+    if not sessions:
+        return None, "no active session in this project"
+    return None, "several candidates — pass the token: " + ", ".join(f"{s['token']} ({s.get('harness', '?')}, {s.get('operator') or '?'}@{s.get('host') or '?'})" for s in sessions)
+
+
+def resolve_session(proj, home, args, required=True):
+    """The session record addressed by `--session [token]`, or None when the flag is absent."""
+    mode, tok = session_arg(args)
+    if mode == "absent":
+        return None
+    sessions = active_sessions(proj)
+    if tok:
+        for s in sessions:
+            if s["token"] == tok:
+                return s
+        die(f"--session {tok}: no active session with that token (ks project status lists them)")
+    rec, how = current_session(proj, home, sessions)
+    if rec is None:
+        die(f"--session: cannot tell which session is yours — {how}")
+    return rec
+
+
+def write_session(proj, rec):
+    p = os.path.join(proj.workarea, ".hook-state", "sessions", rec["token"] + ".json")
+    tmp = p + ".tmp"
+    json.dump(rec, open(tmp, "w", encoding="utf-8"), indent=1)
+    os.replace(tmp, p)
+
+
+def _ago(ts):
+    import time
+    d = max(0, int(time.time() - float(ts or 0)))
+    return f"{d}s ago" if d < 90 else f"{d // 60} min ago" if d < 5400 else f"{d // 3600} h ago"
+
+
+def print_sessions(proj, home):
+    import time
+    sess = sorted(active_sessions(proj), key=lambda s: -float(s.get("last_seen", 0)))
+    print(f"sessions: {len(sess)} active" + ("" if sess else ""))
+    if not sess:
+        return
+    me, how = current_session(proj, home, sess)
+    rows = []
+    for s in sess:
+        mark = ""
+        if me and s["token"] == me["token"]:
+            mark = "← this session (TKSFW_SESSION)" if how == "TKSFW_SESSION" else "← probably yours (" + how + ")"
+        rows.append((s["token"], s.get("harness") or "?", (s.get("operator") or "?")[:22], s.get("host") or "?",
+                     time.strftime("%m-%d %H:%M", time.localtime(float(s.get("started", 0)))), _ago(s.get("last_seen")),
+                     (s.get("routing") + " (session)") if s.get("routing") else "project", mark))
+    hdr = ("token", "harness", "operator", "host", "started", "last seen", "routing", "")
+    w = [max(len(str(r[i])) for r in rows + [hdr]) for i in range(7)]
+    print("  " + "  ".join(str(h).ljust(w[i]) for i, h in enumerate(hdr[:7])))
+    for r in rows:
+        print("  " + "  ".join(str(r[i]).ljust(w[i]) for i in range(7)) + ("  " + r[7] if r[7] else ""))
+
+
 # ----------------------------------------------------------------------------- commands
 def cmd_self(home, args):
     sub = args[0] if args else "version"
@@ -361,8 +456,7 @@ def cmd_project(home, args):
         if d:
             print(f"drift   : outdated {len(d.get('outdated', []))} · edited {len(d.get('edited', []))} · missing {len(d.get('missing', []))} · unchanged {len(d.get('unchanged', []))}"
                   + ("" if not d.get("drift") else "   → `ks project drift` / `ks project update`"))
-        sess = active_sessions(proj)
-        print(f"sessions: {len(sess)} active" + (" (" + ", ".join(f"{s['token']}/{s.get('operator') or '?'}" for s in sess) + ")" if sess else ""))
+        print_sessions(proj, home)
         lay = run([PY, os.path.join(proj.hooks, "layers.py"), "resolve", "--json"], cwd=proj.root, env=proj.env(), capture=True)
         try:
             L = json.loads(lay.stdout).get("layers", [])
@@ -611,7 +705,13 @@ def cmd_routing(home, args):
     proj = Project(home)
     rm = os.path.join(proj.hooks, "route_model.py")
     if sub == "show":
-        sys.exit(run([PY, rm, "--print"], cwd=proj.root, env=proj.env()).returncode)
+        rec = resolve_session(proj, home, args)
+        extra = ["--session-routing", rec["routing"]] if rec and rec.get("routing") else []
+        if rec:
+            print(f"session {rec['token']} ({rec.get('harness', '?')}, {rec.get('operator') or '?'}): " + (f"override → [routing.{rec['routing']}]" if rec.get("routing") else "no session override (project routing applies)"), flush=True)
+            if rec.get("harness") in ("codex", "claude"):
+                extra.append("--" + rec["harness"])
+        sys.exit(run([PY, rm, "--print", *extra], cwd=proj.root, env=proj.env()).returncode)
     if sub == "check":
         sys.exit(run([PY, rm, "--check"], cwd=proj.root, env=proj.env()).returncode)
     if sub == "list":
@@ -654,6 +754,37 @@ def cmd_routing(home, args):
             die("usage: ks routing resolve <agent-name>")
         sys.exit(run([PY, rm, "--resolve", args[1]], cwd=proj.root, env=proj.env()).returncode)
     if sub == "use":
+        rec = resolve_session(proj, home, args)
+        if rec is not None:                                 # ---- session-scoped (3.4.0)
+            if "--clear" in args:
+                had = rec.pop("routing", None)
+                write_session(proj, rec)
+                print(f"session {rec['token']}: override cleared" + (f" (was [routing.{had}])" if had else "") + " — project routing applies from its next spawn")
+                sys.exit(0)
+            table = next((a for a in args[1:] if not a.startswith("--") and a != rec["token"]), None)
+            if not table:
+                die("usage: ks routing use <table> --session [token] | use --clear --session [token]")
+            text = open(proj.config_toml(), encoding="utf-8").read()
+            if not re.search(rf'^\[routing\.{re.escape(table)}\]', text, re.M):
+                die(f"no [routing.{table}] table in {proj.config_toml()} (`ks routing list`)")
+            rec["routing"] = table
+            write_session(proj, rec)
+            print(f"session {rec['token']} ({rec.get('harness', '?')}) → [routing.{table}] for this session only; other sessions and the project pin are untouched")
+            r = run([PY, rm, "--main", "--session-routing", table], cwd=proj.root, env=proj.env(), capture=True)
+            try:
+                mm = json.loads(r.stdout).get(rec.get("harness") if rec.get("harness") in ("codex", "claude") else "claude") or {}
+                if mm.get("model"):
+                    print(f"  main session: `/model {mm['model']}` now (this session's launch defaults are not changed)")
+                if rec.get("harness") == "claude":
+                    print(f"  Claude Code: built-in agents follow via alias; custom agents keep the project-wide frontmatter model — for an exact session use `TKSFW_ROUTING={table} claude` at launch")
+            except Exception:
+                pass
+            print("→ takes effect at this session's next subagent spawn; the model is told at its next prompt")
+            sys.exit(0)
+        others = active_sessions(proj)
+        if others and "--force" not in args:
+            die(f"routing use: {len(others)} session(s) active on this project (" + ", ".join(f"{s['token']}/{s.get('harness', '?')}/{s.get('operator') or '?'}" for s in others)
+                + ") would switch at their next spawn — `--session [token]` limits the change to one session, `--force` switches the project for all")
         refuse_if_busy(proj, "routing use", args)
         path = proj.config_toml()
         text = open(path, encoding="utf-8").read()
@@ -1069,7 +1200,10 @@ to the next session.
   ks project update [dir] [--force] refresh the thin layer to the installed version: pristine files are
                                     replaced, edited files kept and listed, files the template retired are
                                     removed when pristine. Refuses while a session is active (--force).
-  ks project status                 version, mode, ARMED/DISARMED, active sessions, live agents, layers.
+  ks project status                 version, mode, ARMED/DISARMED, layers, and the sessions table (token, harness,
+                                    operator, host, started, last seen, routing) with "← this session" when
+                                    $TKSFW_SESSION identifies yours, "← probably yours" when it is the only one
+                                    on this host by you.
   ks project drift [--json]         which project files differ from the template and how.
   ks project enable | disable       flip `enabled` in .agents/.tksfw.json — the hooks yield when disabled.
   ks project reset [--archive [--label L]] [--keep-agents] [--registry] [--dry-run] [--yes] [--force]
@@ -1086,9 +1220,16 @@ changes.yaml (Layer METHOD) — nothing to write by hand.
   ks routing show                   the table the hook would use now, with the roles it serves.
   ks routing check                  validate config.toml (tiers, roles, efforts, `selected`).
   ks routing resolve <agent-name>   which model/effort a given agent name gets, and why.
-  ks routing use <table>            pin a table (`selected = "<table>"`); applies to the next spawn, no
-                                    restart. Refuses while agents are live (--force).
-  ks routing use --clear            unpin → automatic selection.
+  ks routing use <table>            pin a table for the PROJECT (`selected = "<table>"`); applies to every
+                                    session's next spawn. Refuses while other sessions are active or agents
+                                    are live — `--force` switches them all anyway.
+  ks routing use <table> --session [token]
+                                    switch ONE session only (stored in its session record; dies with the
+                                    session). Without a token: $TKSFW_SESSION (exported to Claude Code Bash
+                                    commands by the SessionStart hook) → the only active session on this host
+                                    by you → otherwise the candidates are listed. Tokens: `ks project status`.
+  ks routing use --clear [--session [token]]   unpin the project / clear one session's override.
+  ks routing show [--session [token]]          the table in force for the project / for one session.
 
 Claude Code spawns use aliases (research→haiku, build→sonnet, judge→opus); `ks routing use` writes the alias →
 routed-id map (ANTHROPIC_DEFAULT_*_MODEL) into .claude/settings.local.json and re-renders the agent mirrors.
@@ -1098,7 +1239,7 @@ The main session runs on the judge tier of the active table: `ks routing use` / 
 to .claude/settings.local.json (Claude Code) and .codex/config.toml (Codex) for the next launch and print the
 `/model …` command to switch the running session now.
 
-Selection order at spawn: TKSFW_ROUTING → `selected` → Codex `model_provider` (first table in file order
+Selection order at spawn: session override → TKSFW_ROUTING → `selected` → Codex `model_provider` (first table in file order
 with match.codex_model_provider, else table key) → Claude Code ANTHROPIC_BASE_URL prefix
 (match.claude_base_url) → `default_routing` → [routing.default] → deny.
 Shipped tables (IBM endpoint, provider "ibm"): ibm-anthropic-cc (Claude Code, 1M-context; the default),

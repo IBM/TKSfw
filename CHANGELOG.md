@@ -2,6 +2,16 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [3.4.0] — 2026-09-10
+
+### Added
+- Session-scoped routing: `ks routing use <table> --session [token]` stores the override in the session record; selection order is now session override → `TKSFW_ROUTING` → `selected` → provider match → URL match → `default_routing`. Only that session's spawns and prompt notice change ("… via session override — THIS SESSION ONLY"); `--clear --session` removes it; the override dies with the session. `ks routing show --session [token]`.
+- Session identity from a shell: the SessionStart hook exports `TKSFW_SESSION=<token>` through Claude Code's `CLAUDE_ENV_FILE`, so `--session` without a token resolves exactly in Claude Code Bash commands; otherwise the only active session on this host by this operator; otherwise the candidates are listed. Session records carry `host`.
+- `ks project status` prints a sessions table (token, harness, operator, host, started, last seen, routing) and marks "← this session (TKSFW_SESSION)" or "← probably yours (only session on this host by you)". STATE.md Sessions section shows overrides and hosts.
+
+### Changed
+- `ks routing use <table>` (project-wide) refuses while other sessions are active, listing them and pointing to `--session` / `--force`. ADR 0015; routing guide, operations guide, `ks help routing|project`. 16 new tests (298 total).
+
 ## [3.3.0] — 2026-09-09
 
 ### Fixed

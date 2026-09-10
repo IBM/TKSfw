@@ -109,7 +109,8 @@ def other_sessions_section():
         rec = recs.get(tok, {})
         live = rec and time.time() - float(rec.get("last_seen", 0)) <= H.SESSION_ACTIVE_SEC
         who = t["op"] or rec.get("operator") or "?"
-        lines.append(f"- {tok} ({who}{', active' if live else ''}): {t['n']} entries · last {t['last'] or '—'} {t['kind']} “{t['title']}”")
+        ovr = f" · routing override [routing.{rec['routing']}]" if rec.get("routing") else ""
+        lines.append(f"- {tok} ({who}{', active' if live else ''}{', ' + rec['host'] if rec.get('host') else ''}): {t['n']} entries · last {t['last'] or '—'} {t['kind']} “{t['title']}”{ovr}")
     conflicts = H.sync_conflicts()
     if conflicts:
         lines.append(f"- SYNC CONFLICT COPIES in workarea: {', '.join(conflicts)} — merge by hand into the canonical files, then delete")

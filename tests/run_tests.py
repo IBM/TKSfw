@@ -855,7 +855,7 @@ def main():
         lhook("inject_state.py", {"source": "startup"})
         r = lhook("track_edits.py", {"prompt": "hi"}, ["--phase", "prompt"])
         check("prompt notice silent when nothing changed", r.returncode == 0 and r.stdout.strip() == "", r.stdout)
-        r = run([PY, ks, "routing", "use", "openrouter"], cwd=lproj, env=lenv)
+        r = run([PY, ks, "routing", "use", "openrouter", "--force"], cwd=lproj, env=lenv)       # a session is active (3.4.0 guard)
         check("ks routing use prints the effect line", r.returncode == 0 and "next subagent spawn" in r.stdout, r.stdout + r.stderr)
         r = lhook("track_edits.py", {"prompt": "hi"}, ["--phase", "prompt"])
         ctx = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"] if r.stdout.strip() else ""
@@ -870,7 +870,7 @@ def main():
         lhook("subagent_track.py", {"hook_event_name": "SubagentStart", "agent_id": "z1", "agent_type": "x-builder"}, ["--start"])
         r = run([PY, ks, "routing", "use", "ibm-openai"], cwd=lproj, env=lenv)
         r2 = run([PY, ks, "routing", "use", "ibm-openai", "--force"], cwd=lproj, env=lenv)
-        check("ks routing use refuses while a subagent runs, --force overrides", r.returncode != 0 and "subagent" in r.stderr and r2.returncode == 0, r.stderr + r2.stderr)
+        check("ks routing use refuses while a session is active / a subagent runs, --force overrides", r.returncode != 0 and ("subagent" in r.stderr or "session(s) active" in r.stderr) and r2.returncode == 0, r.stderr + r2.stderr)
         r = run([PY, ks, "project", "update"], cwd=lproj, env=lenv)
         check("ks project update refuses while the project is busy", r.returncode != 0 and ("session" in r.stderr or "subagent" in r.stderr), r.stderr)
         # external change notice (archive by ks)
@@ -1266,6 +1266,71 @@ def main():
         run([PY, ks, "routing", "use", "ibm-anthropic-cc", "--force"], cwd=mp5, env=kenv)
         r = run([PY, os.path.join(plug, "hooks", "track_edits.py"), "--phase", "prompt"], cwd=mp5, env=kenv, inp=json.dumps({"session_id": "SM", "turn_id": "m3", "cwd": mp5, "prompt": "x"}))
         check("prompt notice: routing switch + main-session /model instruction", "Model routing now [routing.ibm-anthropic-cc]" in r.stdout and "/model claude-opus-5[1m]" in r.stdout, r.stdout[:600])
+
+        # 26 — session-scoped routing
+        sp = os.path.join(tmp, "sessp")
+        run([PY, ks, "project", "init", sp], cwd=tmp, env=kenv)
+        envf = os.path.join(tmp, "claude_env_file")
+        cenv = dict(kenv); cenv["CLAUDE_ENV_FILE"] = envf; cenv["TKSFW_HOST"] = "mac1"
+        run([PY, os.path.join(plug, "hooks", "inject_state.py")], cwd=sp, env=cenv, inp=json.dumps({"session_id": "C1", "prompt_id": "p1", "source": "startup", "cwd": sp}))
+        xenv = dict(kenv); xenv["TKSFW_HOST"] = "mac1"
+        run([PY, os.path.join(plug, "hooks", "inject_state.py")], cwd=sp, env=xenv, inp=json.dumps({"session_id": "X1", "turn_id": "t1", "source": "startup", "cwd": sp}))
+        envtxt = open(envf).read() if os.path.isfile(envf) else ""
+        mtok = re.search(r"export TKSFW_SESSION=([0-9A-Za-z]{8})", envtxt)
+        check("SessionStart exports TKSFW_SESSION through CLAUDE_ENV_FILE", bool(mtok), envtxt)
+        ctok = mtok.group(1) if mtok else ""
+        recs = {json.load(open(os.path.join(sp, ".agents", "workarea", ".hook-state", "sessions", f)))["token"]: json.load(open(os.path.join(sp, ".agents", "workarea", ".hook-state", "sessions", f))) for f in os.listdir(os.path.join(sp, ".agents", "workarea", ".hook-state", "sessions"))}
+        check("session records carry the host", all(r.get("host") == "mac1" for r in recs.values()), str(recs))
+        xtok = next(t for t, r in recs.items() if r["harness"] == "codex")
+        r = run([PY, ks, "project", "status"], cwd=sp, env=xenv)
+        check("ks project status: sessions table with token/harness/operator/host/routing, no marker when ambiguous",
+              "sessions: 2 active" in r.stdout and "token" in r.stdout and "harness" in r.stdout and ctok in r.stdout and xtok in r.stdout and "←" not in r.stdout, r.stdout)
+        senv = dict(xenv); senv["TKSFW_SESSION"] = ctok
+        r = run([PY, ks, "project", "status"], cwd=sp, env=senv)
+        check("ks project status marks the current session from TKSFW_SESSION", f"{ctok}" in r.stdout and "← this session (TKSFW_SESSION)" in r.stdout, r.stdout)
+        r = run([PY, ks, "routing", "use", "ibm-openai-cc"], cwd=sp, env=xenv)
+        check("project-wide switch refuses while sessions are active and names --session / --force",
+              r.returncode != 0 and "2 session(s) active" in r.stderr and "--session [token]" in r.stderr and "--force" in r.stderr, r.stderr)
+        r = run([PY, ks, "routing", "use", "ibm-openai-cc", "--session"], cwd=sp, env=xenv)
+        check("--session without id and two candidate sessions → error listing the tokens", r.returncode != 0 and "several candidates" in r.stderr and ctok in r.stderr and xtok in r.stderr, r.stderr)
+        r = run([PY, ks, "routing", "use", "ibm-openai-cc", "--session"], cwd=sp, env=senv)
+        check("--session resolves via TKSFW_SESSION; override written; /model hint; Claude Code caveat",
+              r.returncode == 0 and f"session {ctok} (claude) → [routing.ibm-openai-cc] for this session only" in r.stdout and "/model gpt-5.6-sol[1m]" in r.stdout
+              and "custom agents keep the project-wide frontmatter model" in r.stdout
+              and json.load(open(os.path.join(sp, ".agents", "workarea", ".hook-state", "sessions", ctok + ".json"))).get("routing") == "ibm-openai-cc", r.stdout + r.stderr)
+        cfgtxt = open(os.path.join(sp, ".agents", "config.toml")).read()
+        check("session override leaves config.toml unpinned", not re.search(r"^selected\s*=", cfgtxt, re.M), cfgtxt[:300])
+        r = run([PY, os.path.join(plug, "hooks", "route_model.py")], cwd=sp, env=cenv,
+                inp=json.dumps({"session_id": "C1", "prompt_id": "p2", "hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": {"subagent_type": "Explore", "prompt": "p"}, "cwd": sp}))
+        c1 = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
+        r = run([PY, os.path.join(plug, "hooks", "route_model.py")], cwd=sp, env=xenv,
+                inp=json.dumps({"session_id": "X1", "turn_id": "t2", "hook_event_name": "PreToolUse", "tool_name": "spawn_agent", "tool_input": {"agent_type": "x-planner"}, "cwd": sp}))
+        x1 = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
+        check("only the overridden session's spawns use the session table", "gpt-5.6-luna[1m]" in c1 and "[routing.ibm-openai-cc]" in c1 and "[routing.ibm-anthropic]" in x1 and "claude-opus-5" in x1, c1[:150] + " || " + x1[:150])
+        r = run([PY, os.path.join(plug, "hooks", "route_model.py")], cwd=sp, env=cenv | {"TKSFW_ROUTING": "openrouter"},
+                inp=json.dumps({"session_id": "C1", "prompt_id": "p2b", "hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": {"subagent_type": "Explore", "prompt": "p"}, "cwd": sp}))
+        check("session override beats TKSFW_ROUTING", "[routing.ibm-openai-cc]" in json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"], r.stdout[:300])
+        r = run([PY, os.path.join(plug, "hooks", "track_edits.py"), "--phase", "prompt"], cwd=sp, env=cenv, inp=json.dumps({"session_id": "C1", "prompt_id": "p3", "cwd": sp, "prompt": "x"}))
+        r2 = run([PY, os.path.join(plug, "hooks", "track_edits.py"), "--phase", "prompt"], cwd=sp, env=xenv, inp=json.dumps({"session_id": "X1", "turn_id": "t3", "cwd": sp, "prompt": "x"}))
+        check("prompt notice: the overridden session is told 'THIS SESSION ONLY'; the other session sees nothing",
+              "via session override — THIS SESSION ONLY" in r.stdout and r2.stdout.strip() == "", r.stdout[:300] + " || " + r2.stdout[:100])
+        r = run([PY, ks, "routing", "show", "--session", ctok], cwd=sp, env=xenv)
+        check("ks routing show --session <token>: override line first, then the table as that harness sees it",
+              r.stdout.startswith(f"session {ctok} (claude") and "override → [routing.ibm-openai-cc]" in r.stdout and "harness=claude  routing='ibm-openai-cc'  selected_by=session override" in r.stdout, r.stdout)
+        r = run([PY, os.path.join(plug, "hooks", "refresh_state.py"), "--print"], cwd=sp, env=cenv)
+        # STATE.md Sessions section lists shards only; write one entry for C1 so the token appears
+        open(os.path.join(sp, ".agents", "workarea", f"lessons.{ctok}.yaml"), "w").write(f"- Lssn0001:\n    AuthorAgent: main\n    Model: m\n    Timestamp: \"2026-09-10 09:00:00\"\n    OwnerSessionId: {ctok}\n    OwnerSessionUserName: carlos\n    Title: \"t\"\n    Description: |-\n      x\n    Remarks: |-\n      x\n")
+        r = run([PY, os.path.join(plug, "hooks", "refresh_state.py"), "--print"], cwd=sp, env=cenv)
+        check("STATE.md Sessions shows the routing override and host", f"routing override [routing.ibm-openai-cc]" in r.stdout and "mac1" in r.stdout, r.stdout[-600:])
+        r = run([PY, ks, "routing", "use", "--clear", "--session", ctok], cwd=sp, env=xenv)
+        check("--clear --session removes the override", r.returncode == 0 and "override cleared (was [routing.ibm-openai-cc])" in r.stdout
+              and "routing" not in json.load(open(os.path.join(sp, ".agents", "workarea", ".hook-state", "sessions", ctok + ".json"))), r.stdout + r.stderr)
+        r = run([PY, ks, "routing", "use", "ibm-openai-cc", "--force"], cwd=sp, env=xenv)
+        check("--force switches the project for all sessions", r.returncode == 0 and 'selected = "ibm-openai-cc"' in open(os.path.join(sp, ".agents", "config.toml")).read(), r.stdout + r.stderr)
+        # one active session on this host by this operator → resolved without env
+        os.remove(os.path.join(sp, ".agents", "workarea", ".hook-state", "sessions", xtok + ".json"))
+        r = run([PY, ks, "project", "status"], cwd=sp, env=xenv)
+        check("single candidate → 'probably yours' marker", "← probably yours (only session on this host by you)" in r.stdout, r.stdout)
 
         agents_md = open(os.path.join(full, "AGENTS.md"), encoding="utf-8").read()
         check("AGENTS.md keeps the naming kernel and points to define-agent",
