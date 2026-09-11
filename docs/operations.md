@@ -23,6 +23,7 @@ itself through the shell tool — while a session is open.
 |---|---|---|---|
 | Switch model routing | `ks routing use <table>` (refuses while subagents run; `--force`) · `ks routing show` to verify | Next spawn | `changes.yaml`, Layer METHOD |
 | Return to automatic routing | `ks routing use --clear` | Next spawn | METHOD |
+| A closed session still shows as active (`update`/`reset` refuse) | `ks project sessions close <token>` or `--stale`; with the 3.5.0 plugin the harness's `SessionEnd` hook does this by itself | Immediate | METHOD |
 | Switch routing for one session only | `ks routing use <table> --session` (yours) or `--session <token>` (`ks project status` lists sessions and marks yours); `--clear --session` removes it; the override dies with the session | That session's next spawn | METHOD (that session's shard) |
 | Switch routing for the whole project while others work | `ks routing use <table> --force` — every active session is listed and switches at its next spawn; each is told at its next prompt | Next spawn, all sessions | METHOD |
 | Align the running main session to the routing table | after `ks routing use <table>` run the `/model <judge model>` it prints (Claude Code; `s` in the picker = this session only) or `/model` in Codex — harnesses do not re-read settings mid-session; the next launch picks it up from `.claude/settings.local.json` / `.codex/config.toml` | Immediate (by hand) | — |

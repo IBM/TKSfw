@@ -378,6 +378,12 @@ def touch_session(payload):
         return
     rec["last_seen"] = time.time()
     rec.setdefault("host", HOSTNAME)
+    if rec.get("harness", "unknown") == "unknown":
+        h = harness(payload)
+        if h != "unknown":
+            rec["harness"] = h                            # SessionStart payloads carry no harness marker; later hooks do
+    if rec.get("ended"):                                  # a resumed session after SessionEnd (e.g. Claude /resume)
+        rec.pop("ended", None); rec.pop("end_reason", None)
     export_session_env(rec["token"])                      # resume / compaction: the env file may be fresh
     try:
         atomic_write(os.path.join(SESSIONS_DIR, rec["token"] + ".json"), json.dumps(rec, indent=1))
@@ -385,11 +391,35 @@ def touch_session(payload):
         pass
 
 
+def is_active(rec, within=SESSION_ACTIVE_SEC, now=None):
+    """A session is active while its heartbeat is recent AND it has not been ended (SessionEnd hook or
+    `ks project sessions close`, 3.5.0)."""
+    if not rec or rec.get("ended"):
+        return False
+    return (now or time.time()) - float(rec.get("last_seen", 0)) <= within
+
+
 def other_active_sessions(payload, within=SESSION_ACTIVE_SEC):
-    """Other sessions whose heartbeat is within `within` seconds."""
+    """Other sessions whose heartbeat is within `within` seconds and that have not ended."""
     me = session_token(payload)
     now = time.time()
-    return [d for d in list_sessions() if d["token"] != me and now - float(d.get("last_seen", 0)) <= within]
+    return [d for d in list_sessions() if d["token"] != me and is_active(d, within, now)]
+
+
+def end_session(payload, reason="other"):
+    """SessionEnd: mark the record ended (kept for the ledger view; pruned with the others) and clear the
+    session's live-subagent set. Returns the token or ''."""
+    rec = session_record(payload)
+    if not rec:
+        return ""
+    rec["ended"] = time.time()
+    rec["end_reason"] = str(reason or "other")
+    rec["last_seen"] = time.time()
+    try:
+        atomic_write(os.path.join(SESSIONS_DIR, rec["token"] + ".json"), json.dumps(rec, indent=1))
+    except Exception as e:
+        log(f"end_session: {e}")
+    return rec["token"]
 
 
 def prune_sessions(expire=SESSION_EXPIRE_SEC):
@@ -550,8 +580,10 @@ def harness(payload):
     for detection logic."""
     if "turn_id" in payload or "model" in payload:
         return "codex"
-    if "prompt_id" in payload or "effort" in payload:
+    if "prompt_id" in payload or "effort" in payload or "scratchpad_dir" in payload:
         return "claude"
+    if os.environ.get("CLAUDE_PROJECT_DIR") or os.environ.get("CLAUDE_PLUGIN_ROOT"):
+        return "claude"                                   # Claude Code exports these to hook processes
     return "unknown"
 
 

@@ -77,6 +77,7 @@ import sys
 sys.dont_write_bytecode = True
 import os
 import json
+import time
 import shutil
 import glob
 import re
@@ -1370,6 +1371,50 @@ def main():
               hs["permissionDecision"] == "allow" and os.path.isfile(os.path.join(sp, ".claude", "agents", "report-builder.md")), r.stdout[:300])
         r = run([PY, ks, "routing", "resolve", "never-defined-builder"], cwd=sp, env=xenv)
         check("ks routing resolve answers for an undefined name (informational, no existence check)", r.returncode == 0 and '"ok": true' in r.stdout, r.stdout)
+        # 27 — 3.5.0: SessionEnd ends a session at once; harness detected for Claude SessionStart; sessions close
+        sdir = os.path.join(sp, ".agents", "workarea", ".hook-state", "sessions")      # only C1 survives section 26
+        c2env = dict(cenv); c2env["CLAUDE_PROJECT_DIR"] = sp
+        run([PY, os.path.join(plug, "hooks", "inject_state.py")], cwd=sp, env=c2env, inp=json.dumps({"session_id": "C2", "source": "startup", "cwd": sp}))
+        recs = {json.load(open(os.path.join(sdir, f)))["token"]: json.load(open(os.path.join(sdir, f))) for f in os.listdir(sdir) if f.endswith(".json")}
+        c2 = next((r for r in recs.values() if r.get("harness_session_id") == "C2"), None)
+        check("Claude SessionStart without prompt_id: harness = claude (from CLAUDE_PROJECT_DIR), not unknown", c2 is not None and c2["harness"] == "claude", str(c2))
+        with open(os.path.join(sdir, c2["token"] + ".json"), "w") as fh:
+            json.dump(c2 | {"harness": "unknown"}, fh)
+        run([PY, os.path.join(plug, "hooks", "track_edits.py"), "--phase", "prompt"], cwd=sp, env=cenv,
+            inp=json.dumps({"session_id": "C2", "prompt_id": "q1", "hook_event_name": "UserPromptSubmit", "prompt": "hi", "cwd": sp}))
+        c2b = json.load(open(os.path.join(sdir, c2["token"] + ".json")))
+        check("an 'unknown' harness is backfilled by the next heartbeat that can tell", c2b["harness"] == "claude", str(c2b))
+        r = run([PY, ks, "project", "status"], cwd=sp, env=xenv)
+        check("status: 2 active before SessionEnd, wording explains 'active'", "sessions: 2 active (ended by the harness, or heartbeat within the last 30 min)" in r.stdout, r.stdout[:400])
+        r = run([PY, os.path.join(plug, "hooks", "session_end.py")], cwd=sp, env=cenv,
+                inp=json.dumps({"session_id": "C2", "hook_event_name": "SessionEnd", "reason": "prompt_input_exit", "cwd": sp}))
+        c2c = json.load(open(os.path.join(sdir, c2["token"] + ".json")))
+        check("SessionEnd hook marks the record ended with the reason, exit 0", r.returncode == 0 and c2c.get("ended") and c2c.get("end_reason") == "prompt_input_exit", r.stdout + r.stderr + str(c2c))
+        r = run([PY, ks, "project", "status"], cwd=sp, env=xenv)
+        check("status: the ended session no longer counts as active; ended count shown; its row gone",
+              "sessions: 1 active" in r.stdout and "1 ended in the last 3 h" in r.stdout and c2["token"] not in r.stdout, r.stdout[:500])
+        r = run([PY, ks, "routing", "use", "ibm-openai-cc", "--session", ctok], cwd=sp, env=xenv)
+        r = run([PY, ks, "routing", "use", "ibm-anthropic-cc"], cwd=sp, env=xenv)
+        check("project-wide switch is still guarded by the remaining active session only", r.returncode != 0 and ctok in r.stderr and c2["token"] not in r.stderr, r.stderr)
+        run([PY, os.path.join(plug, "hooks", "inject_state.py")], cwd=sp, env=c2env, inp=json.dumps({"session_id": "C2", "source": "resume", "cwd": sp}))
+        c2d = json.load(open(os.path.join(sdir, c2["token"] + ".json")))
+        check("a resumed session after SessionEnd is active again", not c2d.get("ended"), str(c2d))
+        r = run([PY, ks, "project", "sessions", "close", "nope1234"], cwd=sp, env=xenv)
+        check("ks project sessions close: unknown token → error", r.returncode != 0 and "not found" in r.stderr, r.stderr)
+        r = run([PY, ks, "project", "sessions", "close", ctok], cwd=sp, env=xenv)
+        r2 = run([PY, ks, "project", "status"], cwd=sp, env=xenv)
+        check("ks project sessions close <token> ends it; status drops to 1 active", r.returncode == 0 and ctok in r.stdout and "sessions: 1 active" in r2.stdout, r.stdout + r2.stdout[:300])
+        r = run([PY, ks, "project", "sessions", "close", "--stale"], cwd=sp, env=xenv)
+        check("sessions close --stale closes nothing while heartbeats are fresh", r.returncode == 0 and "closed 0" in r.stdout, r.stdout)
+        old = json.load(open(os.path.join(sdir, c2["token"] + ".json"))); old["last_seen"] = time.time() - 4000
+        json.dump(old, open(os.path.join(sdir, c2["token"] + ".json"), "w"))
+        r = run([PY, ks, "project", "sessions", "close", "--stale"], cwd=sp, env=xenv)
+        r2 = run([PY, ks, "project", "update"], cwd=sp, env=xenv)
+        check("sessions close --stale ends the old record; project update then runs without --force", "closed 1" in r.stdout and c2["token"] in r.stdout and r2.returncode == 0, r.stdout + r2.stderr[:300])
+        r = run([PY, ks, "project", "sessions"], cwd=sp, env=xenv)
+        check("ks project sessions (list) prints the table with the ended count", "sessions: 0 active" in r.stdout and "2 ended in the last 3 h" in r.stdout, r.stdout)
+        r = run([PY, ks, "doctor"], cwd=sp, env=xenv)
+        check("doctor: version line ok when project == installed", re.search(r"ok\s+version project", r.stdout) is not None, r.stdout[-600:])
 
         agents_md = open(os.path.join(REPO, "template", "AGENTS.md"), encoding="utf-8").read()   # the kernel itself, not the project copy (a test appends to that)
         check("AGENTS.md keeps the naming kernel and points to define-agent",

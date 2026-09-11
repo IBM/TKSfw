@@ -84,6 +84,17 @@
           }
         ]
       }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .agents/hooks/session_end.py",
+            "timeout": 30
+          }
+        ]
+      }
     ]
   }
 }

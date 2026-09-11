@@ -107,7 +107,7 @@ def other_sessions_section():
     lines.append("## Sessions (ledger shards)")
     for tok, t in sorted(tokens.items(), key=lambda kv: kv[1]["last"], reverse=True):
         rec = recs.get(tok, {})
-        live = rec and time.time() - float(rec.get("last_seen", 0)) <= H.SESSION_ACTIVE_SEC
+        live = H.is_active(rec)
         who = t["op"] or rec.get("operator") or "?"
         ovr = f" · routing override [routing.{rec['routing']}]" if rec.get("routing") else ""
         lines.append(f"- {tok} ({who}{', active' if live else ''}{', ' + rec['host'] if rec.get('host') else ''}): {t['n']} entries · last {t['last'] or '—'} {t['kind']} “{t['title']}”{ovr}")

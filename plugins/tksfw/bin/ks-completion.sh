@@ -11,7 +11,7 @@ _ks_complete() {
     case "${COMP_WORDS[1]}" in
       self)     words="install version home" ;;
       operator) words="set show" ;;
-      project)  words="init update enable disable status drift reset --full --json --archive --label --keep-agents --registry --dry-run --yes --force" ;;
+      project)  words="init update enable disable status sessions drift reset --stale --all --full --json --archive --label --keep-agents --registry --dry-run --yes --force" ;;
       routing)  words="list show check resolve use --clear" ;;
       hil)      words="show set --impact --reversibility --logic --mode" ;;
       layers)   words="resolve pin journal section --l3 --l4 --json --clear" ;;

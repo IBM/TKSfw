@@ -2,6 +2,17 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [3.5.0] — 2026-09-11
+
+### Added
+- `SessionEnd` hook (`session_end.py`, both harnesses): the session record is marked `ended` (with the harness's reason) the moment the main thread closes, and its live-subagent set is cleared. A closed session no longer counts as active for `ks project update|reset`, `ks routing use`, the spawn-time "other sessions" notice, STATE.md or `ks doctor` — previously it lingered up to 30 minutes after the last heartbeat. `/resume` of an ended session reopens its record. Codex: one more hook entry to trust (`ks harness retrust --ack`).
+- `ks project sessions [list]` and `ks project sessions close <token>… | --stale | --all` — end records by hand when a harness quit without `SessionEnd` (older plugin, crash).
+- `ks project status` explains the count ("N active (ended by the harness, or heartbeat within the last 30 min) · K ended in the last 3 h") and hints at `sessions close` when an active row is older than 10 minutes.
+
+### Fixed
+- Session records created by a Claude Code `SessionStart` showed `harness: unknown` (that payload has no `prompt_id` yet): the harness is now taken from `CLAUDE_PROJECT_DIR`/`CLAUDE_PLUGIN_ROOT`, and any remaining `unknown` is backfilled by the next heartbeat that can tell.
+- `ks doctor`: the "version project X / installed Y — run `ks project update`" line is now WARN on any mismatch (it was `ok` for same-minor mismatches, which hid a refused update). 13 new tests (315 total).
+
 ## [3.4.1] — 2026-09-11
 
 ### Fixed

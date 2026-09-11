@@ -299,7 +299,9 @@ def _ago(ts):
 def print_sessions(proj, home):
     import time
     sess = sorted(active_sessions(proj), key=lambda s: -float(s.get("last_seen", 0)))
-    print(f"sessions: {len(sess)} active" + ("" if sess else ""))
+    ended = [s for s in all_sessions(proj) if s.get("ended") and time.time() - float(s["ended"]) <= 3 * 3600]
+    print(f"sessions: {len(sess)} active (ended by the harness, or heartbeat within the last 30 min)"
+          + (f" · {len(ended)} ended in the last 3 h" if ended else ""))
     if not sess:
         return
     me, how = current_session(proj, home, sess)
@@ -316,6 +318,9 @@ def print_sessions(proj, home):
     print("  " + "  ".join(str(h).ljust(w[i]) for i, h in enumerate(hdr[:7])))
     for r in rows:
         print("  " + "  ".join(str(r[i]).ljust(w[i]) for i in range(7)) + ("  " + r[7] if r[7] else ""))
+    if any(not s.get("ended") and time.time() - float(s.get("last_seen", 0)) > 600 for s in sess):
+        print("  (a session you know is closed but still listed: its harness sent no SessionEnd — "
+              "`ks project sessions close <token>` or `--stale`)")
 
 
 # ----------------------------------------------------------------------------- commands
@@ -425,6 +430,23 @@ def cmd_project(home, args):
             except SystemExit:
                 pass
         sys.exit(rc)
+    if sub == "sessions":
+        proj = Project(home)
+        act = rest[0] if rest else "list"
+        if act == "list":
+            print_sessions(proj, home)
+            sys.exit(0)
+        if act == "close":
+            toks = [a for a in rest[1:] if not a.startswith("--")]
+            if not toks and "--stale" not in rest and "--all" not in rest:
+                die("ks project sessions close <token>… | --stale | --all")
+            done = close_sessions(proj, tokens=toks or None, stale="--stale" in rest) if (toks or "--stale" in rest) \
+                else close_sessions(proj)
+            print(f"closed {len(done)} session record(s)" + (": " + ", ".join(done) if done else ""))
+            if toks and set(toks) - set(done):
+                die("not found or already ended: " + ", ".join(sorted(set(toks) - set(done))))
+            sys.exit(0)
+        die(f"ks project sessions: unknown action {act!r} (list | close)")
     if sub in ("update", "enable", "disable", "drift"):
         target = next((a for a in rest if not a.startswith("--")), None)
         proj = Project(home, target)
@@ -610,19 +632,46 @@ def cmd_reset(home, args):
     print("→ commit the working tree; the next session starts with empty ledgers and a fresh token")
 
 
-def active_sessions(proj, within=1800):
-    import time
+def all_sessions(proj):
     d = os.path.join(proj.workarea or "", ".hook-state", "sessions")
     out = []
     try:
         for f in os.listdir(d):
             if f.endswith(".json"):
                 rec = json.load(open(os.path.join(d, f)))
-                if time.time() - float(rec.get("last_seen", 0)) <= within:
+                if isinstance(rec, dict) and rec.get("token"):
+                    rec["_path"] = os.path.join(d, f)
                     out.append(rec)
     except Exception:
         pass
     return out
+
+
+def active_sessions(proj, within=1800):
+    """Active = heartbeat within `within` seconds AND not ended (SessionEnd hook / `ks project sessions close`)."""
+    import time
+    now = time.time()
+    return [r for r in all_sessions(proj) if not r.get("ended") and now - float(r.get("last_seen", 0)) <= within]
+
+
+def close_sessions(proj, tokens=None, stale=False, within=1800):
+    """Mark session records ended by hand (a harness that quit without SessionEnd, or an old plugin).
+    `tokens`: explicit; `stale=True`: every un-ended record whose heartbeat is older than `within`."""
+    import time
+    now = time.time()
+    done = []
+    for r in all_sessions(proj):
+        if r.get("ended"):
+            continue
+        if (tokens and r["token"] in tokens) or (stale and now - float(r.get("last_seen", 0)) > within) or (tokens is None and not stale):
+            path = r.pop("_path")
+            r["ended"] = now; r["end_reason"] = "ks project sessions close"
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(r, fh, indent=1)
+            os.replace(tmp, path)
+            done.append(r["token"])
+    return done
 
 
 def apply_main_model(proj, quiet=False):
@@ -1103,7 +1152,7 @@ def cmd_doctor(home, args):
         m = proj.manifest
         (ok if m.get("enabled", True) is not False else warn)(f"armed: {m.get('enabled', True) is not False}")
         pv, iv = str(m.get("version", "?")), home.version
-        (ok if pv.split(".")[:2] == iv.split(".")[:2] else warn)(f"version project {pv} / installed {iv}" + ("" if pv == iv else " — `ks project update`"))
+        (ok if pv == iv else warn)(f"version project {pv} / installed {iv}" + ("" if pv == iv else " — run `ks project update`"))
         d = run([PY, home.new_project, proj.root, "--drift", "--json"], capture=True)
         try:
             dj = json.loads(d.stdout)
@@ -1136,7 +1185,8 @@ def cmd_doctor(home, args):
         rc = run([PY, os.path.join(proj.hooks, "route_model.py"), "--check"], cwd=proj.root, env=proj.env(), capture=True)
         (ok if rc.returncode == 0 else fail)("routing: " + rc.stdout.strip().splitlines()[0] if rc.stdout.strip() else "routing: no output")
         sess = active_sessions(proj)
-        (ok if len(sess) <= 1 else warn)(f"active sessions: {len(sess)}" + ("" if len(sess) <= 1 else " — ledgers are partitioned per session; tasks.md has one plan-writer"))
+        (ok if len(sess) <= 1 else warn)(f"active sessions: {len(sess)}" + ("" if len(sess) <= 1 else " — ledgers are partitioned per session; tasks.md has one plan-writer")
+                                        + (" (closed ones the harness did not end: `ks project sessions close --stale`)" if len(sess) > 1 else ""))
         conf = sync_conflicts(proj)
         (ok if not conf else fail)("sync conflict copies: " + (", ".join(conf) + " — merge by hand into the canonical files, then delete" if conf else "none"))
         shards = [n for n in os.listdir(proj.workarea) if re.match(r"^(changes|lessons|handoffs|events|decisions)\.[0-9A-Za-z]{8}\.yaml$", n)] if os.path.isdir(proj.workarea) else []
@@ -1204,6 +1254,11 @@ to the next session.
                                     operator, host, started, last seen, routing) with "← this session" when
                                     $TKSFW_SESSION identifies yours, "← probably yours" when it is the only one
                                     on this host by you.
+  ks project sessions [list]        the sessions table (same as status), including recently ended ones.
+  ks project sessions close <token>… | --stale | --all
+                                    mark records ended by hand — for a harness that quit without SessionEnd
+                                    (older plugin, crash). --stale: heartbeat older than 30 min; --all: every
+                                    un-ended record. Ended records stop counting as "active" at once.
   ks project drift [--json]         which project files differ from the template and how.
   ks project enable | disable       flip `enabled` in .agents/.tksfw.json — the hooks yield when disabled.
   ks project reset [--archive [--label L]] [--keep-agents] [--registry] [--dry-run] [--yes] [--force]
