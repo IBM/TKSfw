@@ -102,6 +102,20 @@ def host_state(project):
     return os.path.join(project, ".agents", "workarea", ".hook-state", "hosts", HOST)
 
 
+
+AGENT_NAMES = ("sources-researcher", "report-builder", "x-planner", "output-validator", "x-builder", "data-fetcher", "cv-writer", "final-writer", "pricing-reviewer", "manual")
+
+
+def seed_agents(root, names=AGENT_NAMES):
+    """Agent definitions the spawn tests refer to (3.4.1: the hook denies spawns of undefined agents)."""
+    d = os.path.join(root, ".agents", "agents")
+    os.makedirs(d, exist_ok=True)
+    for n in names:
+        p = os.path.join(d, n + ".toml")
+        if not os.path.exists(p):
+            open(p, "w").write(f'name = "{n}"\ndescription = "MUST BE USED for {n} work."\ndeveloper_instructions = "Do the {n} work."\n')
+
+
 def run(cmd, cwd=None, env=None, inp=None):
     e = os.environ.copy()
     e.pop("CLAUDE_PROJECT_DIR", None)
@@ -148,6 +162,7 @@ def main():
         proj = os.path.join(tmp, "proj")
         r = run([PY, os.path.join(work, "tools", "new_project.py"), proj, "--plugin-mode"])
         check("new_project.py --plugin-mode", r.returncode == 0, r.stdout + r.stderr)
+        seed_agents(proj)
         check("plugin-mode project has no .agents/hooks", not os.path.exists(os.path.join(proj, ".agents", "hooks")))
         check("plugin-mode project has AGENTS.md + workarea",
               os.path.isfile(os.path.join(proj, "AGENTS.md")) and os.path.isdir(os.path.join(proj, ".agents", "workarea")))
@@ -188,6 +203,7 @@ def main():
         full = os.path.join(tmp, "full")
         r = run([PY, os.path.join(work, "tools", "new_project.py"), full, "--no-sync"])
         check("new_project.py full mode", r.returncode == 0, r.stdout + r.stderr)
+        seed_agents(full, ("x-planner", "output-validator", "x-builder", "report-builder", "sources-researcher"))
         probe2 = ("import sys; sys.path.insert(0, %r); import hooklib as H; print(H.PROJECT_ROOT); print(H.PLUGIN_MODE)") \
             % os.path.join(full, ".agents", "hooks")
         r = run([PY, "-c", probe2], cwd=tmp)
@@ -433,6 +449,7 @@ def main():
               and ".agents/.tksfw.json" in open(os.path.join(plug, "bootstrap", "AGENTS.global.md")).read())
         np2 = os.path.join(tmp, "from-plugin")
         r = run([PY, os.path.join(init, "assets", "new_project.py"), np2, "--plugin-mode"])
+        seed_agents(np2)
         mf = os.path.join(np2, ".agents", ".tksfw.json")
         check("project created from the plugin bundle (plugin mode, armed)",
               r.returncode == 0 and os.path.isfile(os.path.join(np2, "AGENTS.md")) and os.path.isfile(mf)
@@ -466,6 +483,7 @@ def main():
         # nested spawn denied
         dproj = os.path.join(tmp, "deleg")
         run([PY, os.path.join(work, "tools", "new_project.py"), dproj, "--plugin-mode"])
+        seed_agents(dproj)
         spawn = lambda extra={}: json.dumps({"session_id": "d", "turn_id": "t9", "hook_event_name": "PreToolUse", "tool_name": "spawn_agent",
                                               "tool_input": {"agent_type": "sources-researcher"}, "cwd": dproj, **extra})
         rm = lambda inp: run([PY, os.path.join(plug, "hooks", "route_model.py")], cwd=dproj, env=penv, inp=inp)
@@ -542,6 +560,7 @@ def main():
         # 14 — parallel sessions
         sproj = os.path.join(tmp, "sessions")
         run([PY, os.path.join(work, "tools", "new_project.py"), sproj, "--plugin-mode"])
+        seed_agents(sproj)
         senv = penv | {"TKSFW_USER": "carlos"}
         wa = os.path.join(sproj, ".agents", "workarea")
         def hook(script, sid, turn, extra, env=senv, args=()):
@@ -849,6 +868,7 @@ def main():
         # 17 — live reconfiguration
         lproj = os.path.join(tmp, "live")
         run([PY, ks, "project", "init", lproj], cwd=tmp, env=kenv)
+        seed_agents(lproj)
         lenv = kenv | {"TKSFW_USER": "carlos"}
         lhook = lambda script, extra, args=(): run([PY, os.path.join(plug, "hooks", script), *args], cwd=lproj, env=lenv,
                                                    inp=json.dumps({"session_id": "SL", "turn_id": "l1", "cwd": lproj, **extra}))
@@ -1270,6 +1290,7 @@ def main():
         # 26 — session-scoped routing
         sp = os.path.join(tmp, "sessp")
         run([PY, ks, "project", "init", sp], cwd=tmp, env=kenv)
+        seed_agents(sp, ("x-planner",))
         envf = os.path.join(tmp, "claude_env_file")
         cenv = dict(kenv); cenv["CLAUDE_ENV_FILE"] = envf; cenv["TKSFW_HOST"] = "mac1"
         run([PY, os.path.join(plug, "hooks", "inject_state.py")], cwd=sp, env=cenv, inp=json.dumps({"session_id": "C1", "prompt_id": "p1", "source": "startup", "cwd": sp}))
@@ -1331,8 +1352,26 @@ def main():
         os.remove(os.path.join(sp, ".agents", "workarea", ".hook-state", "sessions", xtok + ".json"))
         r = run([PY, ks, "project", "status"], cwd=sp, env=xenv)
         check("single candidate → 'probably yours' marker", "← probably yours (only session on this host by you)" in r.stdout, r.stdout)
+        # 3.4.1 — spawning an undefined agent is denied with the fix; a bare role name is called out; built-ins pass
+        r = run([PY, os.path.join(plug, "hooks", "route_model.py")], cwd=sp, env=cenv,
+                inp=json.dumps({"session_id": "C1", "prompt_id": "p7", "hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": {"subagent_type": "builder", "prompt": "p"}, "cwd": sp}))
+        hs = json.loads(r.stdout)["hookSpecificOutput"]
+        check("spawn of a bare role name is denied: 'builder is a ROLE, not an agent', define-agent hint",
+              hs["permissionDecision"] == "deny" and "is a ROLE, not an agent" in hs["permissionDecisionReason"] and "define-agent" in hs["permissionDecisionReason"] and "report-builder" in hs["permissionDecisionReason"], r.stdout)
+        r = run([PY, os.path.join(plug, "hooks", "route_model.py")], cwd=sp, env=cenv,
+                inp=json.dumps({"session_id": "C1", "prompt_id": "p8", "hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": {"subagent_type": "report-builder", "prompt": "p"}, "cwd": sp}))
+        hs = json.loads(r.stdout)["hookSpecificOutput"]
+        check("spawn of an undefined <family>-<role> agent is denied naming the missing .toml", hs["permissionDecision"] == "deny" and ".agents/agents/report-builder.toml missing" in hs["permissionDecisionReason"], r.stdout)
+        seed_agents(sp, ("report-builder",))
+        r = run([PY, os.path.join(plug, "hooks", "route_model.py")], cwd=sp, env=cenv,
+                inp=json.dumps({"session_id": "C1", "prompt_id": "p9", "hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": {"subagent_type": "report-builder", "prompt": "p"}, "cwd": sp}))
+        hs = json.loads(r.stdout)["hookSpecificOutput"]
+        check("once defined, the spawn is allowed and the missing Claude mirror is rendered on the fly",
+              hs["permissionDecision"] == "allow" and os.path.isfile(os.path.join(sp, ".claude", "agents", "report-builder.md")), r.stdout[:300])
+        r = run([PY, ks, "routing", "resolve", "never-defined-builder"], cwd=sp, env=xenv)
+        check("ks routing resolve answers for an undefined name (informational, no existence check)", r.returncode == 0 and '"ok": true' in r.stdout, r.stdout)
 
-        agents_md = open(os.path.join(full, "AGENTS.md"), encoding="utf-8").read()
+        agents_md = open(os.path.join(REPO, "template", "AGENTS.md"), encoding="utf-8").read()   # the kernel itself, not the project copy (a test appends to that)
         check("AGENTS.md keeps the naming kernel and points to define-agent",
               "define-agent" in agents_md and "Reserved name `main`" in agents_md and "project-agent-1" not in agents_md
               and len(agents_md.encode()) < 19000)

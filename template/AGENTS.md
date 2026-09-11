@@ -57,10 +57,10 @@
 
 ### Subagents
 
-- Before delegating any plan step, check `.agents/agents/` (harness-neutral agent definitions; the hooks render the harness-specific copies) for a matching agent by role.
+- Before delegating any plan step, check `.agents/agents/` (harness-neutral definitions) for a matching agent by role. The spawn's agent type is the agent's **full name** (`<family>-<role>`), never a bare role or tier — the hook denies spawns of undefined agents.
 	- If an existing agent's scope partially matches, update its definition rather than reuse or duplicate.
 	- Agent definitions should never carry task history. History lives only in the ledger.
-- If none exists, create `.agents/agents/<agent-name>.toml` — **load the `define-agent` skill first** (it owns the field rules, the naming convention and the validator; the PostToolUse hook blocks a non-conforming file). Never write `model`/`model_reasoning_effort`: models are routed by **tier** from `.agents/config.toml` (`research` = search/read-only, `build` = implementation, `judge` = planning/architecture/judgement/validation); the agent's `-<role>` suffix selects the tier via `[roles]`; the hooks render the model into the harness copies and apply the tier at every spawn (unknown role → spawn refused).
+- If none exists, create `.agents/agents/<agent-name>.toml` — **load the `define-agent` skill first** (it owns the field rules, naming and validator; the PostToolUse hook blocks a non-conforming file). Never write `model`/`model_reasoning_effort`: models are routed by **tier** from `.agents/config.toml` (`research` = search/read-only, `build` = implementation, `judge` = planning/judgement/validation); the `-<role>` suffix selects the tier via `[roles]`; the hooks render the model into the harness copies and apply it at every spawn (unknown role → refused).
 - Never delegate to the `judge` tier unless the task involves planning or architectural thinking, or judgment/validation.
 - Never write a model ID in an agent file or in this document (change procedure: `delegate-work` skill); record the model the hook reports in the Handoff/Event `Model` field.
 - Try to constrain each subagent to just one task for focused execution, improved traceability, and optimized handoffs.
@@ -149,7 +149,7 @@
 
 - `Layer` (Change Log) reuses the L1–L4 / Group A–B taxonomy, so classification is mechanical: `METHOD` = `AGENTS.md`, Group-A skills, `.agents/hooks/**`, harness config (`.codex/config.toml`, `.claude/settings.json`) — reusable across all projects · `ARCHETYPE` = `KS_PROJECT.md` (the archetype spec), Group-B skills, reusable scaffolding — reusable across instances of this archetype · `PROJECT` = `KS_SPEC.md` (the project spec), the deliverables, instance-specific data — this instance only.
 - Enforcement is harness-level, not memory: a `PostToolUse` hook detects writes to the ledgers by content hashing (any tool, shell or script) and blocks a malformed entry, feeding back the validator's report; a `Stop` hook advises when a deliverable/framework edit or a delegation looks un-logged (from the hash journal, never the transcript).
-- **Partitioning and ownership:** each session writes only its own ledger shards `.agents/workarea/<ledger>.<session-token>.yaml` (the token is shown at session start); every other shard and the unsuffixed legacy files are read-only, and the hook rejects writes to them. Every new entry carries `OwnerSessionId` and `OwnerSessionUserName` (minted by the `yaml-log-entry` skill). Readers (STATE.md, checks, `find`) merge all shards; decisions are append-only — a status change is an `events` entry of `EventType: DECISION` with `DecisionID`.
+- **Partitioning and ownership:** each session writes only its own ledger shards `.agents/workarea/<ledger>.<session-token>.yaml` (the token is shown at session start); every other shard and the unsuffixed legacy files are read-only, and the hook rejects writes to them. Every new entry carries `OwnerSessionId` and `OwnerSessionUserName` (minted by `yaml-log-entry`). Readers merge all shards; decisions are append-only — a status change is an `events` entry of `EventType: DECISION` with `DecisionID`.
 
 #### Deliverables Registry
 
@@ -189,5 +189,5 @@
 - Quality Control:
 	- Keep deliverables clean: DO NOT add mentions/references to fixes/changes made in the Deliverables themselves.
 	- Do NOT leak references to internal working aliases/codenames for inputs into ANY deliverable.
-	- Audit trails of (iterative) fixes/changes MUST be added to `changes.yaml`, scoped by `Layer` (METHOD | ARCHETYPE | PROJECT) — this spans framework/method work, not only deliverable edits.
+	- Audit trails of (iterative) fixes/changes MUST be added to `changes.yaml`, scoped by `Layer` (METHOD | ARCHETYPE | PROJECT) — framework/method work included, not only deliverable edits.
 - The folder is CLEAN of temporary files and folders.

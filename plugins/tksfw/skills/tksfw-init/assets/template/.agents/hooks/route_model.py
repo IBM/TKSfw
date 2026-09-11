@@ -208,8 +208,9 @@ def resolve_role(table, name):
     return None, None, name
 
 
-def resolve(table, name, harness, payload=None):
-    """Full resolution → dict(ok, ...). Never raises for data problems."""
+def resolve(table, name, harness, payload=None, check_agent=True):
+    """Full resolution → dict(ok, ...). Never raises for data problems. `check_agent=False` (CLI `--resolve`)
+    answers "which model would this name get" without requiring the definition to exist."""
     key, tab, how = select_routing(table, harness, payload)
     if tab is None:
         avail = sorted((table.get("routing") or {}).keys())
@@ -225,6 +226,27 @@ def resolve(table, name, harness, payload=None):
     entry = tab.get(tier)
     if not isinstance(entry, dict) or not entry.get("model"):
         return {"ok": False, "reason": f"TKSfw routing: [routing.{key}] has no model for tier {tier!r}."}
+    # 3.4.1: the harness will refuse an agent type that does not exist — say so here, with the fix
+    builtin = set((table.get("naming") or {}).get("builtin_agents") or []) | {"Explore", "Plan", "general-purpose", "explorer", "worker", "default"}
+    if check_agent and base not in builtin:
+        src = os.path.join(H.PROJECT_ROOT, ".agents", "agents", base + ".toml")
+        if not os.path.isfile(src):
+            roles = table.get("roles") or {}
+            hint = (f"`{base}` is a ROLE, not an agent — agents are named <family>-<role> (e.g. `report-{base}`). "
+                    if base in roles and "-" not in base else "")
+            return {"ok": False, "no_agent": True, "routing": key, "role": role, "tier": tier,
+                    "reason": (f"TKSfw routing: no agent definition for {base!r} (.agents/agents/{base}.toml missing). {hint}"
+                               f"Define it first with the define-agent skill (it renders .claude/agents/{base}.md and "
+                               f".codex/agents/{base}.toml), or spawn a built-in type ({', '.join(sorted(b for b in builtin if b[0].isupper() or b == 'general-purpose'))}) "
+                               f"and route it by role.")}
+        mirror = os.path.join(H.PROJECT_ROOT, ".claude", "agents", base + ".md") if harness == "claude" \
+            else os.path.join(H.PROJECT_ROOT, ".codex", "agents", base + ".toml")
+        if not os.path.isfile(mirror):
+            try:                                          # source exists, mirror missing (copied project, pruned dir): render now
+                import agentlib
+                agentlib.sync(check=False, only=[src])
+            except Exception as e:
+                H.log(f"route_model: mirror render for {base}: {e}")
     return {"ok": True, "routing": key, "selected_by": how, "agent": base, "role": role, "tier": tier,
             "model": entry["model"], "reasoning_effort": entry.get("reasoning_effort")}
 
@@ -364,7 +386,7 @@ def main():
         table = load_table()
         if so:
             os.environ["TKSFW_SESSION_ROUTING"] = so
-        print(json.dumps(resolve(table, name, harness_arg or "codex"), indent=2))
+        print(json.dumps(resolve(table, name, harness_arg or "codex", check_agent=False), indent=2))
         sys.exit(0)
 
     # ---- hook mode

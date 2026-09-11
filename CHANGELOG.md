@@ -2,6 +2,12 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [3.4.1] — 2026-09-11
+
+### Fixed
+- Claude Code failed spawns with "Agent type 'builder' not found": the model passed a **role** as the agent type. The routing hook only checked that the name mapped to a role, so it allowed the spawn and the harness then refused it. The hook now denies a spawn whose agent has no definition (`.agents/agents/<name>.toml` missing, built-in types excepted) with the fix in the reason — "`builder` is a ROLE, not an agent — agents are named <family>-<role> (e.g. `report-builder`). Define it first with the define-agent skill …". When the source exists but the harness mirror is missing (copied project, pruned folder) it is rendered on the fly. `ks routing resolve <name>` stays informational (no existence check).
+- AGENTS.md § Subagents: "the spawn's agent type is the agent's full name (`<family>-<role>`), never a bare role or tier — the hook denies spawns of undefined agents" (18,977 B; two sentences shortened). 4 new tests (302 total); the kernel-size test now reads the template, not the project copy.
+
 ## [3.4.0] — 2026-09-10
 
 ### Added
