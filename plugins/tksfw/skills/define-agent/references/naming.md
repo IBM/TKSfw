@@ -48,7 +48,7 @@ marked **[E]** (error, blocks the write) and reports everything marked **[W]** (
   is the set of keys of `[roles]` in `.agents/config.toml` (currently `planner`, `builder`,
   `reviewer`, `validator`, `researcher`, `fetcher`, `writer`) **[E]**; harness built-in agent names
   listed under `[naming] builtin_agents` are not method roles **[E]**.
-  - Extend this list deliberately (edit `[roles]`, a METHOD change); do not invent a one-off role
+  - Extend this list deliberately (edit `[roles]`, a CORE-layer change); do not invent a one-off role
     word per agent.
 - Order `<family>` first so related agents sort and scan together (`pricing-fetcher`, `pricing-validator`).
 - The `name` is a stable identifier; the `description` drives selection.

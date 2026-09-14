@@ -1,17 +1,22 @@
 #!/usr/bin/env python3
-"""Project layers L3/L4 (2.2.0): the ONE resolver for the archetype (L3) and project (L4) files.
+"""Project layers (2.2.0, names since 3.6.0): the ONE resolver for the ARCHETYPE and SPEC files.
 
-    layers.py resolve [--l3 P] [--l4 P] [--json]     where the layers are, their status (exit 0/3/4)
-    layers.py pin --l3 P | --l4 P [--clear]          record paths in .agents/.tksfw.json `layers`
-    layers.py journal                                record the current hashes (status baseline)
-    layers.py section                                the markdown block the SessionStart hook injects
+    layers.py resolve [--archetype P] [--spec P] [--json]   where the layers are, their status (exit 0/3/4)
+    layers.py pin --archetype P | --spec P [--clear]        record paths in .agents/.tksfw.json `layers`
+    layers.py journal                                       record the current hashes (status baseline)
+    layers.py section                                       the markdown block the SessionStart hook injects
 
-Convention (tier 3): `KS_PROJECT.md` (L3 — what kind of project this is and how such projects are
-run) and `KS_SPEC.md` (L4 — what this particular project must deliver) at the project root.
-Declared paths (tier 2): `"layers": {"l3": "...", "l4": "..."}` in `.agents/.tksfw.json`, relative
-to the project root. Explicit arguments (tier 1) win over both for the key they name. A declared
-path that does not exist resolves as `missing` — never a silent fallback to the convention. L3 is
-optional (a project may have only L4); both keys may point at the same file.
+The layer model: CORE (AGENTS.md — principles, orchestration policy, agent behaviour, execution
+guidelines, acceptance criteria) · ARCHETYPE (`KS_PROJECT.md` — what kind of project this is and how
+such projects are run; changes.yaml `Layer: ARCHETYPE`) · PROJECT SPEC (`KS_SPEC.md` — what this
+particular project must deliver; `Layer: PROJECT`). Names, not numbers (ADR 0016).
+
+Convention (tier 3): the two files at the project root. Declared paths (tier 2): `"layers":
+{"archetype": "...", "spec": "..."}` in `.agents/.tksfw.json`, relative to the project root (the
+pre-3.6.0 keys `l3` / `l4` and flags `--l3` / `--l4` are still accepted). Explicit arguments (tier 1)
+win over both for the key they name. A declared path that does not exist resolves as `missing` —
+never a silent fallback to the convention. The archetype is optional (a project may have only a
+spec); both keys may point at the same file.
 
 Consumers — the SessionStart hook (`inject_state.py`), the `ks-start` skill (through `ks layers
 resolve --json`) and any later launcher — call this module; none of them restates the tiers.
@@ -32,9 +37,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hooklib as H  # noqa: E402
 
 CONVENTION = H.LAYER_CONVENTION            # single source: hooklib (classify/watched_files use it too)
-LAYER_ORDER = ("l3", "l4")
-LABEL = {"l3": "L3", "l4": "L4"}
-KS_LAYER_VALUES = {"l3": ("project", "archetype"), "l4": ("spec",)}
+LAYER_ORDER = ("archetype", "spec")
+LABEL = {"archetype": "Archetype", "spec": "Spec"}
+LEDGER_LAYER = {"archetype": "ARCHETYPE", "spec": "PROJECT"}     # changes.yaml Layer value for edits
+LEGACY = H.LAYER_LEGACY_KEYS                                    # {"l3": "archetype", "l4": "spec"}
+KS_LAYER_VALUES = {"archetype": ("project", "archetype", "l3"), "spec": ("spec", "project-spec", "l4")}
 RECORD = os.path.join(H.STATE_DIR, "layers.json")
 SECTION_CAP = 600                      # bytes: the block is pointers, never content
 STATUS_TEXT = {
@@ -64,12 +71,13 @@ def valid_rel(path):
 
 
 def declared():
-    """{'l3': rel|None, 'l4': rel|None, 'watch': bool, 'invalid': {key: raw}} from the manifest."""
+    """{'archetype': rel|None, 'spec': rel|None, 'watch': bool, 'invalid': {key: raw}} from the manifest
+    (legacy keys l3/l4 honoured)."""
     m = H.read_manifest() or {}
     lay = m.get("layers") if isinstance(m.get("layers"), dict) else {}
-    out = {"l3": None, "l4": None, "watch": lay.get("watch", True) is not False, "invalid": {}}
+    out = {"archetype": None, "spec": None, "watch": lay.get("watch", True) is not False, "invalid": {}}
     for k in LAYER_ORDER:
-        raw = lay.get(k)
+        raw = H.layer_stanza_value(lay, k)
         if raw is None:
             continue
         rel = valid_rel(raw)
@@ -81,7 +89,7 @@ def declared():
 
 
 def layer_paths():
-    """{'l3': rel, 'l4': rel} as the hooks see them (tiers 2 + 3, no arguments) — the watched set.
+    """{'archetype': rel, 'spec': rel} as the hooks see them (tiers 2 + 3, no arguments) — the watched set.
     Declared paths are returned even when the file is absent (so their appearance is journaled)."""
     d = declared()
     return {k: (d[k] or CONVENTION[k]) for k in LAYER_ORDER}
@@ -122,11 +130,11 @@ def read_record():
     return H.load_json(RECORD, {}) or {}
 
 
-def resolve(l3=None, l4=None):
+def resolve(archetype=None, spec=None):
     """The resolution result (see module doc). Never raises; problems land in `warnings`."""
     d = declared()
     warnings = [f"{k}: invalid path in .agents/.tksfw.json ignored: {v!r}" for k, v in d["invalid"].items()]
-    args = {"l3": l3, "l4": l4}
+    args = {"archetype": archetype, "spec": spec}
     rec = read_record()
     layers, tiers = [], set()
     for k in LAYER_ORDER:
@@ -143,7 +151,7 @@ def resolve(l3=None, l4=None):
         exists = os.path.isfile(path)
         if not exists and source == "convention":
             continue                                   # optional layer, not declared: simply absent
-        entry = {"layer": k, "path": rel, "source": source, "exists": exists, "hash": None,
+        entry = {"layer": k, "label": LABEL[k], "ledger_layer": LEDGER_LAYER[k], "path": rel, "source": source, "exists": exists, "hash": None,
                  "journal_status": "missing", "title": "", "frontmatter": None}
         if exists:
             try:
@@ -178,7 +186,7 @@ def resolve(l3=None, l4=None):
 
 
 def exit_code(res):
-    """0 resolved at least L4 (or L3 alone — a file was found); 3 nothing resolved; 4 a declared layer is missing."""
+    """0 a layer file was found; 3 nothing resolved; 4 a declared layer is missing."""
     if any(e["journal_status"] == "missing" for e in res["layers"]):
         return 4
     if not any(e["exists"] for e in res["layers"]):
@@ -200,8 +208,9 @@ def journal(res=None):
     return rec
 
 
-def pin(l3=None, l4=None, clear=False):
-    """Write/clear the `layers` stanza in .agents/.tksfw.json. Returns the stanza written (or None)."""
+def pin(archetype=None, spec=None, clear=False):
+    """Write/clear the `layers` stanza in .agents/.tksfw.json (keys archetype/spec; a legacy l3/l4 key for
+    the same layer is replaced). Returns the stanza written (or None)."""
     m = H.read_manifest()
     if m is None:
         raise SystemExit("no .agents/.tksfw.json — initialise the project first (ks project init)")
@@ -210,15 +219,18 @@ def pin(l3=None, l4=None, clear=False):
         stanza = None
     else:
         stanza = dict(m.get("layers") or {}) if isinstance(m.get("layers"), dict) else {}
-        for k, v in (("l3", l3), ("l4", l4)):
+        for k, v in (("archetype", archetype), ("spec", spec)):
             if v is None:
                 continue
             rel = valid_rel(v)
             if rel is None:
                 raise SystemExit(f"{k}: not a project-relative .md path inside the project: {v!r}")
             stanza[k] = rel
+            for old, new in LEGACY.items():
+                if new == k:
+                    stanza.pop(old, None)
         if not stanza:
-            raise SystemExit("usage: layers.py pin --l3 <path> | --l4 <path> | --clear")
+            raise SystemExit("usage: layers.py pin --archetype <path> | --spec <path> | --clear")
         m["layers"] = stanza
     H.atomic_write(H.MANIFEST, json.dumps(m, indent=2, sort_keys=True) + "\n")
     return stanza
@@ -242,7 +254,7 @@ def section(res=None):
     have = [e["layer"] for e in res["layers"] if e["exists"]]
     order = " then ".join(LABEL[k] for k in LAYER_ORDER if k in have) or "them"
     text = ("## Project layers\n" + "\n".join(rows) + f"\nRead {order} in full before planning. "
-            "L4 overrides L3; neither overrides AGENTS.md or the method. Start execution with `/ks-start`."
+            "Spec overrides Archetype; neither overrides AGENTS.md (Core). Start execution with `/ks-start`."
             + (" " + " ".join(dict.fromkeys(hints)) if hints else ""))
     if len(text.encode("utf-8")) > SECTION_CAP:
         text = text.encode("utf-8")[: SECTION_CAP - 2].decode("utf-8", "ignore") + " …"
@@ -265,13 +277,13 @@ def main(argv):
         return 0
     sub, rest = argv[0], argv[1:]
     if sub == "resolve":
-        res = resolve(_opt(rest, "--l3"), _opt(rest, "--l4"))
+        res = resolve(_opt(rest, "--archetype") or _opt(rest, "--l3"), _opt(rest, "--spec") or _opt(rest, "--l4"))
         rc = exit_code(res)
         if "--json" in rest:
             print(json.dumps(res, indent=2))
         else:
             if not res["layers"]:
-                print("no project layers: nothing at KS_PROJECT.md / KS_SPEC.md and no `layers` in .agents/.tksfw.json")
+                print("no project layers: nothing at KS_PROJECT.md (archetype) / KS_SPEC.md (spec) and no `layers` in .agents/.tksfw.json")
             for e in res["layers"]:
                 print(f"{LABEL[e['layer']]}  {e['path']}  [{e['source']}]  {STATUS_TEXT[e['journal_status']]}"
                       + (f"  — {e['title']}" if e["title"] else ""))
@@ -284,14 +296,14 @@ def main(argv):
         print(f"layers journaled: {', '.join(e['path'] for e in res['layers'] if e['exists']) or 'none'} → {os.path.relpath(RECORD, H.PROJECT_ROOT)}")
         return exit_code(res)
     if sub == "pin":
-        stanza = pin(_opt(rest, "--l3"), _opt(rest, "--l4"), clear="--clear" in rest)
+        stanza = pin(_opt(rest, "--archetype") or _opt(rest, "--l3"), _opt(rest, "--spec") or _opt(rest, "--l4"), clear="--clear" in rest)
         print("layers cleared from .agents/.tksfw.json (convention applies)" if stanza is None
               else "layers pinned in .agents/.tksfw.json: " + json.dumps(stanza))
         return 0
     if sub == "section":
         sys.stdout.write(section())
         return 0
-    raise SystemExit("usage: layers.py resolve [--l3 P] [--l4 P] [--json] | pin --l3 P | --l4 P | --clear | journal | section")
+    raise SystemExit("usage: layers.py resolve [--archetype P] [--spec P] [--json] | pin --archetype P | --spec P | --clear | journal | section")
 
 
 if __name__ == "__main__":

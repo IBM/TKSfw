@@ -245,11 +245,11 @@ def main():
 
     manifest = {"framework": "TKSfw", "version": version(), "plugin_mode": plugin_mode,
                 "enabled": (prev or {}).get("enabled", True) is not False, "files": new_hashes}
-    for keep in ("resets", "layers", "installs"):          # generation history (ks project reset); L3/L4 paths (ks layers pin); install log
+    for keep in ("resets", "layers", "installs"):          # generation history (ks project reset); layer paths (ks layers pin); install log
         if (prev or {}).get(keep):
             manifest[keep] = prev[keep]
     # install log (2.5.0): every init/update is recorded here; the first session afterwards is told to log
-    # it in changes.yaml (Layer METHOD) — the operator has nothing to write by hand
+    # it in changes.yaml (Layer CORE) — the operator has nothing to write by hand
     import datetime as _dt
     manifest.setdefault("installs", []).append({"ts": _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "version": version(),
                                                 "action": "update" if prev else "init", "mode": "plugin" if plugin_mode else "full",
@@ -279,7 +279,7 @@ def main():
             subprocess.run([sys.executable, sync], cwd=target, check=False)
     action = "update" if prev else "install"
     print(f"\nRecorded: {action} of v{manifest['version']} in .agents/.tksfw.json — the first session logs it in "
-          "changes.yaml (Layer METHOD); nothing to write by hand.")
+          "changes.yaml (Layer CORE); nothing to write by hand.")
     print("\nNext steps")
     if plugin_mode:
         print("  1. Launch Codex (or Claude Code) in this folder. Codex asks once to trust the project's .codex layer — accept.")
@@ -289,7 +289,7 @@ def main():
         print("  1. Launch Codex (or Claude Code) in this folder. Codex asks to trust the project's .codex layer — accept —")
         print("     and lists the project's hooks: type /hooks and trust them (full mode ships its own hooks).")
         print("  2. `ks harness retrust --ack` to record that trust, then `ks doctor` — 0 FAIL means ready.")
-    print("  3. Optional: describe the project in KS_PROJECT.md (L3) / KS_SPEC.md (L4).")
+    print("  3. Optional: describe the project in KS_PROJECT.md (archetype) / KS_SPEC.md (project spec).")
     print("  4. Start the run with the ks-start skill: Codex `$ks-start` (or /skills → ks-start); Claude Code `/tksfw:ks-start` (`/ks-start` when unambiguous).")
     if kept:
         print(f"\nReview the {len(kept)} locally edited file(s) against template/ and merge by hand.")

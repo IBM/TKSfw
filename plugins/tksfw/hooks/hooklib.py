@@ -146,14 +146,30 @@ APPEND_ONLY_LEDGERS = ("changes", "lessons", "handoffs", "events", "decisions") 
 MUTABLE_LEDGERS = ("deliverables",)                                   # registry: own entries may be rewritten
 SESSION_ACTIVE_SEC = 30 * 60                                          # heartbeat window for "another session is active"
 SESSION_EXPIRE_SEC = 24 * 3600                                        # snapshot/session files older than this are pruned
-# Files whose edit is a loggable METHOD/ARCHETYPE change (Layer table in AGENTS.md).
+# Files whose edit is a loggable CORE/ARCHETYPE change (Layer table in AGENTS.md).
 ROOT_INSTRUCTION_FILES = ("AGENTS.md", "CLAUDE.md", "CLAUDE.local.md", "MISSION.md",
                           "Job Role Definitions.md")
 FRAMEWORK_DIRS = (".agents", ".codex", ".claude")           # minus the workarea, see classify()
-# 2.2.0 — project layers: L3 archetype (Layer: ARCHETYPE) and L4 project spec (Layer: PROJECT) are watched
-# INPUTS (class `layer:l3` / `layer:l4`), never deliverables. Convention at the project root; a `layers`
-# stanza in the manifest declares other paths. Resolution, status and the injected block: layers.py.
-LAYER_CONVENTION = {"l3": "KS_PROJECT.md", "l4": "KS_SPEC.md"}
+# 2.2.0 / 3.6.0 — project layers: the ARCHETYPE (KS_PROJECT.md, Layer: ARCHETYPE) and the project SPEC
+# (KS_SPEC.md, Layer: PROJECT) are watched INPUTS (class `layer:archetype` / `layer:spec`), never
+# deliverables. Convention at the project root; a `layers` stanza in the manifest declares other paths
+# (keys `archetype` / `spec`; the pre-3.6.0 keys `l3` / `l4` are still read). Resolution, status and the
+# injected block: layers.py. The layer model has names, not numbers: CORE (AGENTS.md) · ARCHETYPE · PROJECT.
+LAYER_CONVENTION = {"archetype": "KS_PROJECT.md", "spec": "KS_SPEC.md"}
+LAYER_LEGACY_KEYS = {"l3": "archetype", "l4": "spec"}
+CHANGE_LAYER_ALIASES = {"METHOD": "CORE"}                    # 3.6.0: read-only alias in changes.yaml
+
+
+def layer_stanza_value(lay, key):
+    """Manifest `layers` value for `key` ('archetype'|'spec'), honouring the legacy key."""
+    if not isinstance(lay, dict):
+        return None
+    v = lay.get(key)
+    if v is None:
+        for old, new in LAYER_LEGACY_KEYS.items():
+            if new == key and lay.get(old) is not None:
+                return lay.get(old)
+    return v
 # Tool names that mean "a subagent was delegated to" (Claude: Agent (formerly Task);
 # Codex: spawn_agent, which its matcher also exposes as Agent).
 DELEGATION_TOOLS = {"Agent", "Task", "spawn_agent"}
@@ -196,13 +212,14 @@ def armed():
 
 
 def layer_paths():
-    """{'l3': rel, 'l4': rel} — declared in the manifest `layers` stanza (relative, inside the root,
-    .md) or the convention. Declared-but-absent files are included so their appearance is journaled."""
+    """{'archetype': rel, 'spec': rel} — declared in the manifest `layers` stanza (relative, inside the
+    root, .md; legacy keys l3/l4 honoured) or the convention. Declared-but-absent files are included so
+    their appearance is journaled."""
     m = read_manifest() or {}
     lay = m.get("layers") if isinstance(m.get("layers"), dict) else {}
     out = {}
     for k, conv in LAYER_CONVENTION.items():
-        raw = lay.get(k)
+        raw = layer_stanza_value(lay, k)
         rel = None
         if isinstance(raw, str) and raw.strip():
             p = raw.strip().replace("\\", "/")
@@ -214,11 +231,17 @@ def layer_paths():
 
 
 def layer_class(rel):
-    """'layer:l3' | 'layer:l4' when `rel` is a resolved layer file (config or convention), else None."""
+    """'layer:archetype' | 'layer:spec' when `rel` is a resolved layer file (config or convention), else None."""
     for k, p in layer_paths().items():
         if rel == p:
             return "layer:" + k
     return None
+
+
+def change_layer(value):
+    """Canonical changes.yaml Layer value: 'CORE' | 'ARCHETYPE' | 'PROJECT' ('METHOD' → 'CORE'), or ''."""
+    v = str(value or "").strip().upper()
+    return CHANGE_LAYER_ALIASES.get(v, v)
 
 
 def guard():
@@ -231,7 +254,7 @@ def guard():
 
 def install_line():
     """'TKSfw v<ver> installed|updated <ts> (<mode>) by <op> — not yet in changes.yaml: log it …' or ''.
-    The manifest's `installs` log (new_project.py) is compared with the METHOD-layer changes entries:
+    The manifest's `installs` log (new_project.py) is compared with the CORE-layer changes entries:
     once an entry with Timestamp >= the install stamp exists, the line disappears (2.5.0)."""
     m = read_manifest() or {}
     inst = m.get("installs") or []
@@ -241,14 +264,14 @@ def install_line():
     ts = str(last.get("ts") or "")
     try:
         for _i, f in load_kind("changes"):
-            if str(f.get("Layer", "")).upper() == "METHOD" and str(f.get("Timestamp", "")) >= ts:
+            if change_layer(f.get("Layer")) == "CORE" and str(f.get("Timestamp", "")) >= ts:
                 return ""
     except Exception as e:
         log(f"install_line: {e}")
     verb = "installed" if last.get("action") == "init" else "updated to"
     who = f" by {last['operator']}" if last.get("operator") else ""
     return (f"TKSfw {verb} v{last.get('version', '?')} on {ts[:16]} ({last.get('mode', '?')} mode){who} — not yet recorded: "
-            f"log it now in changes.yaml (Layer METHOD, Title \"TKSfw v{last.get('version', '?')} {verb.split()[0]}\"); "
+            f"log it now in changes.yaml (Layer CORE, Title \"TKSfw v{last.get('version', '?')} {verb.split()[0]}\"); "
             "the operator was told this happens automatically.")
 
 
@@ -771,7 +794,7 @@ def classify(rel, globs=None):
         return None                           # generated mirrors (skills, agent definitions), not sources
     lc = layer_class(rel)
     if lc:
-        return lc                             # L3/L4 project layers (2.2.0): watched inputs
+        return lc                             # ARCHETYPE/SPEC project layers (2.2.0): watched inputs
     top = rel.split("/", 1)[0]
     if top in FRAMEWORK_DIRS:
         return "framework"
@@ -831,7 +854,7 @@ def watched_files():
     for f in ROOT_INSTRUCTION_FILES:
         if os.path.isfile(os.path.join(PROJECT_ROOT, f)):
             files.add(f)
-    for rel in layer_paths().values():                    # L3/L4 (2.2.0)
+    for rel in layer_paths().values():                    # project layers (2.2.0)
         if os.path.isfile(os.path.join(PROJECT_ROOT, rel)) and not _ignored(rel):
             files.add(rel)
     # deliverables (registry globs, relative to the project root; ** is recursive)
@@ -1188,7 +1211,7 @@ def unlogged(entries):
       deliverable  edit to a registry-matched deliverable AFTER the last changes.yaml write
       framework    edit to .agents/.codex/.claude/** or a root instruction file AFTER the last
                    changes.yaml write
-      layer        edit to the L3/L4 project layer files (KS_PROJECT.md → ARCHETYPE, KS_SPEC.md →
+      layer        edit to the project layer files (KS_PROJECT.md → ARCHETYPE, KS_SPEC.md →
                    PROJECT) AFTER the last changes.yaml write (2.2.0)
       handoff      a delegation AFTER the last handoffs.yaml OR events.yaml write
     Returns (flags dict, paths dict) where paths lists the offending files."""

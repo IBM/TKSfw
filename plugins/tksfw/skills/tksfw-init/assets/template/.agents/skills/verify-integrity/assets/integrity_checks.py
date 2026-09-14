@@ -8,7 +8,7 @@ those domain checks live in the Group-B `verify-deliverables` skill.
 
 Both the file set to scan and the alias strings are DATA INPUTS, not hardcoded: the *rule* ("don't
 leak internal input aliases into any deliverable") is method (A); the *specific aliases* (e.g. a
-project's codenames) are instance data (L4) supplied by the caller. This mirrors how
+project's codenames) are instance data (PROJECT layer) supplied by the caller. This mirrors how
 `register-deliverables` keeps the mechanism generic and the naming external.
 
 Usage:
@@ -19,7 +19,7 @@ Usage:
       --aliases          internal alias strings that must NOT appear in any scanned file (default: none)
       --root             directory to walk for the clean-folder scan (default: current dir)
       --require-aliases  treat an empty alias list as a FAILURE, not a skip. Use when the project
-                         is known to have internal aliases (L4 data), so the leak check can never
+                         is known to have internal aliases (PROJECT-layer data), so the leak check can never
                          silently no-op. Without it, an empty list emits a visible WARN and passes.
 
 Exit 0 = clean, 1 = problems. Std lib only.

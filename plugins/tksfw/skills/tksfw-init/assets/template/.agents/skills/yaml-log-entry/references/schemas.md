@@ -38,7 +38,7 @@ validator **and** add a fixture under `tests/fixtures/` (see `SKILL.md § Tests`
 		- OwnerSessionUserName: operator name — see Ownership
 		- Model: Model name used
 		- Timestamp: with format "YYYY-MM-DD hh:mm:ss"
-		- Layer: < METHOD | ARCHETYPE | PROJECT > — the scope of the change (see Clarifications and the Layer table).
+		- Layer: < CORE | ARCHETYPE | PROJECT > — the scope of the change (see Clarifications and the Layer table). Entries written before 3.6.0 carry `METHOD`, read as `CORE`; never write it anew.
 		- Title: Summarize to a maximum of 80 characters
 		- Description: Memo-like field
 		- StateBefore: Memo-like field
@@ -53,7 +53,7 @@ validator **and** add a fixture under `tests/fixtures/` (see `SKILL.md § Tests`
     OwnerSessionUserName: cveira
     Model: gpt-5.6-sol
     Timestamp: "2026-07-21 11:05:00"
-    Layer: METHOD
+    Layer: CORE
     Title: "Add Agent Naming convention to AGENTS.md"
     Description: |-
       Added an Agent Naming subsection under Subagents.
@@ -68,14 +68,14 @@ validator **and** add a fixture under `tests/fixtures/` (see `SKILL.md § Tests`
 
 - Clarifications:
 	- The Change Log records changes to **anything in the workspace**, not only project deliverables. `Layer` classifies the scope so the single ledger stays filterable. This lifts the earlier deliverable-only reading — framework and method work is logged here too.
-	- `Layer` reuses the existing L1–L4 / skill Group A–B taxonomy, so classification is mechanical (not a per-change judgment). See the table below.
+	- `Layer` reuses the layer model (CORE · ARCHETYPE · PROJECT) and the skill Group A–B taxonomy, so classification is mechanical (not a per-change judgment). See the table below.
 	- The internal working files under `.agents/workarea/` (the ledgers themselves, `STATE.md`, `tasks*.md`, the deliverables registry) are process bookkeeping, **not** loggable changes — do not create Change Log entries for editing them.
 
 | Layer       | Covers                                                                                                                                                 | Reuse boundary                                  |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------- |
-| `METHOD`    | `AGENTS.md`, Group-A skills (`yaml-log-entry`, `register-deliverables`, `verify-integrity`, `verify-sources`), `.agents/hooks/**`, `.codex/config.toml`, `.claude/settings.json` | Reusable across **all** projects                |
-| `ARCHETYPE` | `_project-archetype.md`, Group-B skills, the reusable `D40-scripts` engine/pipeline scaffolding                                                        | Reusable across instances of **this archetype** |
-| `PROJECT`   | `_project.md`, the D-numbered deliverables, instance-specific data/topology/prices                                                                     | **This instance** only                          |
+| `CORE`      | `AGENTS.md`, Group-A skills (`yaml-log-entry`, `register-deliverables`, `verify-integrity`, `verify-sources`), `.agents/hooks/**`, `.agents/config.toml`, `.codex/config.toml`, `.claude/settings.json` | Reusable across **all** projects                |
+| `ARCHETYPE` | `KS_PROJECT.md` (the archetype), Group-B skills, reusable engine/pipeline scaffolding                                                                 | Reusable across instances of **this archetype** |
+| `PROJECT`   | `KS_SPEC.md` (the project spec), the deliverables, instance-specific data/topology/prices                                                              | **This instance** only                          |
 
 ## Decision Log
 

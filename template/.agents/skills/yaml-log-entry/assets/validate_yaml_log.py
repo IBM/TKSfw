@@ -5,7 +5,7 @@
 Four append-only LEDGER kinds live under `.claude/workarea/`:
   changes   -> changes.yaml    (ChangeID  -> AuthorAgent, Model, Timestamp, Layer,
                                  Title, Description, StateBefore, StateAfter, Remarks;
-                                 Layer is the enum METHOD|ARCHETYPE|PROJECT — see
+                                 Layer is the enum CORE|ARCHETYPE|PROJECT (legacy METHOD accepted) — see
                                  `_validate_change`)
   lessons   -> lessons.yaml     (LessonID  -> AuthorAgent, Model, Timestamp, Title,
                                  Description, Remarks)
@@ -117,9 +117,11 @@ STATUS_BY_TYPE = {
 }
 
 # Change Log `Layer` vocabulary (mirrors the `<...>` choice set in the spec). Discriminates the
-# scope of a change: METHOD (L1/L2 policy+method + Group-A tooling), ARCHETYPE (L3 + Group-B
-# skills + reusable D40 engine), PROJECT (L4 + the deliverables + instance-specific data).
-CHANGE_LAYER = {"METHOD", "ARCHETYPE", "PROJECT"}
+# scope of a change: CORE (AGENTS.md + Group-A tooling, hooks, harness config), ARCHETYPE (KS_PROJECT.md
+# + Group-B skills + reusable engines), PROJECT (KS_SPEC.md + the deliverables + instance-specific data).
+# 3.6.0 renamed METHOD → CORE (ADR 0016); METHOD stays readable in existing append-only ledgers.
+CHANGE_LAYER = {"CORE", "ARCHETYPE", "PROJECT"}
+CHANGE_LAYER_LEGACY = {"METHOD": "CORE"}     # 3.6.0: accepted on read (append-only ledgers keep old entries); write CORE
 
 # Decision Log enum vocabularies (mirror the `<...>` choice sets in the spec).
 DECISION_IMPACT = {"VERY LOW", "LOW", "MEDIUM", "HIGH", "VERY HIGH"}
@@ -462,8 +464,8 @@ def _validate_change(tag, fields, problems):
     already enforced by the generic required-fields check; here we only validate the value.
     See `references/schemas.md § YAML-based Logs → Change Log`."""
     layer = fields.get("Layer")
-    if layer is not None and str(layer) not in CHANGE_LAYER:
-        problems.append(f"{tag}: Layer {layer!r} not in {sorted(CHANGE_LAYER)}")
+    if layer is not None and str(layer) not in CHANGE_LAYER and str(layer) not in CHANGE_LAYER_LEGACY:
+        problems.append(f"{tag}: Layer {layer!r} not in {sorted(CHANGE_LAYER)} (legacy METHOD is read as CORE)")
 
 
 def _validate_event(tag, fields, problems):

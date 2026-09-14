@@ -23,8 +23,8 @@ baked in. The only fixed output is the registry *shape*, which is validated dete
 ## Source modes (pick what applies)
 | Mode | Input | How |
 |---|---|---|
-| Archetype doc (L3) | `KS_PROJECT.md` (or the L3 path from `ks layers resolve`) DELIVERABLES section | Read the doc; extract each deliverable's ID, title, and file/folder path. |
-| Project doc (L4) | `KS_SPEC.md` (or the L4 path) mission/deliverables list | Same, from the project-specific list; L4 narrows or extends L3. |
+| Archetype doc | `KS_PROJECT.md` (or the archetype path from `ks layers resolve`) DELIVERABLES section | Read the doc; extract each deliverable's ID, title, and file/folder path. |
+| Project spec | `KS_SPEC.md` (or the spec path) mission/deliverables list | Same, from the project-specific list; the spec narrows or extends the archetype. |
 | Interactive | live conversation | Ask the user for the deliverable set (or confirm a proposed one) and record it. |
 
 ## Entry schema (minimal)

@@ -7,7 +7,7 @@ system ships instruction files or project-root configuration:
 |---|---|---|
 | Method tooling | `skills/`, `hooks/` (this is exactly what Codex and Claude Code plugins carry) | **Plugin** `plugins/tksfw/` — one directory, two manifests |
 | Method instance | `AGENTS.md`, `CLAUDE.local.md`, `.agents/workarea/`, `.codex/config.toml`, `.claude/settings.json` (+ hooks/skills in *full* mode) | **Template** `template/` via `tools/new_project.py` |
-| Project layers (L3/L4) | `KS_PROJECT.md` (archetype), `KS_SPEC.md` (project spec) — or paths pinned in `.agents/.tksfw.json` `layers` | **Not distributed**: user content, written per project, never touched by `--update`; remote archetype libraries are roadmap (ADR 0013) |
+| Project layers (ARCHETYPE / PROJECT spec) | `KS_PROJECT.md` (archetype), `KS_SPEC.md` (project spec) — or paths pinned in `.agents/.tksfw.json` `layers` | **Not distributed**: user content, written per project, never touched by `--update`; remote archetype libraries are roadmap (ADR 0013) |
 
 ## Source vs generated (why `plugin-src/` and `plugins/` both exist)
 
@@ -119,4 +119,4 @@ Both modes work inside Box-synced folders: only plain files are written, no syml
 | Hooks after install/update | `/hooks` → trust (plugin hooks are non-managed and skipped until trusted) | none (project/plugin hooks load directly); `/reload-plugins` switches to the new path |
 | Skill invocation | `$yaml-log-entry` / implicit from description | `/tksfw:yaml-log-entry` / implicit from description |
 | Where runtime state lives | project `.agents/workarea/.hook-state/`, `STATE.md` | same — never `${CLAUDE_PLUGIN_ROOT}` (ephemeral on update) |
-| Record the change | `changes.yaml`, Layer METHOD | same |
+| Record the change | `changes.yaml`, Layer CORE | same |

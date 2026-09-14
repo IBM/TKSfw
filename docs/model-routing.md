@@ -130,7 +130,7 @@ file: `.codex/agents/<name>.toml` and `.claude/agents/<name>.md` are generated f
 ## Changing models mid-session
 
 1. Wait for running subagents to finish.
-2. Edit `.agents/config.toml` (the hash hook journals this as a METHOD edit → `changes.yaml`).
+2. Edit `.agents/config.toml` (the hash hook journals this as a CORE-layer edit → `changes.yaml`).
 3. `python3 .agents/hooks/sync_harness.py --models` to re-render every agent mirror with the new
    models (in plugin-mode projects, re-save each `.agents/agents/*.toml` instead — the hook renders).
 4. Next spawn uses the new mapping. No restart; the hook **script** is unchanged, so Codex needs no

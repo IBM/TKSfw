@@ -29,7 +29,7 @@ Owner of the agent-definition procedure and the naming convention (moved here fr
 5. Harness mirrors (`.codex/agents/<name>.toml` with the routed model lines, `.claude/agents/<name>.md`)
    are rendered automatically by the PostToolUse hook once the file is valid — never edit them.
    Bulk re-render after changing `.agents/config.toml`: `python3 .agents/hooks/sync_harness.py --models`.
-6. Log: a new or renamed agent is a `changes.yaml` entry (Layer METHOD or ARCHETYPE per the
+6. Log: a new or renamed agent is a `changes.yaml` entry (Layer CORE or ARCHETYPE per the
    `yaml-log-entry` skill); a rename must state old → new so the Handoff/Event `AgentName` history
    stays traceable.
 

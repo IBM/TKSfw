@@ -46,7 +46,7 @@ a spawn from inside a subagent is refused, and the 5th concurrent spawn of a tur
 
 ## Changing models
 
-- Models change only by editing `.agents/config.toml` (a METHOD-layer change, logged in `changes.yaml`)
+- Models change only by editing `.agents/config.toml` (a CORE-layer change, logged in `changes.yaml`)
   — never an agent file, never AGENTS.md. Do it only while no subagent is running; then run
   `python3 .agents/hooks/sync_harness.py --models` to re-render the harness copies of the agent
   definitions. The next spawn uses the new mapping; no restart or hook re-trust is needed

@@ -13,7 +13,7 @@ What it does, in order (all fail-open):
   2. Rebuilds STATE.md from the ledgers RIGHT NOW (not the stale turn-end copy), so after a
      mid-turn compaction it reflects the current plan and ledger state.
   3. Emits `hookSpecificOutput.additionalContext` assembled from SECTIONS (2.2.0): `state` = a
-     short preamble + STATE.md (the only section that is truncated to fit), `layers` = the L3/L4
+     short preamble + STATE.md (the only section that is truncated to fit), `layers` = the archetype/spec
      project-layer pointer block (paths + status, ≤ 600 B). Each section sits between
      `<!-- tksfw:<id> -->` markers; a failing emitter degrades to an error marker. Hard cap MAX_CHARS. Both harnesses spill oversized hook output to a temp file and hand the model a
      preview instead (Codex ≈ 2,500 tokens by default, Claude Code 10,000 chars); staying under
@@ -132,7 +132,7 @@ def emit_state(payload, ctx):
 
 
 def emit_layers(payload, ctx):
-    """Section `layers` (2.2.0): pointer block for the L3/L4 project layers — paths and status, never
+    """Section `layers` (2.2.0): pointer block for the archetype/spec project layers — paths and status, never
     content. '' when nothing resolves. The resolution is kept in ctx so main() can journal the hashes."""
     res = layers.resolve()
     ctx["layers"] = res

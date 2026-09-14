@@ -2,6 +2,14 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [3.6.0] — 2026-09-14
+
+### Changed
+- Layer model by name (ADR 0016): **CORE** (`AGENTS.md` — principles, orchestration policy, agent behaviour, execution guidelines, acceptance criteria) · **ARCHETYPE** (`KS_PROJECT.md`) · **PROJECT** spec (`KS_SPEC.md`). The L1–L4 numbers are gone from the kernel, skills, hooks, `ks` and the guides; the spec overrides the archetype, neither overrides the core.
+- `changes.yaml` `Layer` enum is `CORE | ARCHETYPE | PROJECT`. `METHOD` (pre-3.6.0) stays valid on read — the validator accepts it and every reader canonicalises it to `CORE` (install-log reconciliation included); new entries write `CORE`. Existing ledgers are never rewritten.
+- `ks layers resolve|pin --archetype P | --spec P` (manifest keys `archetype` / `spec`). The pre-3.6.0 flags `--l3/--l4` and manifest keys `l3/l4` are still read; `pin` replaces a legacy key with the new one. Hook-state classes are `layer:archetype` / `layer:spec`; `layers.py --json` rows carry `label` and `ledger_layer`.
+- SessionStart layers block: "| Archetype | … |", "| Spec | … |", "Spec overrides Archetype; neither overrides AGENTS.md (Core)". `ks project status` layers line starts with `CORE AGENTS.md`. `ks help layers` explains the model. 7 new tests (322 total).
+
 ## [3.5.0] — 2026-09-11
 
 ### Added

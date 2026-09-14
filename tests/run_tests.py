@@ -1186,13 +1186,25 @@ def main():
               and man["installs"][0]["version"] == open(os.path.join(REPO, "VERSION")).read().strip() and man["installs"][0]["operator"], str(man.get("installs")))
         r = run([PY, os.path.join(plug, "hooks", "inject_state.py")], cwd=ip, env=kenv, inp=json.dumps({"session_id": "SI", "turn_id": "i1", "source": "startup", "cwd": ip}))
         ctx = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
-        check("SessionStart on a fresh project: install line asks the model to log the install (Layer METHOD)", "TKSfw installed v" in ctx and "Layer METHOD" in ctx, ctx[:400])
+        check("SessionStart on a fresh project: install line asks the model to log the install (Layer CORE)", "TKSfw installed v" in ctx and "Layer CORE" in ctx, ctx[:400])
         tI = next(json.load(open(os.path.join(ip, ".agents", "workarea", ".hook-state", "sessions", f)))["token"] for f in os.listdir(os.path.join(ip, ".agents", "workarea", ".hook-state", "sessions")))
         open(os.path.join(ip, ".agents", "workarea", f"changes.{tI}.yaml"), "w").write(
-            f"- Chng0001:\n    AuthorAgent: main\n    Model: m\n    Timestamp: \"2099-01-01 00:00:00\"\n    OwnerSessionId: {tI}\n    OwnerSessionUserName: carlos\n    Layer: METHOD\n    Title: \"TKSfw installed\"\n    Description: |-\n      x\n    Files: |-\n      - .agents/.tksfw.json\n    Remarks: |-\n      x\n")
+            f"- Chng0001:\n    AuthorAgent: main\n    Model: m\n    Timestamp: \"2099-01-01 00:00:00\"\n    OwnerSessionId: {tI}\n    OwnerSessionUserName: carlos\n    Layer: METHOD\n    Title: \"TKSfw installed\"\n    Description: |-\n      x\n    StateBefore: |-\n      x\n    StateAfter: |-\n      y\n    Remarks: |-\n      x\n")
         r = run([PY, os.path.join(plug, "hooks", "inject_state.py")], cwd=ip, env=kenv, inp=json.dumps({"session_id": "SI", "turn_id": "i2", "source": "resume", "cwd": ip}))
         ctx = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"] if r.stdout.strip() else ""
-        check("install line disappears once a METHOD-layer change is logged", "not yet recorded" not in ctx, ctx[:300])
+        check("install line disappears once a CORE-layer change is logged — a legacy `Layer: METHOD` entry counts (3.6.0 alias)", "not yet recorded" not in ctx, ctx[:300])
+        vpy = os.path.join(plug, "skills", "yaml-log-entry", "assets", "validate_yaml_log.py")
+        shard = os.path.join(ip, ".agents", "workarea", f"changes.{tI}.yaml")
+        r = run([PY, vpy, shard], cwd=ip, env=kenv)
+        check("validator accepts legacy Layer: METHOD in an existing ledger", r.returncode == 0, r.stdout + r.stderr)
+        txt = open(shard).read()
+        open(shard, "w").write(txt.replace("Layer: METHOD", "Layer: CORE"))
+        r = run([PY, vpy, shard], cwd=ip, env=kenv)
+        check("validator accepts Layer: CORE", r.returncode == 0, r.stdout + r.stderr)
+        open(shard, "w").write(txt.replace("Layer: METHOD", "Layer: KERNEL"))
+        r = run([PY, vpy, shard], cwd=ip, env=kenv)
+        check("validator rejects an unknown Layer and names the enum with the alias note", r.returncode != 0 and "['ARCHETYPE', 'CORE', 'PROJECT']" in (r.stdout + r.stderr) and "legacy METHOD" in (r.stdout + r.stderr), r.stdout + r.stderr)
+        open(shard, "w").write(txt)
         r = run([PY, ks, "project", "update", ip, "--force"], cwd=tmp, env=kenv)      # the test session above is still "active"
         man = json.load(open(os.path.join(ip, ".agents", ".tksfw.json")))
         check("project update appends installs[1] = update and says 'Recorded: update of v…'", len(man["installs"]) == 2 and man["installs"][1]["action"] == "update" and "Recorded: update of v" in r.stdout, r.stdout[-300:])
@@ -1481,25 +1493,26 @@ def main():
         open(os.path.join(lp, "KS_SPEC.md"), "w").write("# ACME landing zone review\n\nspec\n")
         r = run([PY, L_HOOK, "resolve", "--json"], cwd=lp, env=kenv)
         d = json.loads(r.stdout)
-        check("layers: convention resolves L3 + L4 with titles (frontmatter / first heading) and status new",
-              r.returncode == 0 and d["tier"] == "convention" and [e["layer"] for e in d["layers"]] == ["l3", "l4"]
+        check("layers: convention resolves archetype + spec with titles (frontmatter / first heading) and status new",
+              r.returncode == 0 and d["tier"] == "convention" and [e["layer"] for e in d["layers"]] == ["archetype", "spec"]
+              and [e["ledger_layer"] for e in d["layers"]] == ["ARCHETYPE", "PROJECT"]
               and d["layers"][0]["title"] == "Engagement archetype" and d["layers"][1]["title"] == "ACME landing zone review"
               and all(e["journal_status"] == "new" and e["source"] == "convention" and len(e["hash"]) == 64 for e in d["layers"]) and d["warnings"] == [], r.stdout[:600])
         t1 = lstart("L1")
         b1 = lblock(t1)
         check("SessionStart injects the layers block on a fresh project (no STATE yet), marked, with both rows as new",
-              "| L3 | `KS_PROJECT.md` | new, not yet journaled |" in b1 and "| L4 | `KS_SPEC.md` | new, not yet journaled |" in b1
-              and "Read L3 then L4 in full" in b1 and "ks-start" in b1, t1[:800])
+              "| Archetype | `KS_PROJECT.md` | new, not yet journaled |" in b1 and "| Spec | `KS_SPEC.md` | new, not yet journaled |" in b1
+              and "Read Archetype then Spec in full" in b1 and "Spec overrides Archetype; neither overrides AGENTS.md (Core)" in b1 and "ks-start" in b1, t1[:800])
         check("layers block stays within its 600-byte cap", 0 < len(b1.encode()) <= 600, str(len(b1.encode())))
         t2 = lstart("L2")
-        check("second start: statuses unchanged (hashes journaled by the hook)", "| L3 | `KS_PROJECT.md` | unchanged |" in lblock(t2) and "| L4 | `KS_SPEC.md` | unchanged |" in lblock(t2), lblock(t2))
+        check("second start: statuses unchanged (hashes journaled by the hook)", "| Archetype | `KS_PROJECT.md` | unchanged |" in lblock(t2) and "| Spec | `KS_SPEC.md` | unchanged |" in lblock(t2), lblock(t2))
         check("state section is marked when present", ("<!-- tksfw:state -->" in t2) == ("Session token:" in t2), t2[:300])
         with open(os.path.join(lp, "KS_SPEC.md"), "a") as fh:
             fh.write("\nmore scope\n")
         t3 = lstart("L3", "compact")
-        check("after an edit the compaction re-injection reports L4 changed with the re-read hint", "| L4 | `KS_SPEC.md` | changed since last session |" in lblock(t3) and "Re-read changed layers" in lblock(t3) and "| L3 | `KS_PROJECT.md` | unchanged |" in lblock(t3), lblock(t3))
+        check("after an edit the compaction re-injection reports the spec changed with the re-read hint", "| Spec | `KS_SPEC.md` | changed since last session |" in lblock(t3) and "Re-read changed layers" in lblock(t3) and "| Archetype | `KS_PROJECT.md` | unchanged |" in lblock(t3), lblock(t3))
         t4 = lstart("L4")
-        check("…and the next start is unchanged again (block re-journaled)", "| L4 | `KS_SPEC.md` | unchanged |" in lblock(t4), lblock(t4))
+        check("…and the next start is unchanged again (block re-journaled)", "| Spec | `KS_SPEC.md` | unchanged |" in lblock(t4), lblock(t4))
         # watched + classified + reported
         run([PY, os.path.join(plug, "hooks", "track_edits.py")], cwd=lp, env=kenv, inp=json.dumps({"session_id": "L4", "turn_id": "l2", "hook_event_name": "PostToolUse", "tool_name": "Write", "cwd": lp, "tool_input": {"file_path": os.path.join(lp, "KS_SPEC.md")}}))
         with open(os.path.join(lp, "KS_SPEC.md"), "a") as fh:
@@ -1507,15 +1520,15 @@ def main():
         r = run([PY, os.path.join(plug, "hooks", "track_edits.py")], cwd=lp, env=kenv, inp=json.dumps({"session_id": "L4", "turn_id": "l2", "hook_event_name": "PostToolUse", "tool_name": "Write", "cwd": lp, "tool_input": {"file_path": os.path.join(lp, "KS_SPEC.md")}}))
         jl = [json.loads(l) for l in open(os.path.join(host_state(lp), "journal.jsonl")) if l.strip()]
         cls = [c for e in jl for c in e.get("changed", []) if c["path"] == "KS_SPEC.md"]
-        check("PostToolUse journals the L4 edit as class layer:l4, attributed own", cls and cls[-1]["class"] == "layer:l4" and cls[-1]["attrib"] == "own", str(cls[-1:]))
+        check("PostToolUse journals the spec edit as class layer:spec, attributed own", cls and cls[-1]["class"] == "layer:spec" and cls[-1]["attrib"] == "own", str(cls[-1:]))
         r = run([PY, os.path.join(plug, "hooks", "check_ledgers_on_stop.py")], cwd=lp, env=kenv, inp=json.dumps({"session_id": "L4", "turn_id": "l2", "cwd": lp}))
-        check("Stop hook reminds about the un-logged layer edit with the ARCHETYPE/PROJECT hint", "Project layer edits without a later `changes.yaml` entry" in r.stdout and "KS_SPEC.md" in r.stdout and "PROJECT for L4" in r.stdout, r.stdout[:400])
+        check("Stop hook reminds about the un-logged layer edit with the ARCHETYPE/PROJECT hint", "Project layer edits without a later `changes.yaml` entry" in r.stdout and "KS_SPEC.md" in r.stdout and "PROJECT for KS_SPEC.md" in r.stdout, r.stdout[:400])
         r = run([PY, os.path.join(plug, "hooks", "refresh_state.py"), "--print"], cwd=lp, env=kenv)
         check("STATE.md lists the layer edit under un-logged edits", "layer: KS_SPEC.md" in r.stdout, r.stdout[-600:])
         # config tier: pin, missing, L4 alone, clear; ks verbs; update keeps the stanza
-        r = run([PY, ks, "layers", "pin", "--l4", "docs/brief.md"], cwd=lp, env=kenv)
+        r = run([PY, ks, "layers", "pin", "--spec", "docs/brief.md"], cwd=lp, env=kenv)
         man = json.load(open(os.path.join(lp, ".agents", ".tksfw.json")))
-        check("ks layers pin writes the manifest stanza and prints the effect line", r.returncode == 0 and man.get("layers") == {"l4": "docs/brief.md"} and "Layer: METHOD" in r.stdout, r.stdout + r.stderr)
+        check("ks layers pin writes the manifest stanza (key spec) and prints the effect line", r.returncode == 0 and man.get("layers") == {"spec": "docs/brief.md"} and "Layer: CORE" in r.stdout, r.stdout + r.stderr)
         r = run([PY, ks, "layers", "resolve", "--json"], cwd=lp, env=kenv)
         d = json.loads(r.stdout)
         check("declared but missing L4 → exit 4, status missing, source config; L3 still by convention",
@@ -1526,24 +1539,42 @@ def main():
         open(os.path.join(lp, "docs", "brief.md"), "w").write("# Brief\n")
         r = run([PY, ks, "layers", "resolve"], cwd=lp, env=kenv)
         check("declared L4 found → exit 0, tier config in the human view", r.returncode == 0 and "docs/brief.md  [config]" in r.stdout, r.stdout)
-        r = run([PY, ks, "layers", "resolve", "--l4", "KS_SPEC.md", "--json"], cwd=lp, env=kenv)
+        r = run([PY, ks, "layers", "resolve", "--spec", "KS_SPEC.md", "--json"], cwd=lp, env=kenv)
         check("arguments (tier 1) win over the config for the key they name", json.loads(r.stdout)["layers"][1]["path"] == "KS_SPEC.md" and json.loads(r.stdout)["layers"][1]["source"] == "args" and json.loads(r.stdout)["tier"] == "args", r.stdout[:400])
-        r = run([PY, ks, "layers", "pin", "--l3", "../outside.md"], cwd=lp, env=kenv)
+        r = run([PY, ks, "layers", "pin", "--archetype", "../outside.md"], cwd=lp, env=kenv)
         check("pin refuses a path outside the project", r.returncode != 0 and "project-relative" in r.stderr, r.stderr)
         r = run([PY, os.path.join(plug, "skills", "tksfw-init", "assets", "new_project.py"), lp, "--update", "--no-sync"], cwd=tmp, env=kenv)
         man = json.load(open(os.path.join(lp, ".agents", ".tksfw.json")))
-        check("new_project --update preserves the layers stanza", r.returncode == 0 and man.get("layers") == {"l4": "docs/brief.md"}, r.stdout[-300:] + str(man.get("layers")))
+        check("new_project --update preserves the layers stanza", r.returncode == 0 and man.get("layers") == {"spec": "docs/brief.md"}, r.stdout[-300:] + str(man.get("layers")))
         r = run([PY, ks, "project", "status"], cwd=lp, env=kenv)
-        check("ks project status prints the layers line", "layers  : L3 KS_PROJECT.md" in r.stdout and "L4 docs/brief.md" in r.stdout, r.stdout)
+        check("ks project status prints the layers line (CORE first, names)", "layers  : CORE AGENTS.md · ARCHETYPE KS_PROJECT.md" in r.stdout and "SPEC docs/brief.md" in r.stdout, r.stdout)
+        # 3.6.0 — legacy manifest keys l3/l4 and flags --l3/--l4 keep working; pin replaces the legacy key
+        man["layers"] = {"l4": "docs/brief.md"}
+        json.dump(man, open(os.path.join(lp, ".agents", ".tksfw.json"), "w"), indent=2)
+        r = run([PY, ks, "layers", "resolve", "--json"], cwd=lp, env=kenv)
+        d = json.loads(r.stdout)
+        check("legacy manifest key l4 still resolves as the spec (source config)", r.returncode == 0 and d["layers"][1]["path"] == "docs/brief.md" and d["layers"][1]["source"] == "config" and d["layers"][1]["layer"] == "spec", r.stdout[:400])
+        r = run([PY, ks, "layers", "resolve", "--l4", "KS_SPEC.md", "--json"], cwd=lp, env=kenv)
+        check("legacy flag --l4 still accepted", json.loads(r.stdout)["layers"][1]["path"] == "KS_SPEC.md" and json.loads(r.stdout)["layers"][1]["source"] == "args", r.stdout[:300])
+        r = run([PY, ks, "layers", "pin", "--spec", "docs/brief.md"], cwd=lp, env=kenv)
+        man = json.load(open(os.path.join(lp, ".agents", ".tksfw.json")))
+        check("pin --spec replaces a legacy l4 key instead of duplicating it", man.get("layers") == {"spec": "docs/brief.md"}, str(man.get("layers")))
+        r = run([PY, os.path.join(plug, "hooks", "track_edits.py")], cwd=lp, env=kenv, inp=json.dumps({"session_id": "L4", "turn_id": "l3", "hook_event_name": "PostToolUse", "tool_name": "Write", "cwd": lp, "tool_input": {"file_path": os.path.join(lp, "docs", "brief.md")}}))
+        with open(os.path.join(lp, "docs", "brief.md"), "a") as fh:
+            fh.write("x\n")
+        run([PY, os.path.join(plug, "hooks", "track_edits.py")], cwd=lp, env=kenv, inp=json.dumps({"session_id": "L4", "turn_id": "l3", "hook_event_name": "PostToolUse", "tool_name": "Write", "cwd": lp, "tool_input": {"file_path": os.path.join(lp, "docs", "brief.md")}}))
+        jl = [json.loads(l) for l in open(os.path.join(host_state(lp), "journal.jsonl")) if l.strip()]
+        cls = [c for e in jl for c in e.get("changed", []) if c["path"] == "docs/brief.md"]
+        check("a pinned spec path is watched as layer:spec", cls and cls[-1]["class"] == "layer:spec", str(cls[-1:]))
         r = run([PY, ks, "layers", "pin", "--clear"], cwd=lp, env=kenv)
         os.remove(os.path.join(lp, "KS_PROJECT.md"))
         r = run([PY, ks, "layers", "resolve", "--json"], cwd=lp, env=kenv)
         d = json.loads(r.stdout)
-        check("after --clear and without L3: L4 alone by convention is valid (exit 0, one row)", r.returncode == 0 and "layers" not in json.load(open(os.path.join(lp, ".agents", ".tksfw.json"))) and [e["layer"] for e in d["layers"]] == ["l4"], r.stdout[:300])
-        check("section for L4 alone says Read L4", "Read L4 in full" in run([PY, L_HOOK, "section"], cwd=lp, env=kenv).stdout)
+        check("after --clear and without an archetype: the spec alone by convention is valid (exit 0, one row)", r.returncode == 0 and "layers" not in json.load(open(os.path.join(lp, ".agents", ".tksfw.json"))) and [e["layer"] for e in d["layers"]] == ["spec"], r.stdout[:300])
+        check("section for the spec alone says Read Spec", "Read Spec in full" in run([PY, L_HOOK, "section"], cwd=lp, env=kenv).stdout)
         open(os.path.join(lp, "KS_PROJECT.md"), "w").write("---\nks_layer: spec\n---\n# Wrong marker\n")
         r = run([PY, ks, "layers", "resolve", "--json"], cwd=lp, env=kenv)
-        check("frontmatter ks_layer mismatch is a warning, not a failure", r.returncode == 0 and any("ks_layer='spec'" in w and "L3" in w for w in json.loads(r.stdout)["warnings"]), r.stdout[-300:])
+        check("frontmatter ks_layer mismatch is a warning, not a failure", r.returncode == 0 and any("ks_layer='spec'" in w and "Archetype" in w for w in json.loads(r.stdout)["warnings"]), r.stdout[-300:])
         r = run([PY, ks, "layers", "journal"], cwd=lp, env=kenv)
         check("ks layers journal records the hashes", r.returncode == 0 and "layers journaled: KS_PROJECT.md, KS_SPEC.md" in r.stdout and os.path.isfile(os.path.join(host_state(lp), "layers.json")), r.stdout + r.stderr)
         # skill, prompts, kernel
@@ -1570,9 +1601,10 @@ def main():
               not os.path.exists(os.path.join(stale, "ks-start.md")) and os.path.exists(os.path.join(stale, "edited.md"))
               and "removed (retired by the template, pristine): 1" in r.stdout and "retired but edited locally" in r.stdout, r.stdout[-500:])
         agents_md = open(os.path.join(REPO, "template", "AGENTS.md"), encoding="utf-8").read()
-        check("AGENTS.md: Project Layers section, precedence rule, no legacy layer file names, kernel < 19,000 B",
-              "#### Project Layers (L3 / L4)" in agents_md and "L4 overrides L3" in agents_md and "neither overrides this file or the method" in agents_md
-              and "`KS_PROJECT.md` (L3) + `KS_SPEC.md` (L4)" in agents_md and "_project-archetype.md" not in agents_md and "_project.md" not in agents_md
+        check("AGENTS.md: Instruction Layers section, named model, precedence rule, no numbers or METHOD left, kernel < 19,000 B",
+              "#### Instruction Layers" in agents_md and "**CORE** = this file" in agents_md and "Spec overrides archetype" in agents_md and "neither overrides this file or the method" in agents_md
+              and "`KS_PROJECT.md` (ARCHETYPE) + `KS_SPEC.md` (PROJECT spec)" in agents_md and "_project-archetype.md" not in agents_md and "_project.md" not in agents_md
+              and not re.search(r"\bL[1-4]\b", agents_md) and "METHOD" not in agents_md and "(CORE | ARCHETYPE | PROJECT)" in agents_md
               and len(agents_md.encode()) < 19000, str(len(agents_md.encode())))
 
     # 6 — committed plugin copy is current

@@ -7,7 +7,7 @@
     ks project reset [--archive [--label L]] [--keep-agents] [--registry] [--dry-run] [--yes] [--force]
     ks routing list | show | check | resolve <agent> | use <table> | use --clear
     ks hil show | set [--impact L] [--reversibility L] [--logic and|or] [--mode enforce|advisory]
-    ks layers resolve [--l3 P] [--l4 P] [--json] | pin --l3 P | --l4 P | --clear | journal | section
+    ks layers resolve [--archetype P] [--spec P] [--json] | pin --archetype P | --spec P | --clear | journal | section
     ks ledger check | find <id> [--refs] [--json] | digest [--task T] [--agent A] [--json]
               | export all|<kinds> [--out F] [--archive] [--csv DIR]
               | archive-plan [--dry-run] | archive <ledger|all> --before YYYY-MM-DD [--dry-run]
@@ -482,7 +482,7 @@ def cmd_project(home, args):
         lay = run([PY, os.path.join(proj.hooks, "layers.py"), "resolve", "--json"], cwd=proj.root, env=proj.env(), capture=True)
         try:
             L = json.loads(lay.stdout).get("layers", [])
-            print("layers  : " + (", ".join(f"{e['layer'].upper()} {e['path']} ({e['journal_status']})" for e in L) if L else "none (KS_PROJECT.md / KS_SPEC.md or `ks layers pin`)"))
+            print("layers  : CORE AGENTS.md" + (" · " + " · ".join(f"{e['layer'].upper()} {e['path']} ({e['journal_status']})" for e in L) if L else " · no project layers (KS_PROJECT.md / KS_SPEC.md or `ks layers pin`)"))
         except Exception:
             pass
         state = os.path.join(proj.workarea, "STATE.md")
@@ -856,7 +856,7 @@ def cmd_routing(home, args):
             else:
                 lines.insert(0, ins)
             open(path, "w", encoding="utf-8").write("".join(lines))
-            print(f"routing pinned to [routing.{table}] — log it in changes.yaml (Layer: METHOD)")
+            print(f"routing pinned to [routing.{table}] — log it in changes.yaml (Layer: CORE)")
             apply_main_model(proj)
         rc = run([PY, rm, "--check"], cwd=proj.root, env=proj.env()).returncode
         if rc == 0:
@@ -927,18 +927,18 @@ def cmd_hil(home, args):
 
 
 def cmd_layers(home, args):
-    """L3/L4 project layers (2.2.0): one resolver (hooks/layers.py) for the SessionStart block, the
+    """Project layers ARCHETYPE / SPEC (2.2.0; names since 3.6.0): one resolver (hooks/layers.py) for the SessionStart block, the
     ks-start skill and this verb. Exit codes: 0 resolved, 3 nothing resolved, 4 declared but missing."""
     sub = args[0] if args else "resolve"
     proj = Project(home)
     script = os.path.join(proj.hooks, "layers.py")
     if sub not in ("resolve", "pin", "journal", "section"):
-        die("usage: ks layers resolve [--l3 P] [--l4 P] [--json] | pin --l3 P | --l4 P | --clear | journal | section")
+        die("usage: ks layers resolve [--archetype P] [--spec P] [--json] | pin --archetype P | --spec P | --clear | journal | section")
     if sub == "pin":
         refuse_if_busy(proj, "layers pin", args)
     rc = run([PY, script, *args], cwd=proj.root, env=proj.env()).returncode
     if sub == "pin" and rc == 0:
-        print("→ log it in changes.yaml (Layer: METHOD)")
+        print("→ log it in changes.yaml (Layer: CORE)")
         effect("prompt")
     sys.exit(rc)
 
@@ -1267,7 +1267,7 @@ to the next session.
                                     unless --yes; refuses while sessions are active.
 
 Every init/update is recorded in .agents/.tksfw.json (`installs`); the first session afterwards logs it in
-changes.yaml (Layer METHOD) — nothing to write by hand.
+changes.yaml (Layer CORE) — nothing to write by hand.
 """,
     "routing": """ks routing — model routing tables in .agents/config.toml ([routing.<table>], [tiers], [roles])
 
@@ -1311,11 +1311,19 @@ Levels: impact VERY LOW|LOW|MEDIUM|HIGH|VERY HIGH; reversibility TRIVIAL|EASY|ME
 Default: Impact >= HIGH OR Reversibility >= HARD, enforce — a new decision at/above it must carry
 ConfirmationType OPERATOR; a Worker must leave it OPEN. `advisory` warns instead of rejecting.
 """,
-    "layers": """ks layers — the project layers: L3 archetype (KS_PROJECT.md) and L4 project spec (KS_SPEC.md)
+    "layers": """ks layers — the project layers: ARCHETYPE (KS_PROJECT.md) and SPEC (KS_SPEC.md)
 
-  ks layers resolve [--l3 P] [--l4 P] [--json]   which files resolve, from where (argument, pin, convention)
+The layer model (3.6.0, ADR 0016) has names, not numbers: CORE = AGENTS.md (principles, orchestration
+policy, agent behaviour, execution guidelines, acceptance criteria) · ARCHETYPE = KS_PROJECT.md (what kind
+of project, how such projects run) · PROJECT SPEC = KS_SPEC.md (what this project must deliver). Spec
+overrides Archetype; neither overrides Core. changes.yaml Layer: CORE | ARCHETYPE | PROJECT.
+
+  ks layers resolve [--archetype P] [--spec P] [--json]
+                                                 which files resolve, from where (argument, pin, convention)
                                                  and their status: new | unchanged | changed | missing.
-  ks layers pin --l3 P | --l4 P | --clear        declare non-conventional paths in .agents/.tksfw.json.
+  ks layers pin --archetype P | --spec P | --clear
+                                                 declare non-conventional paths in .agents/.tksfw.json
+                                                 (keys archetype/spec; pre-3.6.0 keys l3/l4 and flags --l3/--l4 still read).
   ks layers journal                              record the current hashes (baseline for the next start).
   ks layers section                              the pointer block SessionStart injects.
 

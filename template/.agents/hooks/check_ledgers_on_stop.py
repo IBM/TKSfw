@@ -94,12 +94,12 @@ def main():
                      + (" …" if len(paths["deliverable"]) > 6 else ""))
     if flags["framework"]:
         items.append("• Framework/method edits without a later `changes.yaml` entry "
-                     "(Layer: METHOD or ARCHETYPE): "
+                     "(Layer: CORE or ARCHETYPE): "
                      + ", ".join(paths["framework"][:6])
                      + (" …" if len(paths["framework"]) > 6 else ""))
     if flags.get("layer"):
         items.append("• Project layer edits without a later `changes.yaml` entry "
-                     "(Layer: ARCHETYPE for L3 / PROJECT for L4): "
+                     "(Layer: ARCHETYPE for KS_PROJECT.md / PROJECT for KS_SPEC.md): "
                      + ", ".join(paths["layer"][:6])
                      + (" …" if len(paths["layer"]) > 6 else ""))
     if flags["handoff"]:
