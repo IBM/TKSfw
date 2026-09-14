@@ -2,6 +2,11 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [3.7.1] — 2026-09-14
+
+### Fixed
+- Every `ks` command now renders through the 3.7.0 conventions — 3.7.0 had left the commands that delegate to framework scripts printing the scripts' own text. `new_project.py` gained `--json` for init/update/enable/disable; `ks project init|update` render a header, an INIT/UPDATE block (installed / refreshed / kept / removed / retired / unchanged, with the merge hint on kept files), MAIN SESSION MODEL, and NEXT STEPS (init) or the restart effect (update). `ks project drift` (DRIFT none/yes with per-class rows), `enable|disable` (✓ ARMED / ! DISARMED), `reset` (RESET PLAN block), `routing show` (ROUTING line + tier/model/effort/roles table, SESSION line with `--session`), `routing check|resolve` (one ✓ line: agent → role → tier → model), `hil show|set`, `layers resolve` (CORE/ARCHETYPE/SPEC block with source and title), `layers pin|journal`, `ledger check` (one finding per file, RESULT PASS/FAIL), `ledger find|digest|export|archive*`, `harness sync` (target/result/path table) and `retrust`, `self version|install|setup`, `operator set|show` restyled. Child-script output that is passed through gets its first line marked by exit code and `code` spans in cyan; `--plain` and `--json` stay raw. 2 new tests (332 total).
+
 ## [3.7.0] — 2026-09-14
 
 ### Changed

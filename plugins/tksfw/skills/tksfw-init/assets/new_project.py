@@ -118,7 +118,7 @@ def main():
     ap.add_argument("--disable", action="store_true", help="set enabled=false in .agents/.tksfw.json (disarm)")
     ap.add_argument("--enable", action="store_true", help="set enabled=true in .agents/.tksfw.json (re-arm)")
     ap.add_argument("--drift", action="store_true", help="report the project's framework files against this version; exit 1 on drift; writes nothing")
-    ap.add_argument("--json", action="store_true", help="with --drift: machine-readable output")
+    ap.add_argument("--json", action="store_true", help="machine-readable output (drift report, or the init/update/enable/disable result) — `ks` renders it")
     ap.add_argument("--set-operator", metavar="NAME", help="write the per-user config ~/.config/tksfw/user.toml (OwnerSessionUserName)")
     ap.add_argument("--show-operator", action="store_true", help="print the resolved operator name and its source; exit 1 when unset")
     a = ap.parse_args()
@@ -146,6 +146,9 @@ def main():
         with open(os.path.join(target, MANIFEST_REL), "w", encoding="utf-8") as fh:
             json.dump(prev, fh, indent=2, sort_keys=True)
             fh.write("\n")
+        if a.json:
+            print(json.dumps({"action": "enable" if prev["enabled"] else "disable", "root": target, "enabled": prev["enabled"], "version": prev.get("version")}))
+            return
         print(f"TKSfw {'ARMED' if prev['enabled'] else 'DISARMED'} in {target} (.agents/.tksfw.json enabled={str(prev['enabled']).lower()})")
         return
     if a.drift:
@@ -261,6 +264,16 @@ def main():
         json.dump(manifest, fh, indent=2, sort_keys=True)
         fh.write("\n")
 
+    if a.json:
+        print(json.dumps({"action": "update" if prev else "init", "version": manifest["version"], "previous": (prev or {}).get("version"),
+                          "root": target, "mode": "plugin" if plugin_mode else "full", "migrated_config": bool(migrated_cfg),
+                          "installed": installed, "refreshed": refreshed, "kept": kept, "removed": removed, "retired_kept": retired_kept,
+                          "unchanged": len(unchanged)}, indent=2))
+        if not plugin_mode and not a.no_sync:
+            sync = os.path.join(target, ".agents", "hooks", "sync_harness.py")
+            if os.path.isfile(sync):
+                subprocess.run([sys.executable, sync], cwd=target, check=False, capture_output=True)
+        return
     print(f"TKSfw v{manifest['version']} → {target}  ({'plugin' if plugin_mode else 'full'} mode)")
     if migrated_cfg:
         print("  renamed: .agents/models.toml → .agents/config.toml (content kept; routing pin, HIL and limits survive)")

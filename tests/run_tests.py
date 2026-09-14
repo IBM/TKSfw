@@ -722,7 +722,7 @@ def main():
         kenv = penv | {"TKSFW_CONFIG_DIR": os.path.join(tmp, "kscfg"), "HOME": khome, "TKSFW_USER": "carlos"}
         os.makedirs(khome, exist_ok=True)
         r = run([PY, ks, "self", "version"], env=kenv)
-        check("ks self version (plugin home via script location)", r.returncode == 0 and "plugin at" in r.stdout and open(os.path.join(REPO, "VERSION")).read().strip() in r.stdout, r.stdout + r.stderr)
+        check("ks self version (plugin home via script location)", r.returncode == 0 and "plugin home at" in r.stdout and open(os.path.join(REPO, "VERSION")).read().strip() in r.stdout, r.stdout + r.stderr)
         r = run([PY, ks, "self", "install", "--bin-dir", os.path.join(tmp, "ksbin")], env=kenv)
         check("ks self install: symlink + home recorded", r.returncode == 0 and os.path.islink(os.path.join(tmp, "ksbin", "ks"))
               and 'home = "' in open(os.path.join(tmp, "kscfg", "user.toml")).read(), r.stdout + r.stderr)
@@ -767,7 +767,9 @@ def main():
         r = run([PY, ks, "project", "status", "--ascii"], cwd=proj, env=kenv)
         check("--ascii replaces the marks", ("ON" in r.stdout or "OK" in r.stdout) and "✓" not in r.stdout and "●" not in r.stdout, r.stdout[:400])
         r = run([PY, ks, "project", "drift"], cwd=kproj, env=kenv)
-        check("ks project drift: fresh project has none", r.returncode == 0 and "no drift" in r.stdout, r.stdout + r.stderr)
+        check("ks project drift: fresh project has none", r.returncode == 0 and re.search(r"DRIFT\s+none", r.stdout) and "unchanged" in r.stdout, r.stdout + r.stderr)
+        rj = run([PY, ks, "project", "drift", "--json"], cwd=proj, env=kenv)
+        check("ks project drift --json still raw", json.loads(rj.stdout)["drift"] is False or json.loads(rj.stdout)["version_project"] is not None, rj.stdout[:200])
         open(os.path.join(kproj, "AGENTS.md"), "a").write("\n# local\n")
         r = run([PY, ks, "project", "drift", "--json"], cwd=kproj, env=kenv)
         check("ks project drift --json reports the edited file", r.returncode == 1 and "AGENTS.md" in json.loads(r.stdout)["edited"], r.stdout[:200] + r.stderr)
@@ -777,14 +779,16 @@ def main():
         r = run([PY, ks, "routing", "use", "ibm-openai"], cwd=kproj, env=kenv)
         mt = open(os.path.join(kproj, ".agents", "config.toml")).read()
         r2 = run([PY, ks, "routing", "show"], cwd=kproj, env=kenv | {"CODEX_HOME": os.path.join(tmp, "nocodex")})
-        check("ks routing use pins `selected` and the hook honours it", r.returncode == 0 and 'selected = "ibm-openai"' in mt and "selected_by=selected" in r2.stdout, r.stdout + r2.stdout + r2.stderr)
+        check("ks routing use pins `selected` and the hook honours it", r.returncode == 0 and 'selected = "ibm-openai"' in mt and re.search(r"ROUTING\s+ibm-openai\s+via selected", r2.stdout), r.stdout + r2.stdout + r2.stderr)
         r = run([PY, ks, "routing", "use", "nope"], cwd=kproj, env=kenv)
         check("ks routing use refuses an unknown table", r.returncode != 0 and "no [routing.nope]" in r.stderr, r.stderr)
         r = run([PY, ks, "routing", "use", "--clear"], cwd=kproj, env=kenv)
         check("ks routing use --clear", r.returncode == 0 and not re.search(r"^selected\s*=", open(os.path.join(kproj, ".agents", "config.toml")).read(), re.M), r.stdout)
         r = run([PY, ks, "routing", "check"], cwd=kproj, env=kenv)
         r2 = run([PY, ks, "routing", "resolve", "sources-researcher"], cwd=kproj, env=kenv)
-        check("ks routing check/resolve", r.returncode == 0 and '"model": "claude-haiku-4-5"' in r2.stdout, r.stdout + r2.stdout)
+        check("ks routing check/resolve", r.returncode == 0 and "config.toml ok" in r.stdout and "claude-haiku-4-5" in r2.stdout and "tier research" in r2.stdout, r.stdout + r2.stdout)
+        r3 = run([PY, ks, "routing", "resolve", "sources-researcher", "--json"], cwd=kproj, env=kenv)
+        check("ks routing resolve --json stays raw JSON", '"model": "claude-haiku-4-5"' in r3.stdout, r3.stdout)
         # archives
         kwa = os.path.join(kproj, ".agents", "workarea")
         def ev(eid, task, ts, status):
@@ -875,7 +879,7 @@ def main():
         r = run([PY, ks, "dev", "test"], cwd=kproj, env=kenv)
         check("ks dev refuses to run from a plugin home", r.returncode != 0 and "checkout" in r.stderr, r.stderr)
         r = run([PY, os.path.join(REPO, "tools", "ks"), "self", "version"], env=kenv | {"TKSFW_HOME": REPO})
-        check("ks from the checkout reports repo home", "repo at" in r.stdout, r.stdout)
+        check("ks from the checkout reports repo home", "repo home at" in r.stdout, r.stdout)
 
         # 17 — live reconfiguration
         lproj = os.path.join(tmp, "live")
@@ -1190,8 +1194,8 @@ def main():
         ip = os.path.join(tmp, "instp")
         r = run([PY, ks, "project", "init", ip], cwd=tmp, env=kenv)
         check("post-init: 'Recorded: install of v…' and plugin-mode next steps (no re-trust, ks doctor)",
-              "Recorded: install of v" in r.stdout and "nothing to write by hand" in r.stdout and "Next steps" in r.stdout
-              and "nothing to re-trust for this project" in r.stdout and "Record the install/update" not in r.stdout, r.stdout)
+              re.search(r"INIT\s+3\.\d+\.\d+", r.stdout) and "recorded in .agents/.tksfw.json" in r.stdout and "nothing to write by hand" in r.stdout and "NEXT STEPS" in r.stdout
+              and "nothing to re-trust per project" in r.stdout and "Record the install/update" not in r.stdout, r.stdout)
         man = json.load(open(os.path.join(ip, ".agents", ".tksfw.json")))
         check("manifest installs[0] = init/plugin with operator and version", man["installs"][0]["action"] == "init" and man["installs"][0]["mode"] == "plugin"
               and man["installs"][0]["version"] == open(os.path.join(REPO, "VERSION")).read().strip() and man["installs"][0]["operator"], str(man.get("installs")))
@@ -1218,10 +1222,10 @@ def main():
         open(shard, "w").write(txt)
         r = run([PY, ks, "project", "update", ip, "--force"], cwd=tmp, env=kenv)      # the test session above is still "active"
         man = json.load(open(os.path.join(ip, ".agents", ".tksfw.json")))
-        check("project update appends installs[1] = update and says 'Recorded: update of v…'", len(man["installs"]) == 2 and man["installs"][1]["action"] == "update" and "Recorded: update of v" in r.stdout, r.stdout[-300:])
+        check("project update appends installs[1] = update and says 'Recorded: update of v…'", len(man["installs"]) == 2 and man["installs"][1]["action"] == "update" and re.search(r"UPDATE\s+3\.\d+\.\d+", r.stdout) and "recorded in .agents/.tksfw.json" in r.stdout, r.stdout[-300:])
         fp2 = os.path.join(tmp, "instfull")
         r = run([PY, ks, "project", "init", fp2, "--full"], cwd=tmp, env=kenv)
-        check("post-init in full mode: /hooks trust + retrust --ack steps", "type /hooks and trust them" in r.stdout and "ks harness retrust --ack" in r.stdout, r.stdout[-600:])
+        check("post-init in full mode: /hooks trust + retrust --ack steps", "/hooks and trust the project's hooks" in r.stdout and "ks harness retrust --ack" in r.stdout, r.stdout[-600:])
 
         # 24 — config.toml, routing tables, ks routing list, ks help
         cp3 = os.path.join(tmp, "cfg3")
@@ -1246,15 +1250,15 @@ def main():
         check("resolve under the pinned anthropic-cc table gives the 1M sonnet", "claude-sonnet-5[1m]" in r.stdout, r.stdout)
         run([PY, ks, "routing", "use", "ibm-openai-cc"], cwd=cp3, env=kenv)
         r = run([PY, ks, "routing", "resolve", "x-builder"], cwd=cp3, env=kenv)
-        check("ibm-openai-cc: 1M gpt-5.6-terra for Claude Code", '"gpt-5.6-terra[1m]"' in r.stdout, r.stdout)
+        check("ibm-openai-cc: 1M gpt-5.6-terra for Claude Code", "gpt-5.6-terra[1m]" in r.stdout and "tier build" in r.stdout, r.stdout)
         run([PY, ks, "routing", "use", "ibm-anthropic-cc"], cwd=cp3, env=kenv)
         # legacy file name: readers accept models.toml; update renames it and keeps the pin
         os.replace(os.path.join(cp3, ".agents", "config.toml"), os.path.join(cp3, ".agents", "models.toml"))
         r = run([PY, ks, "routing", "show"], cwd=cp3, env=kenv)
-        check("legacy .agents/models.toml is still read", "routing='ibm-anthropic-cc'" in r.stdout and "models.toml" in r.stdout, r.stdout)
+        check("legacy .agents/models.toml is still read", re.search(r"ROUTING\s+ibm-anthropic-cc", r.stdout) and "models.toml" in r.stdout, r.stdout)
         r = run([PY, ks, "project", "update", cp3, "--force"], cwd=tmp, env=kenv)
         check("ks project update renames models.toml → config.toml keeping the operator's content (pin survives)",
-              "renamed: .agents/models.toml → .agents/config.toml" in r.stdout and os.path.isfile(os.path.join(cp3, ".agents", "config.toml"))
+              re.search(r"renamed\s+\.agents/models\.toml → \.agents/config\.toml", r.stdout) and os.path.isfile(os.path.join(cp3, ".agents", "config.toml"))
               and not os.path.exists(os.path.join(cp3, ".agents", "models.toml")) and 'selected = "ibm-anthropic-cc"' in open(os.path.join(cp3, ".agents", "config.toml")).read(), r.stdout)
         r = run([PY, ks, "help"], cwd=cp3, env=kenv)
         r2 = run([PY, ks, "help", "routing"], cwd=cp3, env=kenv)
@@ -1365,7 +1369,7 @@ def main():
               "via session override — THIS SESSION ONLY" in r.stdout and r2.stdout.strip() == "", r.stdout[:300] + " || " + r2.stdout[:100])
         r = run([PY, ks, "routing", "show", "--session", ctok], cwd=sp, env=xenv)
         check("ks routing show --session <token>: override line first, then the table as that harness sees it",
-              r.stdout.startswith(f"session {ctok} (claude") and "override → [routing.ibm-openai-cc]" in r.stdout and "harness=claude  routing='ibm-openai-cc'  selected_by=session override" in r.stdout, r.stdout)
+              re.search(rf"SESSION\s+{ctok} claude", r.stdout) and "override ibm-openai-cc" in r.stdout and re.search(r"ROUTING\s+ibm-openai-cc\s+via session override .* harness claude", r.stdout), r.stdout)
         r = run([PY, os.path.join(plug, "hooks", "refresh_state.py"), "--print"], cwd=sp, env=cenv)
         # STATE.md Sessions section lists shards only; write one entry for C1 so the token appears
         open(os.path.join(sp, ".agents", "workarea", f"lessons.{ctok}.yaml"), "w").write(f"- Lssn0001:\n    AuthorAgent: main\n    Model: m\n    Timestamp: \"2026-09-10 09:00:00\"\n    OwnerSessionId: {ctok}\n    OwnerSessionUserName: carlos\n    Title: \"t\"\n    Description: |-\n      x\n    Remarks: |-\n      x\n")
@@ -1397,7 +1401,7 @@ def main():
         check("once defined, the spawn is allowed and the missing Claude mirror is rendered on the fly",
               hs["permissionDecision"] == "allow" and os.path.isfile(os.path.join(sp, ".claude", "agents", "report-builder.md")), r.stdout[:300])
         r = run([PY, ks, "routing", "resolve", "never-defined-builder"], cwd=sp, env=xenv)
-        check("ks routing resolve answers for an undefined name (informational, no existence check)", r.returncode == 0 and '"ok": true' in r.stdout, r.stdout)
+        check("ks routing resolve answers for an undefined name (informational, no existence check)", r.returncode == 0 and "never-defined-builder" in r.stdout and "tier build" in r.stdout, r.stdout)
         # 27 — 3.5.0: SessionEnd ends a session at once; harness detected for Claude SessionStart; sessions close
         sdir = os.path.join(sp, ".agents", "workarea", ".hook-state", "sessions")      # only C1 survives section 26
         c2env = dict(cenv); c2env["CLAUDE_PROJECT_DIR"] = sp
@@ -1616,7 +1620,7 @@ def main():
         r = run([PY, ks, "project", "update", lp, "--force"], cwd=tmp, env=kenv)
         check("ks project update removes retired pristine files and keeps edited ones (listed)",
               not os.path.exists(os.path.join(stale, "ks-start.md")) and os.path.exists(os.path.join(stale, "edited.md"))
-              and "removed (retired by the template, pristine): 1" in r.stdout and "retired but edited locally" in r.stdout, r.stdout[-500:])
+              and re.search(r"removed\s+1\s+", r.stdout) and re.search(r"retired\s+1\s+", r.stdout) and "delete by hand" in r.stdout, r.stdout[-500:])
         agents_md = open(os.path.join(REPO, "template", "AGENTS.md"), encoding="utf-8").read()
         check("AGENTS.md: Instruction Layers section, named model, precedence rule, no numbers or METHOD left, kernel < 19,000 B",
               "#### Instruction Layers" in agents_md and "**CORE** = this file" in agents_md and "Spec overrides archetype" in agents_md and "neither overrides this file or the method" in agents_md

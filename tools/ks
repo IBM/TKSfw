@@ -208,6 +208,21 @@ class UI:
 
 
 UI_FLAGS = ("--plain", "--no-color", "--color", "--ascii")
+
+
+def passthrough(r, mark_first=True, ok_kind="ok"):
+    """Print a child's captured output through the renderer: `code` spans cyan, the first stdout line marked
+    ✓/✗ by exit code (unless mark_first=False), stderr lines marked ✗. Returns the exit code."""
+    out = (r.stdout or "").rstrip("\n").splitlines()
+    err = (r.stderr or "").rstrip("\n").splitlines()
+    for i, line in enumerate(out):
+        if i == 0 and mark_first and line.strip() and not ui.plain:
+            print(ui.mark(ok_kind if r.returncode == 0 else "fail") + " " + ui.fmt(line))
+        else:
+            print(ui.fmt(line) if not ui.plain else line)
+    for line in err:
+        sys.stderr.write(((ui.mark("fail") + " ") if line.strip() and not ui.plain else "") + ui.fmt(line) + "\n")
+    return r.returncode
 ui = None                                                 # set in main() once the flags are known
 
 
@@ -545,6 +560,69 @@ def print_sessions(proj, home, section=True):
 
 
 # ----------------------------------------------------------------------------- commands
+def render_install(rep, home, rest, proj=None):
+    """`ks project init|update` result block: what changed, the main-session model, next steps / effect."""
+    root = rep["root"]
+    proj = proj or Project(home, root)
+    action = rep.get("action", "update")
+    ui.header(f"project {action}", project_name(proj), root)
+    prev = rep.get("previous")
+    ui.section(action, ui.bold(rep["version"]) + (ui.dim(f" (was {prev})") if prev and prev != rep["version"] else "") + ui.dim(f" {ui.sym('dot')} {rep['mode']} mode"))
+    def files(items):
+        items = list(items)
+        return ", ".join(items[:6]) + (ui.dim(f" … +{len(items) - 6}") if len(items) > 6 else "")
+    for key, label, st in (("installed", "installed", None), ("refreshed", "refreshed", None),
+                           ("kept", "kept", ("warn", "edited locally — merge by hand against template/")),
+                           ("removed", "removed", (None, ui.dim("retired by the template, pristine"))),
+                           ("retired_kept", "retired", ("warn", "edited locally — delete by hand"))):
+        items = rep.get(key) or []
+        if items:
+            ui.kv(label, f"{len(items):>3}  " + files(items), st)
+    ui.kv("unchanged", f"{rep.get('unchanged', 0):>3}")
+    if rep.get("migrated_config"):
+        ui.kv("renamed", ".agents/models.toml → .agents/config.toml", (None, ui.dim("content kept")))
+    ui.flush()
+    ui.hint("recorded in .agents/.tksfw.json " + ui.dim("— the first session logs it in changes.yaml (Layer CORE); nothing to write by hand"), indent=2)
+    ui.blank()
+    ui.section("main session model", ui.dim("judge tier of the active routing table"))
+    try:
+        apply_main_model(proj)
+    except SystemExit:
+        pass
+    ui.blank()
+    if action == "init":
+        ui.section("next steps")
+        steps = ["Launch Codex or Claude Code in this folder " + ui.dim("— Codex asks once to trust the project's .codex layer: accept")]
+        if rep["mode"] == "plugin":
+            steps.append("`ks doctor` here " + ui.dim("— 0 fail means ready; hooks run from the installed plugin, nothing to re-trust per project"))
+        else:
+            steps.append("In Codex, /hooks and trust the project's hooks, then `ks harness retrust --ack`; `ks doctor` " + ui.dim("— 0 fail means ready"))
+        steps.append("Optional: describe the project in KS_PROJECT.md " + ui.dim("(archetype)") + " and KS_SPEC.md " + ui.dim("(project spec)"))
+        steps.append("Start the run with the ks-start skill: Codex `$ks-start`, Claude Code `/tksfw:ks-start`")
+        for i, st in enumerate(steps, 1):
+            print(f"  {i}  " + ui.fmt(st))
+    else:
+        effect("session")
+        if rep.get("kept"):
+            ui.hint(f"review the {len(rep['kept'])} locally edited file(s) against template/ and merge by hand")
+
+
+def render_drift(rep, proj, home):
+    ui.header("project drift", project_name(proj), proj.root)
+    pv, iv = rep.get("version_project"), rep.get("version_installed")
+    ui.section("drift", (ui.c("none", "g") if not rep.get("drift") else ui.c("yes", "y")) + ui.dim(f" {ui.sym('dot')} project {pv} {ui.sym('dot')} installed {iv} {ui.sym('dot')} {'plugin' if rep.get('plugin_mode') else 'full'} mode"))
+    for key, label, st in (("outdated", "outdated", ("warn", "newer in the installed version — `ks project update` refreshes them")),
+                           ("edited", "edited", ("warn", "changed locally — kept by update; merge by hand")),
+                           ("missing", "missing", ("fail", "should exist — `ks project update` reinstalls them"))):
+        items = rep.get(key) or []
+        if items:
+            ui.kv(label, f"{len(items):>3}  " + ", ".join(items[:6]) + (ui.dim(f" … +{len(items) - 6}") if len(items) > 6 else ""), st)
+    ui.kv("unchanged", f"{len(rep.get('unchanged') or []):>3}")
+    if pv != iv:
+        ui.kv("version", f"{pv} → {iv}", ("warn", "`ks project update`"))
+    ui.flush()
+
+
 def cmd_status(home, rest):
     proj = Project(home)
     m = proj.manifest
@@ -622,7 +700,7 @@ def cmd_status(home, rest):
 def cmd_self(home, args):
     sub = args[0] if args else "version"
     if sub == "version":
-        print(f"ks / TKSfw {home.version}  ({home.kind} at {home.path}, via {home.how})")
+        print(ui.bold(f"ks {home.version}") + ui.dim(f" {ui.sym('dot')} TKSfw {ui.sym('dot')} {home.kind} home at {short_home(home.path)} (via {home.how})"))
     elif sub == "home":
         print(home.path)
     elif sub == "install":
@@ -644,11 +722,12 @@ def cmd_self(home, args):
                 lines.append(f'{k} = "{cfg[k]}"')
         open(USER_TOML, "w", encoding="utf-8").write("\n".join(lines) + "\n")
         comp = os.path.join(os.path.dirname(target), "ks-completion.sh")
-        print(f"installed: {link} → {target}\nhome recorded: {home.path} ({USER_TOML})")
+        print(ui.mark("ok") + " installed " + ui.ident(link) + f" {ui.sym('arrow')} {short_home(target)}")
+        print(ui.mark("ok") + " home recorded " + ui.ident(short_home(home.path)) + ui.dim(f" ({short_home(USER_TOML)})"))
         if os.path.isfile(comp):
-            print(f"completion: add `source {comp}` to ~/.zshrc or ~/.bashrc")
+            ui.hint(f"completion: add `source {short_home(comp)}` to ~/.zshrc or ~/.bashrc")
         if bin_dir not in os.environ.get("PATH", "").split(os.pathsep):
-            print(f"note: {bin_dir} is not on PATH")
+            ui.finding("warn", f"{short_home(bin_dir)} is not on PATH", indent=0)
     elif sub == "setup":
         cmd_setup(home, args[1:])
     else:
@@ -683,19 +762,20 @@ def cmd_setup(home, args):
             if name:
                 run([PY, home.new_project, "--set-operator", name], check=True)
         else:
-            print("operator not configured — pass --operator \"<name>\" (non-interactive)")
+            ui.finding("warn", "operator not configured", "`ks self setup --operator \"<name>\"` (non-interactive)", indent=0)
     else:
-        print(r.stdout.strip())
+        print(ui.mark("ok") + " " + r.stdout.strip())
     if "--no-stanza" not in args:
         boot = os.path.join(home.path, "plugin-src", "tksfw", "bootstrap") if home.kind == "repo" else os.path.join(home.path, "bootstrap")
         codex_home = os.environ.get("CODEX_HOME") or os.path.join(os.path.expanduser("~"), ".codex")
         for target, src in ((os.path.join(codex_home, "AGENTS.md"), "AGENTS.global.md"),
                             (os.path.join(os.path.expanduser("~"), ".claude", "CLAUDE.md"), "CLAUDE.global.md")):
-            print(f"bootstrap stanza → {target}: {append_stanza(target, os.path.join(boot, src))}")
+            res = append_stanza(target, os.path.join(boot, src))
+            ui.finding("ok" if res in ("appended", "already present") else "warn", "bootstrap stanza " + ui.ident(short_home(target)) + ui.dim(f"  {res}"), indent=0)
     comp = os.path.join(os.path.dirname(os.path.realpath(__file__)), "ks-completion.sh")
     if os.path.isfile(comp):
-        print(f"completion: add `source {comp}` to ~/.zshrc or ~/.bashrc")
-    print("\nnext: install the plugin in each harness if not done (docs/getting-started.md), then `ks doctor`")
+        ui.hint(f"completion: add `source {short_home(comp)}` to ~/.zshrc or ~/.bashrc")
+    ui.hint("next: install the plugin in each harness if not done (docs/getting-started.md), then `ks doctor`")
 
 
 def cmd_operator(home, args):
@@ -704,27 +784,27 @@ def cmd_operator(home, args):
     if args[0] == "set":
         if len(args) < 2:
             die("usage: ks operator set <name>")
-        rc = run([PY, home.new_project, "--set-operator", " ".join(a for a in args[1:] if a != "--force")]).returncode
+        r = run([PY, home.new_project, "--set-operator", " ".join(a for a in args[1:] if a != "--force")], capture=True)
+        rc = passthrough(r)
         if rc == 0:
             effect("prompt")
         sys.exit(rc)
-    sys.exit(run([PY, home.new_project, "--show-operator"]).returncode)
+    r = run([PY, home.new_project, "--show-operator"], capture=True)
+    sys.exit(passthrough(r, mark_first=False) if ui.plain else passthrough(r))
 
 
 def cmd_project(home, args):
     sub = args[0] if args else "status"
     rest = args[1:]
     if sub == "init":
-        target = next((a for a in rest if not a.startswith("--")), os.getcwd())
-        cmd = [PY, home.new_project, target] + ([] if "--full" in rest else ["--plugin-mode"])
-        rc = run(cmd).returncode
-        if rc == 0:
-            try:
-                print("Main session model (judge tier of the active routing table):")
-                apply_main_model(Project(home, os.path.abspath(target)))
-            except SystemExit:
-                pass
-        sys.exit(rc)
+        target = os.path.abspath(next((a for a in rest if not a.startswith("--")), os.getcwd()))
+        cmd = [PY, home.new_project, target] + ([] if "--full" in rest else ["--plugin-mode"]) + ["--json"]
+        r = run(cmd, capture=True)
+        if r.returncode:
+            sys.stdout.write(r.stdout); sys.stderr.write(r.stderr)
+            sys.exit(r.returncode)
+        render_install(json.loads(r.stdout), home, rest)
+        sys.exit(0)
     if sub == "sessions":
         proj = Project(home)
         act = next((a for a in rest if not a.startswith("--")), "list")
@@ -752,16 +832,36 @@ def cmd_project(home, args):
         proj = Project(home, target)
         if sub == "update":
             refuse_if_busy(proj, "project update", rest, sessions=True)
-        cmd = [PY, home.new_project, proj.root, "--" + sub] + (["--json"] if "--json" in rest else [])
-        rc = run(cmd).returncode
-        if rc == 0 and sub == "update":
-            apply_main_model(proj)
-            effect("session")
-        elif rc == 0 and sub in ("enable", "disable"):
-            effect("prompt" if sub == "enable" else "files")
-            if sub == "disable":
-                print("→ hooks are inert here from now on (the model is not told — it has no hook to tell it); `ks project enable` re-arms")
-        sys.exit(rc)
+        r = run([PY, home.new_project, proj.root, "--" + sub, "--json"], capture=True)
+        if sub == "drift":
+            try:
+                rep = json.loads(r.stdout)
+            except Exception:
+                sys.stdout.write(r.stdout); sys.stderr.write(r.stderr); sys.exit(r.returncode)
+            if "--json" in rest:
+                print(json.dumps(rep, indent=2))
+                sys.exit(r.returncode)
+            render_drift(rep, proj, home)
+            sys.exit(r.returncode)
+        if r.returncode:
+            sys.stdout.write(r.stdout); sys.stderr.write(r.stderr)
+            sys.exit(r.returncode)
+        try:
+            rep = json.loads(r.stdout)
+        except Exception:
+            sys.stdout.write(r.stdout); sys.exit(0)
+        if "--json" in rest:
+            print(json.dumps(rep, indent=2))
+            sys.exit(0)
+        if sub == "update":
+            render_install(rep, home, rest, proj)
+        else:
+            armed = rep.get("enabled")
+            print(ui.mark("on" if armed else "warn") + " TKSfw " + (ui.c("ARMED", "g") if armed else ui.c("DISARMED", "y")) + " in " + ui.ident(proj.root) + ui.dim(f" (.agents/.tksfw.json enabled={str(armed).lower()})"))
+            effect("prompt" if armed else "files")
+            if not armed:
+                ui.hint("hooks are inert here from now on " + ui.dim("(the model is not told — it has no hook to tell it)") + "; `ks project enable` re-arms")
+        sys.exit(0)
     if sub == "reset":
         cmd_reset(home, rest)
         return
@@ -822,7 +922,7 @@ def cmd_reset(home, args):
         for mirror in (os.path.join(root, ".codex", "agents", name + ".toml"), os.path.join(root, ".claude", "agents", name + ".md")):
             add("agent mirrors", mirror)
     if not groups:
-        print("nothing to reset — the project is already clean")
+        print(ui.mark("ok") + " nothing to reset " + ui.dim("— the project is already clean"))
         return
     stamp = time.strftime("%Y%m%d-%H%M")
     hist = os.path.join(root, ".agents", "history", stamp + (f"-{re.sub(r'[^A-Za-z0-9_-]', '_', label)}" if label else ""))
@@ -833,15 +933,17 @@ def cmd_reset(home, args):
             r = run(["git", "branch", "--merged", "HEAD", "--format=%(refname:short)"], cwd=root, capture=True)
             if r.returncode == 0 and branch not in {l.strip() for l in r.stdout.splitlines()}:
                 unmerged.append(branch)
-    print(f"reset plan for {root}  ({'ARCHIVE to ' + os.path.relpath(hist, root) if archive else 'CLEAR'})")
+    ui.header("project reset", project_name(proj), root)
+    ui.section("reset plan", (ui.c("ARCHIVE", "y") + ui.dim(f" to {os.path.relpath(hist, root)}")) if archive else ui.c("CLEAR", "y"))
     archived_groups = {"ledgers", "plan & view", "archives", "exports", "work areas", "agent definitions", "registry"}
     for g, items in groups.items():
         action = "→ history" if archive and g in archived_groups else "delete"
-        print(f"  {g:<18} {len(items):>3}  {action}")
+        ui.kv(g, f"{len(items):>3}", (None, ui.dim(action)))
     if unmerged:
-        print("  unmerged worktree branches: " + ", ".join(unmerged) + ("  (kept)" if archive else ("  (DELETED with --force)" if force else "  → refusing without --force")))
+        ui.kv("unmerged branches", ", ".join(unmerged), (None, ui.dim("kept")) if archive else (("warn", "DELETED with --force") if force else ("fail", "refusing without --force")))
+    ui.flush()
     if dry:
-        print("dry run — nothing changed")
+        ui.hint("dry run — nothing changed")
         return
     if unmerged and not archive and not force:
         die("refusing: unmerged worktree branches would be lost — merge them, use --archive (keeps branches) or --force")
@@ -898,9 +1000,9 @@ def cmd_reset(home, args):
     with open(mp, "w", encoding="utf-8") as fh:
         json.dump(m, fh, indent=2, sort_keys=True)
         fh.write("\n")
-    print(f"reset done — generation {len(m['resets']) + 1}" + (f"; previous generation in {os.path.relpath(hist, root)}" if archive else ""))
+    print(ui.mark("ok") + f" reset done — generation {len(m['resets']) + 1}" + ui.dim(f" in {root}") + (ui.dim(f"; previous generation in {os.path.relpath(hist, root)}") if archive else ""))
     effect("files")
-    print("→ commit the working tree; the next session starts with empty ledgers and a fresh token")
+    ui.hint("commit the working tree; the next session starts with empty ledgers and a fresh token")
 
 
 def all_sessions(proj):
@@ -1031,13 +1133,35 @@ def cmd_routing(home, args):
     if sub == "show":
         rec = resolve_session(proj, home, args)
         extra = ["--session-routing", rec["routing"]] if rec and rec.get("routing") else []
+        if rec and rec.get("harness") in ("codex", "claude"):
+            extra.append("--" + rec["harness"])
+        r = run([PY, rm, "--print", *extra], cwd=proj.root, env=proj.env(), capture=True)
+        if r.returncode or ui.plain:
+            if rec:
+                print(f"session {rec['token']} harness={rec.get('harness', '?')} override={rec.get('routing') or '-'}")
+            sys.exit(passthrough(r, mark_first=False))
+        ui.header("routing show", project_name(proj), proj.root)
+        m = re.search(r"harness=(\S+)\s+routing='([^']+)'\s+selected_by=(.+)", r.stdout)
         if rec:
-            print(f"session {rec['token']} ({rec.get('harness', '?')}, {rec.get('operator') or '?'}): " + (f"override → [routing.{rec['routing']}]" if rec.get("routing") else "no session override (project routing applies)"), flush=True)
-            if rec.get("harness") in ("codex", "claude"):
-                extra.append("--" + rec["harness"])
-        sys.exit(run([PY, rm, "--print", *extra], cwd=proj.root, env=proj.env()).returncode)
+            ui.section("session", ui.ident(rec["token"]) + ui.dim(f" {rec.get('harness', '?')} {ui.sym('dot')} {rec.get('operator') or '?'}") + "  "
+                       + ((ui.mark("on") + " override " + ui.ident(rec["routing"])) if rec.get("routing") else ui.dim("no session override — project routing applies")))
+            ui.blank()
+        if m:
+            ui.section("routing", ui.ident(m.group(2)) + ui.dim(f"  via {m.group(3).strip()} {ui.sym('dot')} harness {m.group(1)}"))
+        rows = []
+        for line in r.stdout.splitlines():
+            mt = re.match(r"^\s+(\w+)\s+(\S+)\s+effort=(\S+)\s+roles=(.*)$", line)
+            if mt:
+                rows.append((mt.group(1), mt.group(2), ui.dim(mt.group(3)), ui.dim(mt.group(4))))
+        if rows:
+            ui.table(("tier", "model", "effort", "roles"), rows)
+        for line in r.stdout.splitlines():
+            if line.startswith("config:"):
+                print(ui.dim(line))
+        sys.exit(0)
     if sub == "check":
-        sys.exit(run([PY, rm, "--check"], cwd=proj.root, env=proj.env()).returncode)
+        r = run([PY, rm, "--check"], cwd=proj.root, env=proj.env(), capture=True)
+        sys.exit(passthrough(r))
     if sub == "list":
         import tomllib
         path = proj.config_toml()
@@ -1086,7 +1210,18 @@ def cmd_routing(home, args):
     if sub == "resolve":
         if len(args) < 2:
             die("usage: ks routing resolve <agent-name>")
-        sys.exit(run([PY, rm, "--resolve", args[1]], cwd=proj.root, env=proj.env()).returncode)
+        r = run([PY, rm, "--resolve", args[1]], cwd=proj.root, env=proj.env(), capture=True)
+        if "--json" in args or ui.plain:
+            sys.stdout.write(r.stdout); sys.exit(r.returncode)
+        try:
+            d = json.loads(r.stdout)
+        except Exception:
+            sys.exit(passthrough(r))
+        if not d.get("ok"):
+            die(f"routing resolve: {d.get('reason', 'no route')}")
+        print(ui.mark("ok") + " " + ui.ident(d.get("agent", args[1])) + f" {ui.sym('arrow')} role " + ui.ident(str(d.get("role"))) + f" {ui.sym('arrow')} tier " + ui.ident(str(d.get("tier"))) + f" {ui.sym('arrow')} " + ui.bold(str(d.get("model"))) + ui.dim(f" ({d.get('reasoning_effort') or 'provider default'})"))
+        print("  " + ui.dim(f"table {d.get('routing')} via {d.get('selected_by')}"))
+        sys.exit(0)
     if sub == "use":
         rec = resolve_session(proj, home, args)
         if rec is not None:                                 # ---- session-scoped (3.4.0)
@@ -1176,10 +1311,15 @@ def cmd_hil(home, args):
     proj = Project(home)
     pol, V = hil_read(proj)
     if sub == "show":
-        print(f"HIL threshold: {V.hil_describe(pol)}")
+        if ui.plain:
+            print("hil " + " ".join(f"{k}={pol[k]}" for k in ("impact", "reversibility", "logic", "mode")))
+            sys.exit(0)
+        ui.header("hil show", project_name(proj), proj.root)
+        ui.section("hil threshold", ui.bold(V.hil_describe(pol)))
         for k in ("impact", "reversibility", "logic", "mode"):
-            print(f"  {k} = {pol[k]}")
-        print("  rule: AGENTS.md § Human in the Loop — at/above threshold: ConfirmationType OPERATOR; Workers leave it OPEN")
+            ui.kv(k, str(pol[k]))
+        ui.flush()
+        ui.hint(ui.dim("AGENTS.md § Human in the Loop — at/above the threshold a decision carries ConfirmationType OPERATOR; Workers leave it OPEN"), indent=2)
         sys.exit(0)
     if sub == "set":
         new = dict(pol)
@@ -1196,7 +1336,7 @@ def cmd_hil(home, args):
                 die(f"--{key}: {val!r} not in {HIL_KEYS[key]}")
             new[key] = val
         if new == pol:
-            print(f"HIL threshold unchanged: {V.hil_describe(pol)}")
+            print(ui.mark("ok") + " HIL threshold unchanged: " + ui.bold(V.hil_describe(pol)))
             sys.exit(0)
         path = proj.config_toml()
         text = open(path, encoding="utf-8").read()
@@ -1214,7 +1354,7 @@ def cmd_hil(home, args):
         import tomllib
         with open(path, "rb") as fh:
             tomllib.load(fh)                                # must still parse
-        print(f"HIL threshold: {V.hil_describe(new)} (was {V.hil_describe(pol)})")
+        print(ui.mark("ok") + " HIL threshold " + ui.bold(V.hil_describe(new)) + ui.dim(f" (was {V.hil_describe(pol)})"))
         effect("decision")
         sys.exit(0)
     die(f"usage: {cmd_hil.__doc__}")
@@ -1230,9 +1370,29 @@ def cmd_layers(home, args):
         die("usage: ks layers resolve [--archetype P] [--spec P] [--json] | pin --archetype P | --spec P | --clear | journal | section")
     if sub == "pin":
         refuse_if_busy(proj, "layers pin", args)
-    rc = run([PY, script, *args], cwd=proj.root, env=proj.env()).returncode
+    if sub == "resolve" and "--json" not in args and not ui.plain:
+        r = run([PY, script, "resolve", "--json", *[a for a in args[1:] if a != "--json"]], cwd=proj.root, env=proj.env(), capture=True)
+        try:
+            d = json.loads(r.stdout)
+        except Exception:
+            sys.exit(passthrough(r, mark_first=False))
+        ui.header("layers", project_name(proj, d.get("layers")), proj.root)
+        ui.section("layers", ui.dim(f"tier {d.get('tier')}"))
+        ui.kv("CORE", "AGENTS.md", (None, ui.dim("always")))
+        STATUS = {"new": (None, ui.dim("new, not yet journaled")), "unchanged": (None, ui.dim("unchanged")),
+                  "changed": ("warn", "changed since last session — re-read"), "missing": ("fail", "declared in .agents/.tksfw.json but missing — `ks layers pin`")}
+        for e in d.get("layers", []):
+            ui.kv(e["layer"].upper(), e["path"] + ui.dim(f"  [{e['source']}]") + (ui.dim(f"  {e['title']}") if e.get("title") else ""), STATUS.get(e["journal_status"]))
+        if not d.get("layers"):
+            ui.kv("", ui.dim("no project layers — KS_PROJECT.md / KS_SPEC.md at the root, or ") + ui.cmd("ks layers pin --archetype P --spec P"))
+        ui.flush()
+        for w_ in d.get("warnings", []):
+            ui.finding("warn", w_)
+        sys.exit(r.returncode)
+    r = run([PY, script, *args], cwd=proj.root, env=proj.env(), capture=True)
+    rc = passthrough(r, mark_first=(sub in ("pin", "journal")))
     if sub == "pin" and rc == 0:
-        print("→ log it in changes.yaml (Layer: CORE)")
+        ui.hint("log it in changes.yaml " + ui.dim("(Layer: CORE)"))
         effect("prompt")
     sys.exit(rc)
 
@@ -1248,33 +1408,53 @@ def cmd_ledger(home, args):
         for name in ("changes", "lessons", "handoffs", "events", "decisions", "deliverables"):
             files += [p for p in (os.path.join(proj.workarea, name + ".yaml"), os.path.join(proj.workarea, "archive", name + ".yaml")) if os.path.isfile(p)]
         files += [os.path.join(proj.workarea, n) for n in sorted(os.listdir(proj.workarea)) if shard.match(n)]
+        ui.header("ledger check", project_name(proj), proj.root)
         for p in files:
-            rc |= run([PY, a("yaml-log-entry", "validate_yaml_log.py"), p], env=proj.env()).returncode
+            r = run([PY, a("yaml-log-entry", "validate_yaml_log.py"), p], env=proj.env(), capture=True)
+            rc |= r.returncode
+            first = (r.stdout or r.stderr or "").strip().splitlines()[:1]
+            ui.finding("ok" if r.returncode == 0 else "fail", os.path.relpath(p, proj.root) + (ui.dim("  " + first[0][:90]) if first and r.returncode else ""))
+            if r.returncode:
+                for line in (r.stdout + r.stderr).splitlines()[1:8]:
+                    print("      " + ui.dim(line))
         conflicts = sync_conflicts(proj)
         if conflicts:
-            print("SYNC CONFLICT COPIES (not read by the framework — merge by hand, then delete): " + ", ".join(conflicts))
+            ui.finding("fail", "sync conflict copies " + ui.dim("(not read by the framework)") + ": " + ", ".join(conflicts), "merge by hand, then delete")
             rc |= 1
         if os.path.isfile(os.path.join(proj.workarea, "tasks.md")):
-            r = run([PY, a("yaml-log-entry", "tasks_lint.py"), os.path.join(proj.workarea, "tasks.md")], env=proj.env())
+            r = run([PY, a("yaml-log-entry", "tasks_lint.py"), os.path.join(proj.workarea, "tasks.md")], env=proj.env(), capture=True)
             rc |= 1 if r.returncode == 2 else 0
-        rc |= run([PY, a("yaml-log-entry", "cross_check.py"), "--workarea", proj.workarea], env=proj.env()).returncode
+            ui.finding("ok" if r.returncode != 2 else "fail", "tasks.md" + (ui.dim("  " + (r.stdout + r.stderr).strip().splitlines()[0][:90]) if r.returncode else ""))
+        r = run([PY, a("yaml-log-entry", "cross_check.py"), "--workarea", proj.workarea], env=proj.env(), capture=True)
+        rc |= r.returncode
+        head = (r.stdout or r.stderr or "").strip().splitlines()[:1]
+        ui.finding("ok" if r.returncode == 0 else "fail", "cross-ledger integrity" + (ui.dim("  " + head[0][:100]) if head else ""))
+        for line in (r.stdout + r.stderr).splitlines()[1:12]:
+            print("      " + ui.dim(line))
+        ui.blank()
+        ui.section("result", ui.c("PASS", "g") if not rc else ui.c("FAIL", "r"))
         sys.exit(1 if rc else 0)
     if sub == "find":
-        sys.exit(run([PY, a("yaml-log-entry", "find_entry.py"), *args[1:]], cwd=proj.root, env=proj.env()).returncode)
+        r = run([PY, a("yaml-log-entry", "find_entry.py"), *args[1:]], cwd=proj.root, env=proj.env(), capture=True)
+        if "--json" in args or ui.plain:
+            sys.stdout.write(r.stdout); sys.stderr.write(r.stderr); sys.exit(r.returncode)
+        sys.exit(passthrough(r, mark_first=(r.returncode != 0)))
     if sub == "digest":
-        sys.exit(run([PY, a("yaml-log-entry", "digest.py"), *args[1:]], cwd=proj.root, env=proj.env()).returncode)
+        r = run([PY, a("yaml-log-entry", "digest.py"), *args[1:]], cwd=proj.root, env=proj.env(), capture=True)
+        if "--json" in args or ui.plain:
+            sys.stdout.write(r.stdout); sys.stderr.write(r.stderr); sys.exit(r.returncode)
+        sys.exit(passthrough(r, mark_first=False))
     if sub == "export":
         if len(args) < 2 or args[1].startswith("--"):
             die("usage: ks ledger export all | <kind>[,<kind>…] [--out FILE] [--archive] [--session TOKEN] [--csv DIR]\n"
                 "kinds: changes lessons handoffs events decisions deliverables tasks")
-        rc = run([PY, a("yaml-log-entry", "export_ledgers.py"), *args[1:]], cwd=proj.root, env=proj.env()).returncode
-        sys.exit(rc)
+        sys.exit(passthrough(run([PY, a("yaml-log-entry", "export_ledgers.py"), *args[1:]], cwd=proj.root, env=proj.env(), capture=True)))
     if sub in ("archive-plan", "archive"):
         extra = ["plan"] if sub == "archive-plan" else []
-        rc = run([PY, a("yaml-log-entry", "archive_ledger.py"), *extra, *args[1:]], cwd=proj.root, env=proj.env()).returncode
+        rc = passthrough(run([PY, a("yaml-log-entry", "archive_ledger.py"), *extra, *args[1:]], cwd=proj.root, env=proj.env(), capture=True))
         if rc == 0 and "--dry-run" not in args:
             effect("files")
-            print("→ log the archive run in changes.yaml (Layer: PROJECT)")
+            ui.hint("log the archive run in changes.yaml " + ui.dim("(Layer: PROJECT)"))
         sys.exit(rc)
     die("usage: ks ledger check | find <id> [--refs] [--json] | digest [--task T] [--agent A] [--json] | export all|<kinds> [--out F] [--archive] [--session T] [--csv DIR] | archive-plan [--dry-run] | archive <ledger|all> --before YYYY-MM-DD [--dry-run]")
 
@@ -1310,10 +1490,30 @@ def cmd_harness(home, args):
         sync = os.path.join(proj.hooks, "sync_harness.py")
         if not os.path.isfile(sync):
             die("plugin-mode project: nothing to sync (hooks and skills come from the plugin)")
-        rc = run([PY, sync, *args[1:]], cwd=proj.root, env=proj.env()).returncode
-        if rc == 0 and "--check" not in args:
+        r = run([PY, sync, *args[1:]], cwd=proj.root, env=proj.env(), capture=True)
+        if ui.plain:
+            sys.exit(passthrough(r, mark_first=False))
+        ui.header("harness sync", project_name(proj), proj.root)
+        rows = []
+        for line in (r.stdout or "").splitlines():
+            m = re.match(r"^(\w+)\s+(\w+)\s+(\S+)\s*(.*)$", line)
+            if m and m.group(2) in ("wrote", "skipped", "ok", "conflict", "unchanged", "linked", "copied", "removed"):
+                kind = {"conflict": "fail", "skipped": None, "wrote": "ok", "ok": "ok", "unchanged": "ok", "linked": "ok", "copied": "ok", "removed": "ok"}[m.group(2)]
+                rows.append((m.group(1), (ui.mark(kind) + " " if kind else "  ") + m.group(2), m.group(3), ui.dim(m.group(4))))
+            elif line.startswith("done:"):
+                ui.table(("target", "result", "path", ""), rows) if rows else None
+                rows = []
+                ui.blank()
+                ui.section("result", ui.fmt(line[5:].strip()))
+            elif line.strip():
+                print("  " + ui.dim(ui.fmt(line)))
+        if rows:
+            ui.table(("target", "result", "path", ""), rows)
+        for line in (r.stderr or "").splitlines():
+            ui.finding("fail", line)
+        if r.returncode == 0 and "--check" not in args:
             effect("session")
-        sys.exit(rc)
+        sys.exit(r.returncode)
     if sub == "retrust":
         hooks_dir = proj.hooks if proj.root else home.hooks
         cur = hook_hashes(hooks_dir)
@@ -1328,20 +1528,21 @@ def cmd_harness(home, args):
             trust[hooks_dir] = cur
             os.makedirs(CONFIG_DIR, exist_ok=True)
             json.dump(trust, open(TRUST_JSON, "w"), indent=1)
-            print(f"recorded {len(cur)} hook file hashes for {hooks_dir}")
+            print(ui.mark("ok") + f" recorded {len(cur)} hook file hashes " + ui.dim(f"for {short_home(hooks_dir)}"))
             return
-        print(f"hooks: {hooks_dir}")
+        ui.header("hook trust", project_name(proj) if proj.root else None, proj.root if proj.root else None)
+        print(ui.dim("hooks " + short_home(hooks_dir)))
         if not prev:
-            print("no trust record yet — after trusting the hooks in Codex (/hooks → trust), run `ks harness retrust --ack`")
+            ui.finding("warn", "no trust record yet", "trust the hooks in Codex (/hooks), then `ks harness retrust --ack`")
             sys.exit(1)
         if changed:
-            print("RE-TRUST NEEDED — hook files changed since the last acknowledgement:")
+            ui.finding("warn", f"re-trust needed — {len(changed)} hook file(s) changed since the last acknowledgement")
             for f in changed:
-                print("  -", f)
-            print("Codex: open the project, run /hooks, review and trust; then `ks harness retrust --ack`.\n"
-                  "Claude Code: no trust step (hooks load from settings/plugin).")
+                print("      " + ui.ident(f))
+            ui.hint("Codex: open the project, /hooks, review and trust; then `ks harness retrust --ack`", indent=2)
+            ui.hint(ui.dim("Claude Code: no trust step (hooks load from settings/plugin)"), indent=2)
             sys.exit(1)
-        print("no change since last acknowledgement")
+        ui.finding("ok", "acknowledged — no change since the last acknowledgement")
         return
     die("usage: ks harness sync [--check] | retrust [--ack]")
 
