@@ -285,7 +285,7 @@ def main(argv):
             if not res["layers"]:
                 print("no project layers: nothing at KS_PROJECT.md (archetype) / KS_SPEC.md (spec) and no `layers` in .agents/.tksfw.json")
             for e in res["layers"]:
-                print(f"{LABEL[e['layer']]}  {e['path']}  [{e['source']}]  {STATUS_TEXT[e['journal_status']]}"
+                print(f"{LABEL[e['layer']]:<9}  {e['path']}  [{e['source']}]  {STATUS_TEXT[e['journal_status']]}"
                       + (f"  — {e['title']}" if e["title"] else ""))
             for w in res["warnings"]:
                 print("warning:", w)

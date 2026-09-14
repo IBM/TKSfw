@@ -756,7 +756,16 @@ def main():
         r = run([PY, ks, "project", "init"], cwd=kproj, env=kenv)
         check("ks project init (plugin mode by default)", r.returncode == 0 and os.path.isfile(os.path.join(kproj, ".agents", ".tksfw.json")) and not os.path.exists(os.path.join(kproj, ".agents", "hooks")), r.stdout + r.stderr)
         r = run([PY, ks, "project", "status"], cwd=kproj, env=kenv)
-        check("ks project status", r.returncode == 0 and "ARMED" in r.stdout and "mode: plugin" in r.stdout and "drift" in r.stdout, r.stdout + r.stderr)
+        check("ks project status", r.returncode == 0 and "ARMED" in r.stdout and re.search(r"mode\s+plugin", r.stdout) and "drift" in r.stdout and "STATUS" in r.stdout and "ks " in r.stdout.splitlines()[0], r.stdout + r.stderr)
+        r = run([PY, ks, "project", "status", "--plain"], cwd=proj, env=kenv)
+        check("ks project status --plain: records, no header", r.returncode == 0 and r.stdout.startswith("project ") and "STATUS" not in r.stdout and "\033[" not in r.stdout, r.stdout[:300])
+        r = run([PY, ks, "project", "status", "--json"], cwd=proj, env=kenv)
+        check("ks project status --json", r.returncode == 0 and json.loads(r.stdout)["armed"] is True and json.loads(r.stdout)["mode"] == "plugin", r.stdout[:300])
+        r = run([PY, ks, "project", "status", "--color"], cwd=proj, env=kenv)
+        r2 = run([PY, ks, "project", "status", "--color"], cwd=proj, env=kenv | {"NO_COLOR": "1"})
+        check("--color forces ANSI even when piped; NO_COLOR is not needed for pipes (no escapes without --color)", "\033[" in r.stdout and "\033[" not in run([PY, ks, "project", "status"], cwd=proj, env=kenv).stdout, r.stdout[:200])
+        r = run([PY, ks, "project", "status", "--ascii"], cwd=proj, env=kenv)
+        check("--ascii replaces the marks", ("ON" in r.stdout or "OK" in r.stdout) and "✓" not in r.stdout and "●" not in r.stdout, r.stdout[:400])
         r = run([PY, ks, "project", "drift"], cwd=kproj, env=kenv)
         check("ks project drift: fresh project has none", r.returncode == 0 and "no drift" in r.stdout, r.stdout + r.stderr)
         open(os.path.join(kproj, "AGENTS.md"), "a").write("\n# local\n")
@@ -840,7 +849,9 @@ def main():
         r3 = run([PY, ks, "harness", "retrust"], cwd=kproj, env=kenv)
         check("ks harness retrust: unknown → ack → clean", r.returncode == 1 and r2.returncode == 0 and r3.returncode == 0 and "no change" in r3.stdout, r.stdout + r3.stdout)
         r = run([PY, ks, "doctor"], cwd=kproj, env=kenv)
-        check("ks doctor runs end to end", r.returncode == 0 and "== project" in r.stdout and "FAIL ·" in r.stdout, r.stdout[-300:] + r.stderr)
+        check("ks doctor runs end to end", r.returncode == 0 and "PROJECT" in r.stdout and "RESULT" in r.stdout and re.search(r"0 fail", r.stdout), r.stdout[-300:] + r.stderr)
+        rj = run([PY, ks, "doctor", "--json"], cwd=proj, env=kenv)
+        check("ks doctor --json: findings with section/status/text/hint", rj.returncode == 0 and json.loads(rj.stdout)["fail"] == 0 and any(f["section"] == "project" for f in json.loads(rj.stdout)["findings"]), rj.stdout[:300])
         check("ks doctor: no marketplace / plugin / trust recorded → three WARNs naming the step",
               "Codex marketplace: none" in r.stdout and "tksfw@tksfw: not installed" in r.stdout, r.stdout)
         # Codex ≥ 0.15x records the marketplace, the plugin and hook trust in config.toml — doctor must read those (2.4.1)
@@ -860,7 +871,7 @@ def main():
         with open(os.path.join(dch, "config.toml"), "a") as fh:
             fh.write('profile = "x"\nprofile = "y"\n')          # duplicate key → invalid TOML
         r = run([PY, ks, "doctor"], cwd=kproj, env=renv)
-        check("ks doctor FAILs loudly when Codex config.toml does not parse", "does not parse" in r.stdout and "1 FAIL" in r.stdout or "FAIL" in r.stdout.split("\n")[-2], r.stdout[-400:])
+        check("ks doctor FAILs loudly when Codex config.toml does not parse", "does not parse" in r.stdout and "1 fail" in r.stdout, r.stdout[-400:])
         r = run([PY, ks, "dev", "test"], cwd=kproj, env=kenv)
         check("ks dev refuses to run from a plugin home", r.returncode != 0 and "checkout" in r.stderr, r.stderr)
         r = run([PY, os.path.join(REPO, "tools", "ks"), "self", "version"], env=kenv | {"TKSFW_HOME": REPO})
@@ -1218,9 +1229,11 @@ def main():
         check("project ships .agents/config.toml (no models.toml)", os.path.isfile(os.path.join(cp3, ".agents", "config.toml")) and not os.path.exists(os.path.join(cp3, ".agents", "models.toml")))
         r = run([PY, ks, "routing", "list"], cwd=cp3, env=kenv)
         check("ks routing list: four tables, ibm-anthropic active via match, ibm-anthropic-cc marked default, models per tier",
-              r.returncode == 0 and "5 routing table(s)" in r.stdout and "ibm-anthropic     [active (codex model_provider (match))]" in r.stdout and "gpt-5.6-sol[1m]" in r.stdout
-              and "ibm-anthropic-cc  [default]" in r.stdout and "claude-sonnet-5[1m]" in r.stdout and "gpt-5.6-terra" in r.stdout
-              and "google/gemini-flash-latest" in r.stdout and "anthropic/claude-opus-latest" in r.stdout and "match: codex_model_provider=ibm" in r.stdout, r.stdout)
+              r.returncode == 0 and "5 tables" in r.stdout and re.search(r"ACTIVE\s+ibm-anthropic\s+via codex model_provider \(match\)", r.stdout) and "gpt-5.6-sol[1m]" in r.stdout
+              and re.search(r"ibm-anthropic-cc\s+match none\s+\(default\)", r.stdout) and "claude-sonnet-5[1m]" in r.stdout and "gpt-5.6-terra" in r.stdout
+              and "google/gemini-flash-latest" in r.stdout and "anthropic/claude-opus-latest" in r.stdout and "match codex_model_provider=ibm" in r.stdout, r.stdout)
+        rp = run([PY, ks, "routing", "list", "--plain"], cwd=cp3, env=kenv)
+        check("ks routing list --plain: one record per table", rp.stdout.count("\ntable ") + rp.stdout.startswith("table ") == 5 and "flags=default" in rp.stdout and "research=claude-haiku-4-5:low" in rp.stdout, rp.stdout[:300])
         bad = open(os.path.join(cp3, ".agents", "config.toml")).read().replace('default_routing = "ibm-anthropic-cc"', 'default_routing = "nope"')
         open(os.path.join(cp3, ".agents", "config.toml.bad"), "w").write(bad)
         r = run([PY, os.path.join(plug, "hooks", "route_model.py"), "--check"], cwd=cp3, env=kenv | {"TKSFW_MODELS_FILE": os.path.join(cp3, ".agents", "config.toml.bad")})
@@ -1228,7 +1241,7 @@ def main():
         os.remove(os.path.join(cp3, ".agents", "config.toml.bad"))
         r = run([PY, ks, "routing", "use", "ibm-anthropic-cc"], cwd=cp3, env=kenv)
         r = run([PY, ks, "routing", "list"], cwd=cp3, env=kenv)
-        check("ks routing list marks the pinned table", "ibm-anthropic-cc  [pinned, default, active (selected (config.toml))]" in r.stdout, r.stdout)
+        check("ks routing list marks the pinned table", re.search(r"ACTIVE\s+ibm-anthropic-cc\s+via selected \(config.toml\)", r.stdout) and "(pinned, default)" in r.stdout and "pinned ibm-anthropic-cc" in r.stdout, r.stdout)
         r = run([PY, ks, "routing", "resolve", "x-builder"], cwd=cp3, env=kenv)
         check("resolve under the pinned anthropic-cc table gives the 1M sonnet", "claude-sonnet-5[1m]" in r.stdout, r.stdout)
         run([PY, ks, "routing", "use", "ibm-openai-cc"], cwd=cp3, env=kenv)
@@ -1248,7 +1261,7 @@ def main():
         r3 = run([PY, ks, "ledger", "--help"], cwd=cp3, env=kenv)
         r4 = run([PY, ks, "help", "bogus"], cwd=cp3, env=kenv)
         check("ks help lists commands; ks help routing / ks ledger --help print the guides; unknown → error",
-              "Run `ks help <command>`" in r.stdout and "ks routing list" in r2.stdout and "Selection order at spawn" in r2.stdout
+              "ks help <verb>" in r.stdout and "VERBS" in r.stdout and "EXAMPLES" in r.stdout and "--plain" in r.stdout and "ks routing list" in r2.stdout and "Selection order at spawn" in r2.stdout
               and "ks ledger digest" in r3.stdout and r4.returncode != 0, r.stdout[-200:] + r2.stdout[:200])
         for c in ("self", "operator", "project", "routing", "hil", "layers", "ledger", "harness", "doctor", "dev"):
             rr = run([PY, ks, "help", c], cwd=cp3, env=kenv)
@@ -1264,7 +1277,7 @@ def main():
         sl = os.path.join(mp5, ".claude", "settings.local.json")
         cc = open(os.path.join(mp5, ".codex", "config.toml")).read()
         check("init writes the main-session model: Claude Code → claude-opus-5[1m] (default table), Codex → claude-opus-5 (provider match)",
-              "Claude Code main session → claude-opus-5[1m]" in r.stdout and json.load(open(sl))["model"] == "claude-opus-5[1m]"
+              re.search(r"Claude Code\s+main claude-opus-5\[1m\]", r.stdout) and json.load(open(sl))["model"] == "claude-opus-5[1m]"
               and 'model = "claude-opus-5"' in cc and 'model_reasoning_effort = "high"' in cc, r.stdout[-600:])
         import tomllib as _tl3
         _tl3.loads(cc)
@@ -1276,13 +1289,13 @@ def main():
         envm = json.load(open(sl)).get("env", {})
         check("routing use writes the Claude Code alias map (ANTHROPIC_DEFAULT_*_MODEL) for third-party ids",
               envm == {"ANTHROPIC_DEFAULT_HAIKU_MODEL": "gpt-5.6-luna[1m]", "ANTHROPIC_DEFAULT_SONNET_MODEL": "gpt-5.6-terra[1m]", "ANTHROPIC_DEFAULT_OPUS_MODEL": "gpt-5.6-sol[1m]"}
-              and "subagent aliases → haiku→gpt-5.6-luna[1m]" in r.stdout, json.dumps(envm) + r.stdout[-400:])
+              and "aliases haiku→gpt-5.6-luna[1m]" in r.stdout, json.dumps(envm) + r.stdout[-400:])
         # agent mirrors re-rendered on routing use (plugin mode) with the full routed id in Claude frontmatter
         open(os.path.join(mp5, ".agents", "agents", "cv-writer.toml"), "w").write('name = "cv-writer"\ndescription = "MUST BE USED for writing CVs."\ndeveloper_instructions = "Write."\n')
         r = run([PY, ks, "routing", "use", "ibm-anthropic-cc", "--force"], cwd=mp5, env=kenv)
         cm = os.path.join(mp5, ".claude", "agents", "cv-writer.md")
         check("routing use re-renders agent mirrors in plugin mode; Claude frontmatter carries the routed id",
-              os.path.isfile(cm) and "model: claude-sonnet-5[1m]" in open(cm).read() and "Agent mirrors re-rendered" in r.stdout, r.stdout[-300:] + (open(cm).read() if os.path.isfile(cm) else ""))
+              os.path.isfile(cm) and "model: claude-sonnet-5[1m]" in open(cm).read() and "agent mirrors re-rendered" in r.stdout, r.stdout[-300:] + (open(cm).read() if os.path.isfile(cm) else ""))
         r = run([PY, ks, "routing", "use", "ibm-openai-cc", "--force"], cwd=mp5, env=kenv)
         _tl3.loads(cc)
         r = run([PY, ks, "project", "update", mp5, "--force"], cwd=tmp, env=kenv)
@@ -1318,18 +1331,20 @@ def main():
         xtok = next(t for t, r in recs.items() if r["harness"] == "codex")
         r = run([PY, ks, "project", "status"], cwd=sp, env=xenv)
         check("ks project status: sessions table with token/harness/operator/host/routing, no marker when ambiguous",
-              "sessions: 2 active" in r.stdout and "token" in r.stdout and "harness" in r.stdout and ctok in r.stdout and xtok in r.stdout and "←" not in r.stdout, r.stdout)
+              re.search(r"SESSIONS\s+2 active", r.stdout) and "token" in r.stdout and "harness" in r.stdout and ctok in r.stdout and xtok in r.stdout and "←" not in r.stdout, r.stdout)
         senv = dict(xenv); senv["TKSFW_SESSION"] = ctok
         r = run([PY, ks, "project", "status"], cwd=sp, env=senv)
         check("ks project status marks the current session from TKSFW_SESSION", f"{ctok}" in r.stdout and "← this session (TKSFW_SESSION)" in r.stdout, r.stdout)
+        rp = run([PY, ks, "project", "status", "--plain"], cwd=sp, env=senv)
+        check("--plain: session records carry current=true for yours", f"session {ctok} harness=claude" in rp.stdout and "current=true" in rp.stdout and f"session {xtok} " in rp.stdout, rp.stdout)
         r = run([PY, ks, "routing", "use", "ibm-openai-cc"], cwd=sp, env=xenv)
         check("project-wide switch refuses while sessions are active and names --session / --force",
-              r.returncode != 0 and "2 session(s) active" in r.stderr and "--session [token]" in r.stderr and "--force" in r.stderr, r.stderr)
+              r.returncode != 0 and "2 session(s) active" in r.stderr and "ks routing use ibm-openai-cc --session" in r.stderr and "ks routing use ibm-openai-cc --force" in r.stderr and ctok in r.stderr and xtok in r.stderr, r.stderr)
         r = run([PY, ks, "routing", "use", "ibm-openai-cc", "--session"], cwd=sp, env=xenv)
         check("--session without id and two candidate sessions → error listing the tokens", r.returncode != 0 and "several candidates" in r.stderr and ctok in r.stderr and xtok in r.stderr, r.stderr)
         r = run([PY, ks, "routing", "use", "ibm-openai-cc", "--session"], cwd=sp, env=senv)
         check("--session resolves via TKSFW_SESSION; override written; /model hint; Claude Code caveat",
-              r.returncode == 0 and f"session {ctok} (claude) → [routing.ibm-openai-cc] for this session only" in r.stdout and "/model gpt-5.6-sol[1m]" in r.stdout
+              r.returncode == 0 and f"session {ctok} (claude) → ibm-openai-cc — THIS SESSION ONLY" in r.stdout and "/model gpt-5.6-sol[1m]" in r.stdout
               and "custom agents keep the project-wide frontmatter model" in r.stdout
               and json.load(open(os.path.join(sp, ".agents", "workarea", ".hook-state", "sessions", ctok + ".json"))).get("routing") == "ibm-openai-cc", r.stdout + r.stderr)
         cfgtxt = open(os.path.join(sp, ".agents", "config.toml")).read()
@@ -1357,7 +1372,7 @@ def main():
         r = run([PY, os.path.join(plug, "hooks", "refresh_state.py"), "--print"], cwd=sp, env=cenv)
         check("STATE.md Sessions shows the routing override and host", f"routing override [routing.ibm-openai-cc]" in r.stdout and "mac1" in r.stdout, r.stdout[-600:])
         r = run([PY, ks, "routing", "use", "--clear", "--session", ctok], cwd=sp, env=xenv)
-        check("--clear --session removes the override", r.returncode == 0 and "override cleared (was [routing.ibm-openai-cc])" in r.stdout
+        check("--clear --session removes the override", r.returncode == 0 and "override cleared (was ibm-openai-cc)" in r.stdout
               and "routing" not in json.load(open(os.path.join(sp, ".agents", "workarea", ".hook-state", "sessions", ctok + ".json"))), r.stdout + r.stderr)
         r = run([PY, ks, "routing", "use", "ibm-openai-cc", "--force"], cwd=sp, env=xenv)
         check("--force switches the project for all sessions", r.returncode == 0 and 'selected = "ibm-openai-cc"' in open(os.path.join(sp, ".agents", "config.toml")).read(), r.stdout + r.stderr)
@@ -1397,14 +1412,14 @@ def main():
         c2b = json.load(open(os.path.join(sdir, c2["token"] + ".json")))
         check("an 'unknown' harness is backfilled by the next heartbeat that can tell", c2b["harness"] == "claude", str(c2b))
         r = run([PY, ks, "project", "status"], cwd=sp, env=xenv)
-        check("status: 2 active before SessionEnd, wording explains 'active'", "sessions: 2 active (ended by the harness, or heartbeat within the last 30 min)" in r.stdout, r.stdout[:400])
+        check("status: 2 active before SessionEnd", re.search(r"SESSIONS\s+2 active", r.stdout), r.stdout[:400])
         r = run([PY, os.path.join(plug, "hooks", "session_end.py")], cwd=sp, env=cenv,
                 inp=json.dumps({"session_id": "C2", "hook_event_name": "SessionEnd", "reason": "prompt_input_exit", "cwd": sp}))
         c2c = json.load(open(os.path.join(sdir, c2["token"] + ".json")))
         check("SessionEnd hook marks the record ended with the reason, exit 0", r.returncode == 0 and c2c.get("ended") and c2c.get("end_reason") == "prompt_input_exit", r.stdout + r.stderr + str(c2c))
         r = run([PY, ks, "project", "status"], cwd=sp, env=xenv)
         check("status: the ended session no longer counts as active; ended count shown; its row gone",
-              "sessions: 1 active" in r.stdout and "1 ended in the last 3 h" in r.stdout and c2["token"] not in r.stdout, r.stdout[:500])
+              re.search(r"SESSIONS\s+1 active", r.stdout) and "1 ended in the last 3 h" in r.stdout and c2["token"] not in r.stdout, r.stdout[:500])
         r = run([PY, ks, "routing", "use", "ibm-openai-cc", "--session", ctok], cwd=sp, env=xenv)
         r = run([PY, ks, "routing", "use", "ibm-anthropic-cc"], cwd=sp, env=xenv)
         check("project-wide switch is still guarded by the remaining active session only", r.returncode != 0 and ctok in r.stderr and c2["token"] not in r.stderr, r.stderr)
@@ -1415,7 +1430,7 @@ def main():
         check("ks project sessions close: unknown token → error", r.returncode != 0 and "not found" in r.stderr, r.stderr)
         r = run([PY, ks, "project", "sessions", "close", ctok], cwd=sp, env=xenv)
         r2 = run([PY, ks, "project", "status"], cwd=sp, env=xenv)
-        check("ks project sessions close <token> ends it; status drops to 1 active", r.returncode == 0 and ctok in r.stdout and "sessions: 1 active" in r2.stdout, r.stdout + r2.stdout[:300])
+        check("ks project sessions close <token> ends it; status drops to 1 active", r.returncode == 0 and ctok in r.stdout and re.search(r"SESSIONS\s+1 active", r2.stdout), r.stdout + r2.stdout[:300])
         r = run([PY, ks, "project", "sessions", "close", "--stale"], cwd=sp, env=xenv)
         check("sessions close --stale closes nothing while heartbeats are fresh", r.returncode == 0 and "closed 0" in r.stdout, r.stdout)
         old = json.load(open(os.path.join(sdir, c2["token"] + ".json"))); old["last_seen"] = time.time() - 4000
@@ -1424,9 +1439,11 @@ def main():
         r2 = run([PY, ks, "project", "update"], cwd=sp, env=xenv)
         check("sessions close --stale ends the old record; project update then runs without --force", "closed 1" in r.stdout and c2["token"] in r.stdout and r2.returncode == 0, r.stdout + r2.stderr[:300])
         r = run([PY, ks, "project", "sessions"], cwd=sp, env=xenv)
-        check("ks project sessions (list) prints the table with the ended count", "sessions: 0 active" in r.stdout and "2 ended in the last 3 h" in r.stdout, r.stdout)
+        check("ks project sessions (list) prints the table with the ended count", re.search(r"SESSIONS\s+0 active", r.stdout) and "2 ended in the last 3 h" in r.stdout, r.stdout)
+        r = run([PY, ks, "project", "sessions", "--json"], cwd=sp, env=xenv)
+        check("ks project sessions --json", r.returncode == 0 and json.loads(r.stdout)["ended_recently"] == 2 and json.loads(r.stdout)["active"] == [], r.stdout[:200])
         r = run([PY, ks, "doctor"], cwd=sp, env=xenv)
-        check("doctor: version line ok when project == installed", re.search(r"ok\s+version project", r.stdout) is not None, r.stdout[-600:])
+        check("doctor: version line ok when project == installed", re.search(r"[✓] version project 3\.\d+\.\d+ / installed", r.stdout) is not None, r.stdout[-600:])
 
         agents_md = open(os.path.join(REPO, "template", "AGENTS.md"), encoding="utf-8").read()   # the kernel itself, not the project copy (a test appends to that)
         check("AGENTS.md keeps the naming kernel and points to define-agent",
@@ -1547,7 +1564,7 @@ def main():
         man = json.load(open(os.path.join(lp, ".agents", ".tksfw.json")))
         check("new_project --update preserves the layers stanza", r.returncode == 0 and man.get("layers") == {"spec": "docs/brief.md"}, r.stdout[-300:] + str(man.get("layers")))
         r = run([PY, ks, "project", "status"], cwd=lp, env=kenv)
-        check("ks project status prints the layers line (CORE first, names)", "layers  : CORE AGENTS.md · ARCHETYPE KS_PROJECT.md" in r.stdout and "SPEC docs/brief.md" in r.stdout, r.stdout)
+        check("ks project status prints the layers block (CORE first, names) and the spec title as project name", re.search(r"layers\s+CORE\s+AGENTS.md", r.stdout) and re.search(r"ARCHETYPE\s+KS_PROJECT.md", r.stdout) and re.search(r"SPEC\s+docs/brief.md", r.stdout) and "Brief" in r.stdout.splitlines()[0], r.stdout)
         # 3.6.0 — legacy manifest keys l3/l4 and flags --l3/--l4 keep working; pin replaces the legacy key
         man["layers"] = {"l4": "docs/brief.md"}
         json.dump(man, open(os.path.join(lp, ".agents", ".tksfw.json"), "w"), indent=2)

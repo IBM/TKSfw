@@ -75,3 +75,18 @@ Every mutating verb ends with an effect line: **next spawn** (`routing use`), **
 |---|---|---|
 | `ks update check` / `apply` | P1 | `git ls-remote --tags` against the marketplace repo; per-harness update commands |
 | `ks routing pull` | P2 | remote routing tables — pinned repo, `--check`, diff before write; own ADR |
+
+## Output conventions (3.7.0)
+
+One renderer inside `tools/ks` draws every screen; nothing else is added to the dependency set (standard library only).
+
+| Rule | Detail |
+|---|---|
+| Header | `ks <version> · TKSfw · <verb>` with the project name on the right and its full path below — on view commands only (`project status`, `project sessions`, `doctor`, `routing list`, `help`), never on effect commands. The name is the `title` in the spec's frontmatter, else the archetype's, else the folder name |
+| Colour | Semantic, never decorative: green `✓ ●` ok/armed · yellow `!` needs attention · red `✗` refused · cyan = identifiers you can type (tokens, tables, layer names, commands in hints) · dim = context. On only when stdout is a TTY, `NO_COLOR` is unset, `TERM` is not `dumb`, and neither `--no-color` nor `--plain` was passed; `--color` forces it (`ks doctor --color \| less -R`). See the [CLI Guidelines](https://clig.dev/) and the [NO_COLOR standard](https://no-color.org/) |
+| Symbols | `✓ ● ! ✗ → · ←`; `--ascii` (or a non-UTF-8 stream) swaps in `OK ON WARN FAIL -> - <-` |
+| Layout | Two-column key/value blocks with the status in a right column; tables with a dim header row; sections in bold capitals separated by one blank line; 2-space indents; no box drawing. A finding's hint (`→ command`) sits on the same line when it fits the terminal width, otherwise on its own line under the finding — findings are never truncated |
+| `--plain` | One record per line (`key value k=v …`), no header, colour, symbols or padding — for `grep`, hooks and the model. Also the shape used when `ks` is called from a hook |
+| `--json` | `project status`, `project sessions`, `doctor` (findings with section/status/text/hint), plus the existing `drift`, `layers resolve`, `ledger digest`/`find`, `hil` |
+| Errors | `✗ <verb>: <what> — <fix>` on stderr, the fix being a command in cyan; exit 1. Refusals list what blocks them (e.g. the active sessions) and both ways out (`--session`, `--force`) |
+| Help | `ks help`: description, three examples, verbs, global options. `ks help <verb>`: capitalised headings, `!` notes for surprising behaviour, examples |

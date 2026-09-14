@@ -2,6 +2,14 @@
 
 All notable changes to TKSfw. Format: Keep a Changelog; versions follow semver (`VERSION`).
 
+## [3.7.0] — 2026-09-14
+
+### Changed
+- `ks` output redesigned on one renderer (ADR 0017): header `ks <version> · TKSfw · <verb>` with the project name and path on view commands; bold section titles; key/value blocks with a right-aligned status column; tables with a dim header; semantic colour (green ok/armed, yellow attention, red refused, cyan identifiers and commands, dim context); marks `✓ ● ! ✗ →` with ASCII fallback. Colour only on a TTY with `NO_COLOR` unset and `TERM != dumb`; `--no-color`, `--color`, `--ascii`. Hints that do not fit the terminal width wrap under their finding; nothing is truncated.
+- `--plain` on every command: one record per line, no header/colour/symbols/padding — for scripts, hooks and the model. `--json` for `project status`, `project sessions`, `doctor`.
+- `ks project status`, `ks doctor` (RESULT line `N fail · M warn`), `ks routing list` (stacked tables, ACTIVE line, selection order), `ks routing use` (what changed, per harness; notes as hints), refusals (`✗ … — fix`, blockers listed with both ways out), `ks help` (usage, examples, verbs, options) and `ks help routing` (numbered selection order, `!` notes, examples) restyled. Project name = spec/archetype frontmatter `title`, else folder name.
+- `ks layers resolve` aligns its label column. 8 new tests (330 total).
+
 ## [3.6.0] — 2026-09-14
 
 ### Changed

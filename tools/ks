@@ -16,6 +16,10 @@
     ks dev build | test | release <version>       repository checkout only
     ks help [<command>]                           this list, or the full guide for one command
 
+Global options: --plain (one record per line: no header, colour, symbols or padding — for scripts, hooks and the
+model) · --json where a structure exists · --no-color / --color (NO_COLOR and TERM=dumb honoured) · --ascii.
+Colour and symbols are on only when stdout is a TTY.
+
 ks is a thin dispatcher: every operation is an existing framework script (hooks, skill assets,
 tools/new_project.py); ks only resolves WHERE they are and adds status/doctor/retrust/drift views.
 Standard library only, Python ≥ 3.11 (the same dependency as the hooks).
@@ -47,9 +51,177 @@ USER_TOML = os.path.join(CONFIG_DIR, "user.toml")
 TRUST_JSON = os.path.join(CONFIG_DIR, "trust.json")
 
 
-# ----------------------------------------------------------------------------- output
-def die(msg, rc=1):
-    sys.stderr.write(msg.rstrip("\n") + "\n")
+# ----------------------------------------------------------------------------- output (3.7.0 — one renderer)
+# Colour is on only when stdout is a TTY, NO_COLOR is unset, TERM != dumb and neither --no-color nor --plain was
+# given (--color forces it). Symbols fall back to ASCII when the stream is not UTF-8 or --ascii is given. --plain
+# prints one record per line (no header, colour, symbols or padding) for scripts, hooks and the model. Colour marks
+# meaning: green ok/armed, yellow needs attention, red refused, cyan = identifiers you can type, dim = context.
+class UI:
+    ESC = {"b": "\033[1m", "d": "\033[2m", "g": "\033[32m", "y": "\033[33m", "r": "\033[31m", "c": "\033[36m", "/": "\033[0m"}
+    SYM = {"ok": ("✓", "OK"), "on": ("●", "ON"), "warn": ("!", "WARN"), "fail": ("✗", "FAIL"), "arrow": ("→", "->"),
+           "dot": ("·", "-"), "back": ("←", "<-"), "ge": ("≥", ">=")}
+
+    def __init__(self, argv):
+        self.plain = "--plain" in argv
+        self.ascii = "--ascii" in argv
+        tty = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+        self.color = (tty and not os.environ.get("NO_COLOR") and os.environ.get("TERM") != "dumb"
+                      and "--no-color" not in argv and not self.plain) or ("--color" in argv and not self.plain)
+        enc = (getattr(sys.stdout, "encoding", None) or "").lower().replace("-", "")
+        if not self.ascii and "utf8" not in enc:
+            self.ascii = True
+        if self.plain:
+            self.ascii = True
+        self.width = shutil.get_terminal_size((100, 24)).columns if tty else 100
+        self._kv = []
+
+    # -- primitives
+    def c(self, text, style):
+        """Colour `text` with style letters (b d g y r c); no-op without colour."""
+        if not self.color or not text:
+            return text
+        return "".join(self.ESC[ch] for ch in style) + text + self.ESC["/"]
+
+    def sym(self, name):
+        u, a = self.SYM[name]
+        return a if self.ascii else u
+
+    def mark(self, kind):
+        col = {"ok": "g", "on": "g", "warn": "y", "fail": "r"}[kind]
+        return self.c(self.sym(kind), col)
+
+    def dot(self):
+        return self.c(f" {self.sym('dot')} ", "d")
+
+    def header(self, verb="", project=None, path=None):
+        """`ks <version> · TKSfw · <verb>` with the project name on the right and its path below. Skipped in --plain."""
+        if self.plain:
+            return
+        left = self.c(f"ks {Home.version_of(HERE)}", "b") + self.dot() + "TKSfw" + (self.dot() + verb if verb else "")
+        raw_left = f"ks {Home.version_of(HERE)} {self.sym('dot')} TKSfw" + (f" {self.sym('dot')} {verb}" if verb else "")
+        if project:
+            pad = max(2, min(self.width, 100) - len(raw_left) - len(project))
+            left += " " * pad + self.c(project, "b")
+        print(left)
+        if path:
+            print(self.c(path, "d"))
+        print()
+
+    def section(self, title, tail=""):
+        if self.plain:
+            if tail:
+                print(f"{title.lower().replace(' ', '_')} {self.strip(tail)}")
+            return
+        print(self.c(title.upper(), "b") + (("  " + tail) if tail else ""))
+
+    def kv(self, key, value, status=None, indent=2):
+        """Queue a key/value row; `status` = (kind|None, text) lands in a right column at flush()."""
+        self._kv.append((key, value, status, indent))
+
+    def flush(self):
+        """Print queued kv rows: keys padded, values padded, status column aligned; a status that does not
+        fit the terminal moves under its row. In --plain: `key value status`."""
+        rows, self._kv = self._kv, []
+        if not rows:
+            return
+        if self.plain:
+            last = ""
+            for k, v, st, _i in rows:
+                k = k or last
+                last = k
+                val = re.sub(r"\s+", " ", self.strip(v)).strip()
+                stx = re.sub(r"\s+", " ", self.strip(st[1])).strip() if st else ""
+                print(" ".join(x for x in (k, val, stx) if x))
+            return
+        kw = max(len(k) for k, *_ in rows)
+        vw = max(len(self.strip(v)) for _k, v, *_ in rows)
+        col = min(vw + 4, max(40, self.width - 30))
+        for k, v, st, ind in rows:
+            line = " " * ind + k.ljust(kw + 2) + v
+            if st:
+                kind, text = st
+                cell = ((self.mark(kind) + " ") if kind else "") + text
+                raw = len(self.strip(v))
+                if ind + kw + 2 + col + len(self.strip(text)) + 2 <= self.width and raw <= col - 2:
+                    line += " " * (col - raw) + cell
+                else:
+                    line += "\n" + " " * (ind + kw + 2) + cell
+            print(line)
+
+    def table(self, headers, rows, indent=2, trailer=None):
+        """Left-aligned columns, dim header row. `trailer(row)` may add free text after the last column."""
+        if self.plain:
+            for r in rows:
+                print(" ".join(f"{h}={self.strip(str(c))}" if " " in self.strip(str(c)) else self.strip(str(c)) for h, c in zip(headers, r)))
+            return
+        w = [max(len(self.strip(str(r[i]))) for r in rows + [headers]) for i in range(len(headers))]
+        print(" " * indent + self.c("  ".join(str(h).ljust(w[i]) for i, h in enumerate(headers)).rstrip(), "d"))
+        for r in rows:
+            cells = [str(c) + " " * (w[i] - len(self.strip(str(c)))) for i, c in enumerate(r)]
+            line = " " * indent + "  ".join(cells).rstrip()
+            extra = trailer(r) if trailer else ""
+            print(line + ("  " + extra if extra else ""))
+
+    def finding(self, kind, text, hint=None, indent=2):
+        """`✓ text`, `! text → hint`, `✗ text → hint` — hint (a command, cyan) aligned or wrapped under."""
+        if self.plain:
+            print(f"{self.sym(kind)} {self.strip(text)}" + (f" {self.sym('arrow')} {self.strip(hint)}" if hint else ""))
+            return
+        line = " " * indent + self.mark(kind) + " " + self.fmt(text)
+        if hint:
+            h = self.c(self.sym("arrow"), "d") + " " + self.fmt(hint)
+            raw = indent + 2 + len(self.strip(text))
+            if raw + 3 + len(self.strip(hint)) + 2 <= self.width:
+                line += "   " + h
+            else:
+                line += "\n" + " " * (indent + 2) + h
+        print(line)
+
+    def blank(self):
+        if not self.plain:
+            print()
+
+    def hint(self, text, indent=0):
+        print(" " * indent + self.c(self.sym("arrow"), "d") + " " + self.fmt(text))
+
+    def cmd(self, text):
+        return self.c(text, "c")
+
+    def fmt(self, text):
+        """`code` spans → cyan (backticks dropped when colour is on; kept otherwise for legibility)."""
+        if self.plain or not self.color:
+            return text
+        return re.sub(r"`([^`]+)`", lambda m: self.c(m.group(1), "c"), text)
+
+    def ident(self, text):
+        return self.c(text, "c")
+
+    def dim(self, text):
+        return self.c(text, "d")
+
+    def bold(self, text):
+        return self.c(text, "b")
+
+    @staticmethod
+    def strip(text):
+        return re.sub(r"\033\[[0-9;]*m", "", str(text))
+
+
+UI_FLAGS = ("--plain", "--no-color", "--color", "--ascii")
+ui = None                                                 # set in main() once the flags are known
+
+
+def die(msg, rc=1, hint=None):
+    """Refusal / error: `✗ <what> — <fix>` on stderr; `hint` (a command) goes after the dash."""
+    m = msg.rstrip("\n")
+    if ui and not ui.plain:
+        head, _sep, tail = m.partition(" — ")
+        m = ui.mark("fail") + " " + head + ((" " + ui.dim("—") + " " + tail) if tail else "")
+        if hint:
+            m += " " + ui.dim("—") + " " + ui.cmd(hint)
+    elif hint:
+        m += " -- " + hint
+    sys.stderr.write(m + "\n")
     sys.exit(rc)
 
 
@@ -138,6 +310,21 @@ class Home:
     def asset(self, skill, name):
         return os.path.join(self.skills, skill, "assets", name)
 
+    _ver = None
+
+    @classmethod
+    def version_of(cls, here):
+        """Version of the ks script's own home (checkout: ../VERSION; plugin: ../skills/tksfw-init/assets/VERSION)."""
+        if cls._ver is None:
+            cls._ver = "?"
+            for cand in (os.path.join(here, "..", "VERSION"), os.path.join(here, "..", "skills", "tksfw-init", "assets", "VERSION")):
+                try:
+                    cls._ver = open(cand).read().strip()
+                    break
+                except OSError:
+                    pass
+        return cls._ver
+
 
 # ----------------------------------------------------------------------------- project
 class Project:
@@ -194,7 +381,7 @@ EFFECT = {
 
 
 def effect(kind):
-    print(f"→ {EFFECT[kind]}")
+    ui.hint(EFFECT[kind])
 
 
 def live_subagents(proj):
@@ -216,12 +403,32 @@ def refuse_if_busy(proj, what, args, sessions=False):
         return
     live = live_subagents(proj)
     if live:
-        die(f"{what}: {len(live)} subagent(s) are running in this project — wait for them to return, or --force")
+        die(f"{what}: {len(live)} subagent(s) are running in this project — wait for them to return, or", hint=f"ks {what} --force")
     if sessions:
         act = active_sessions(proj)
         if act:
             die(f"{what}: {len(act)} session(s) active on this project (" + ", ".join(a['token'] for a in act)
-                + ") — finish them first, or --force")
+                + ") — finish them first, `ks project sessions close` the ones you know are closed, or", hint=f"ks {what} --force")
+
+
+def project_name(proj, layers=None):
+    """Display name: frontmatter `title` of the spec, else of the archetype, else the folder name."""
+    if layers is None and proj.root and getattr(proj, "hooks", None):
+        try:
+            r = run([PY, os.path.join(proj.hooks, "layers.py"), "resolve", "--json"], cwd=proj.root, env=proj.env(), capture=True)
+            layers = json.loads(r.stdout).get("layers", [])
+        except Exception:
+            layers = []
+    for key in ("spec", "archetype"):
+        for e in (layers or []):
+            if e.get("layer") == key and e.get("title"):
+                return e["title"]
+    return os.path.basename(proj.root.rstrip(os.sep)) or proj.root
+
+
+def short_home(path):
+    home = os.path.expanduser("~")
+    return "~" + path[len(home):] if path.startswith(home) else path
 
 
 # ----------------------------------------------------------------------------- sessions (3.4.0)
@@ -296,34 +503,122 @@ def _ago(ts):
     return f"{d}s ago" if d < 90 else f"{d // 60} min ago" if d < 5400 else f"{d // 3600} h ago"
 
 
-def print_sessions(proj, home):
+def sessions_data(proj, home):
+    """(active rows, ended-recently count, me-token, how) for status/sessions views and --json."""
     import time
     sess = sorted(active_sessions(proj), key=lambda s: -float(s.get("last_seen", 0)))
     ended = [s for s in all_sessions(proj) if s.get("ended") and time.time() - float(s["ended"]) <= 3 * 3600]
-    print(f"sessions: {len(sess)} active (ended by the harness, or heartbeat within the last 30 min)"
-          + (f" · {len(ended)} ended in the last 3 h" if ended else ""))
-    if not sess:
+    me, how = current_session(proj, home, sess) if sess else (None, None)
+    return sess, len(ended), me, how
+
+
+def print_sessions(proj, home, section=True):
+    import time
+    sess, n_ended, me, how = sessions_data(proj, home)
+    tail = f"{len(sess)} active" + (ui.dim(f" {ui.sym('dot')} {n_ended} ended in the last 3 h") if n_ended else "")
+    if section:
+        ui.section("sessions", tail)
+    else:
+        print(tail)
+    if ui.plain:
+        for s_ in sess:
+            print(f"session {s_['token']} harness={s_.get('harness') or '?'} operator=\"{s_.get('operator') or '?'}\" host={s_.get('host') or '?'} "
+                  f"started={time.strftime('%Y-%m-%dT%H:%M', time.localtime(float(s_.get('started', 0))))} last_seen={int(time.time() - float(s_.get('last_seen', 0)))} "
+                  f"routing={s_.get('routing') or 'project'}" + (" current=true" if me and s_['token'] == me['token'] else ""))
         return
-    me, how = current_session(proj, home, sess)
+    if not sess:
+        print("  " + ui.dim("none — a session counts as active until its harness ends it, or for 30 min after its last heartbeat"))
+        return
     rows = []
-    for s in sess:
-        mark = ""
-        if me and s["token"] == me["token"]:
-            mark = "← this session (TKSFW_SESSION)" if how == "TKSFW_SESSION" else "← probably yours (" + how + ")"
-        rows.append((s["token"], s.get("harness") or "?", (s.get("operator") or "?")[:22], s.get("host") or "?",
-                     time.strftime("%m-%d %H:%M", time.localtime(float(s.get("started", 0)))), _ago(s.get("last_seen")),
-                     (s.get("routing") + " (session)") if s.get("routing") else "project", mark))
-    hdr = ("token", "harness", "operator", "host", "started", "last seen", "routing", "")
-    w = [max(len(str(r[i])) for r in rows + [hdr]) for i in range(7)]
-    print("  " + "  ".join(str(h).ljust(w[i]) for i, h in enumerate(hdr[:7])))
-    for r in rows:
-        print("  " + "  ".join(str(r[i]).ljust(w[i]) for i in range(7)) + ("  " + r[7] if r[7] else ""))
-    if any(not s.get("ended") and time.time() - float(s.get("last_seen", 0)) > 600 for s in sess):
-        print("  (a session you know is closed but still listed: its harness sent no SessionEnd — "
-              "`ks project sessions close <token>` or `--stale`)")
+    for s_ in sess:
+        rows.append((ui.ident(s_["token"]), s_.get("harness") or "?", (s_.get("operator") or "?")[:22], s_.get("host") or "?",
+                     time.strftime("%m-%d %H:%M", time.localtime(float(s_.get("started", 0)))), _ago(s_.get("last_seen")),
+                     (ui.ident(s_["routing"]) + ui.dim(" (session)")) if s_.get("routing") else "project"))
+    def trailer(r):
+        tok = ui.strip(r[0])
+        if me and tok == me["token"]:
+            return ui.c(ui.sym("back") + (" this session" if how == "TKSFW_SESSION" else " probably yours"), "g") + ui.dim(f" ({how})")
+        return ""
+    ui.table(("token", "harness", "operator", "host", "started", "last seen", "routing"), rows, trailer=trailer)
+    if any(time.time() - float(s_.get("last_seen", 0)) > 600 for s_ in sess):
+        ui.hint(ui.dim("a session you closed but still listed sent no SessionEnd:") + " " + ui.cmd("ks project sessions close <token>") + ui.dim(" or ") + ui.cmd("--stale"), indent=2)
 
 
 # ----------------------------------------------------------------------------- commands
+def cmd_status(home, rest):
+    proj = Project(home)
+    m = proj.manifest
+    drift = run([PY, home.new_project, proj.root, "--drift", "--json"], capture=True)
+    try:
+        d = json.loads(drift.stdout)
+    except Exception:
+        d = {}
+    lay = run([PY, os.path.join(proj.hooks, "layers.py"), "resolve", "--json"], cwd=proj.root, env=proj.env(), capture=True)
+    try:
+        L = json.loads(lay.stdout).get("layers", [])
+    except Exception:
+        L = []
+    plan = {}
+    state = os.path.join(proj.workarea, "STATE.md")
+    if os.path.isfile(state):
+        for line in open(state, encoding="utf-8"):
+            if line.startswith("- Active plan block:"):
+                plan["block"] = line.split(":", 1)[1].strip()
+            elif line.startswith("- Next action:"):
+                plan["next"] = line.split(":", 1)[1].strip()
+    wt = run([PY, proj.asset("delegate-work", "workarea.py"), "status", "--json"], cwd=proj.root, env=proj.env(), capture=True)
+    try:
+        w = json.loads(wt.stdout)
+    except Exception:
+        w = {}
+    armed = m.get("enabled", True) is not False
+    mode = "plugin" if m.get("plugin_mode") else "full"
+    pv, iv = m.get("version", "?"), home.version
+    sess, n_ended, me, how = sessions_data(proj, home)
+    if "--json" in rest:
+        print(json.dumps({"project": proj.root, "name": project_name(proj, L), "version": pv, "installed": iv, "home": home.kind,
+                          "mode": mode, "armed": armed,
+                          "drift": {k: len(d.get(k, [])) for k in ("outdated", "edited", "missing", "unchanged")} if d else None,
+                          "layers": [{"layer": e["layer"], "path": e["path"], "status": e["journal_status"]} for e in L],
+                          "sessions": {"active": [{k: v for k, v in s_.items() if not k.startswith("_")} | {"current": bool(me and s_["token"] == me["token"])} for s_ in sess], "ended_recently": n_ended},
+                          "plan": plan, "isolation": {"total": w.get("total"), "stale": len(w.get("stale", []))} if w else None}, indent=2, default=str))
+        return
+    ui.header("project status", project_name(proj, L), proj.root)
+    if ui.plain:
+        print(f"project {proj.root}")
+    ui.section("status")
+    ui.kv("version", f"{pv}  " + ui.dim(f"installed {iv} {ui.sym('dot')} {home.kind} home"),
+          ("ok", "current") if pv == iv else ("warn", ui.cmd("ks project update")))
+    ui.kv("mode", mode, ("on", "ARMED") if armed else ("fail", "DISARMED " + ui.dim("— ") + ui.cmd("ks project enable")))
+    if d:
+        n = {k: len(d.get(k, [])) for k in ("outdated", "edited", "missing", "unchanged")}
+        if d.get("drift"):
+            ui.kv("drift", f"{n['outdated']} outdated {ui.sym('dot')} {n['edited']} edited {ui.sym('dot')} {n['missing']} missing",
+                  ("warn", ui.cmd("ks project drift")))
+        else:
+            ui.kv("drift", f"{n['unchanged']} unchanged", ("ok", "clean"))
+    ui.kv("layers", ui.ident("CORE".ljust(10)) + " AGENTS.md")
+    for e in L:
+        st = e["journal_status"]
+        ui.kv("", ui.ident(e["layer"].upper().ljust(10)) + " " + e["path"],
+              ("warn", "changed — re-read") if st == "changed" else ("fail", "missing " + ui.dim("— ") + ui.cmd("ks layers pin")) if st == "missing"
+              else (None, ui.dim(st)))
+    if not L:
+        ui.kv("", ui.dim(f"no project layers — KS_PROJECT.md / KS_SPEC.md at the root, or ") + ui.cmd("ks layers pin"))
+    ui.flush()
+    ui.blank()
+    print_sessions(proj, home)
+    if plan:
+        ui.blank()
+        ui.section("plan")
+        ui.kv("block", plan.get("block", "—"))
+        ui.kv("next", ui.dim(plan["next"]) if plan.get("next", "").startswith("none") else plan.get("next", "—"))
+        ui.flush()
+    if w:
+        ui.blank()
+        ui.section("isolation", f"{w.get('total', 0)} work areas" + ui.dim(f" {ui.sym('dot')} {len(w.get('stale', []))} stale"))
+
+
 def cmd_self(home, args):
     sub = args[0] if args else "version"
     if sub == "version":
@@ -432,8 +727,13 @@ def cmd_project(home, args):
         sys.exit(rc)
     if sub == "sessions":
         proj = Project(home)
-        act = rest[0] if rest else "list"
+        act = next((a for a in rest if not a.startswith("--")), "list")
         if act == "list":
+            if "--json" in rest:
+                sess, n_ended, me, how = sessions_data(proj, home)
+                print(json.dumps({"active": [{k: v for k, v in s_.items() if not k.startswith("_")} | {"current": bool(me and s_["token"] == me["token"])} for s_ in sess], "ended_recently": n_ended}, indent=2))
+                sys.exit(0)
+            ui.header("sessions", project_name(proj), proj.root)
             print_sessions(proj, home)
             sys.exit(0)
         if act == "close":
@@ -442,7 +742,7 @@ def cmd_project(home, args):
                 die("ks project sessions close <token>… | --stale | --all")
             done = close_sessions(proj, tokens=toks or None, stale="--stale" in rest) if (toks or "--stale" in rest) \
                 else close_sessions(proj)
-            print(f"closed {len(done)} session record(s)" + (": " + ", ".join(done) if done else ""))
+            print(ui.mark("ok") + f" closed {len(done)} session record(s)" + ((" " + ui.dim(ui.sym("dot")) + " " + ", ".join(ui.ident(t) for t in done)) if done else ""))
             if toks and set(toks) - set(done):
                 die("not found or already ended: " + ", ".join(sorted(set(toks) - set(done))))
             sys.exit(0)
@@ -466,36 +766,7 @@ def cmd_project(home, args):
         cmd_reset(home, rest)
         return
     if sub == "status":
-        proj = Project(home)
-        m = proj.manifest
-        drift = run([PY, home.new_project, proj.root, "--drift", "--json"], capture=True)
-        try:
-            d = json.loads(drift.stdout)
-        except Exception:
-            d = {}
-        print(f"project : {proj.root}")
-        print(f"version : {m.get('version', '?')} (installed {home.version}, {home.kind} home)  ·  mode: {'plugin' if m.get('plugin_mode') else 'full'}  ·  {'ARMED' if m.get('enabled', True) is not False else 'DISARMED'}")
-        if d:
-            print(f"drift   : outdated {len(d.get('outdated', []))} · edited {len(d.get('edited', []))} · missing {len(d.get('missing', []))} · unchanged {len(d.get('unchanged', []))}"
-                  + ("" if not d.get("drift") else "   → `ks project drift` / `ks project update`"))
-        print_sessions(proj, home)
-        lay = run([PY, os.path.join(proj.hooks, "layers.py"), "resolve", "--json"], cwd=proj.root, env=proj.env(), capture=True)
-        try:
-            L = json.loads(lay.stdout).get("layers", [])
-            print("layers  : CORE AGENTS.md" + (" · " + " · ".join(f"{e['layer'].upper()} {e['path']} ({e['journal_status']})" for e in L) if L else " · no project layers (KS_PROJECT.md / KS_SPEC.md or `ks layers pin`)"))
-        except Exception:
-            pass
-        state = os.path.join(proj.workarea, "STATE.md")
-        if os.path.isfile(state):
-            for line in open(state, encoding="utf-8"):
-                if line.startswith("- Next action:") or line.startswith("- Active plan block:"):
-                    print("plan    :", line.strip()[2:])
-        wt = run([PY, proj.asset("delegate-work", "workarea.py"), "status", "--json"], cwd=proj.root, env=proj.env(), capture=True)
-        try:
-            w = json.loads(wt.stdout)
-            print(f"isolation: {w['total']} work area(s)/worktree(s), {len(w['stale'])} stale")
-        except Exception:
-            pass
+        cmd_status(home, rest)
         return
     die("usage: ks project init [dir] [--full] | update [dir] | enable | disable | status | drift [--json] | reset [--archive [--label L]] [--keep-agents] [--registry] [--dry-run] [--yes] [--force]")
 
@@ -685,7 +956,7 @@ def apply_main_model(proj, quiet=False):
         mm = json.loads(r.stdout)
     except Exception:
         return []
-    lines = []
+    lines, notes = [], []
     cl = mm.get("claude") or {}
     if cl.get("model"):
         sl = os.path.join(proj.root, ".claude", "settings.local.json")
@@ -708,9 +979,9 @@ def apply_main_model(proj, quiet=False):
             os.makedirs(os.path.dirname(sl), exist_ok=True)
             json.dump(data, open(sl, "w", encoding="utf-8"), indent=2)
             open(sl, "a", encoding="utf-8").write("\n")
-        amap = ", ".join(f"{a}→{m}" for a, m in (cl.get("aliases") or {}).items())
-        lines.append(f"Claude Code main session → {cl['model']} (judge tier of [routing.{cl['routing']}]; .claude/settings.local.json, next launch — now: `/model {cl['model']}`)")
-        lines.append(f"Claude Code subagent aliases → {amap} (ANTHROPIC_DEFAULT_*_MODEL in .claude/settings.local.json; applies at the next launch — restart Claude Code after a routing change)")
+        amap = ", ".join(f"{a}{ui.sym('arrow')}{m}" for a, m in (cl.get("aliases") or {}).items())
+        lines.append("  Claude Code   main " + ui.bold(cl['model']) + ui.dim(f" {ui.sym('dot')} aliases {amap}"))
+        notes.append(f"Claude Code: written to .claude/settings.local.json for the next launch — now: `/model {cl['model']}`; restart Claude Code for the aliases")
     cx = mm.get("codex") or {}
     if cx.get("model"):
         cp = os.path.join(proj.root, ".codex", "config.toml")
@@ -726,7 +997,8 @@ def apply_main_model(proj, quiet=False):
         new = "".join(body)
         if new != text:
             open(cp, "w", encoding="utf-8").write(new)
-        lines.append(f"Codex main session → {cx['model']}" + (f" / {cx['reasoning_effort']}" if cx.get("reasoning_effort") else "") + f" (judge tier of [routing.{cx['routing']}]; .codex/config.toml, next launch — now: `/model`)")
+        lines.append("  Codex         main " + ui.bold(cx['model']) + (f" / {cx['reasoning_effort']}" if cx.get("reasoning_effort") else ""))
+        notes.append("Codex: written to .codex/config.toml for the next launch — now: `/model`")
     # re-render the agent mirrors (.claude/agents/*.md carry the full routed id; .codex/agents/*.toml the id + effort)
     agents_dir = os.path.join(proj.root, ".agents", "agents")
     if os.path.isdir(agents_dir) and any(f.endswith(".toml") for f in os.listdir(agents_dir)):
@@ -740,12 +1012,15 @@ def apply_main_model(proj, quiet=False):
         except Exception:
             n, bad = 0, []
         if n:
-            lines.append(f"Agent mirrors re-rendered with the routed models: {n} file(s) (.claude/agents, .codex/agents)")
+            lines.append("  " + ui.dim(f"agent mirrors re-rendered with the routed models: {n} file(s) (.claude/agents, .codex/agents)"))
         if bad:
-            lines.append(f"Agent mirrors NOT rendered for {len(bad)} source(s) — fix them (`ks harness sync --check` in full mode): " + ", ".join(x[1] for x in bad))
+            lines.append("  " + ui.mark("warn") + f" agent mirrors NOT rendered for {len(bad)} source(s) — fix them (`ks harness sync --check` in full mode): " + ", ".join(x[1] for x in bad))
     if not quiet:
+        rt = (cl.get("routing") or cx.get("routing") or "?")
         for l in lines:
             print(l)
+        for n_ in notes:
+            ui.hint(n_)
     return lines
 
 
@@ -778,25 +1053,35 @@ def cmd_routing(home, args):
         cur, how = (m.group(1), m.group(2).strip()) if m else (None, None)
         pinned = cfg.get("selected")
         dflt = cfg.get("default_routing")
-        print(f"{os.path.relpath(path, proj.root)} — {len(routing)} routing table(s); `ks routing use <table>` pins one, `--clear` unpins")
-        w = max(len(k) for k in routing)
-        for key, tab in routing.items():
-            marks = []
-            if key == pinned:
-                marks.append("pinned")
-            if key == dflt:
-                marks.append("default")
-            if key == cur:
-                marks.append(f"active ({how})")
-            mt = tab.get("match") or {}
-            match = ", ".join(f"{k}={v}" for k, v in mt.items()) if isinstance(mt, dict) and mt else "—"
-            print(f"  {key:<{w}}  {('[' + ', '.join(marks) + ']') if marks else ''}")
-            print(f"  {'':<{w}}  match: {match}")
-            for t in tiers:
-                e = tab.get(t) or {}
-                print(f"  {'':<{w}}  {t:<9} {e.get('model', '?'):<28} effort={e.get('reasoning_effort', 'provider default')}")
-        if not cur:
-            print("  (no table is active for this shell: pin one with `ks routing use <table>` or set TKSFW_ROUTING)")
+        ui.header("routing list", project_name(proj), proj.root)
+        if ui.plain:
+            for key, tab in routing.items():
+                mt = tab.get("match") or {}
+                match = ",".join(f"{k}={v}" for k, v in mt.items()) if isinstance(mt, dict) and mt else "-"
+                flags = ",".join(f for f, on in (("pinned", key == pinned), ("default", key == dflt), ("active", key == cur)) if on) or "-"
+                print(f"table {key} match={match} flags={flags} " + " ".join(f"{t}={(tab.get(t) or {}).get('model', '?')}:{(tab.get(t) or {}).get('reasoning_effort', 'default')}" for t in tiers))
+        else:
+            print(ui.dim(f"{os.path.relpath(path, proj.root)} {ui.sym('dot')} {len(routing)} tables" + (f" {ui.sym('dot')} default {dflt}" if dflt else "") + (f" {ui.sym('dot')} pinned {pinned}" if pinned else "")))
+            print()
+            if cur:
+                ui.section("active", ui.ident(cur) + "  " + ui.dim(f"via {how}"))
+                print()
+            w = max(len(k) for k in routing)
+            mw = max(len(m_) for m_ in [(e.get("model", "?") if isinstance(e, dict) else "?") for tab in routing.values() for e in [tab.get(t) or {} for t in tiers]] + ["x"])
+            for key, tab in routing.items():
+                mt = tab.get("match") or {}
+                match = ", ".join(f"{k}={v}" for k, v in mt.items()) if isinstance(mt, dict) and mt else "none"
+                tags = [t for t, on in (("pinned", key == pinned), ("default", key == dflt)) if on]
+                head = (ui.mark("on") if key == cur else " ") + " " + ui.ident(key.ljust(w)) + "   " + ui.dim("match " + match + (f"  ({', '.join(tags)})" if tags else ""))
+                print(head)
+                for t in tiers:
+                    e = tab.get(t) or {}
+                    print("    " + t.ljust(9) + " " + str(e.get("model", "?")).ljust(mw + 2) + ui.dim(str(e.get("reasoning_effort", "provider default"))))
+            print()
+            print(ui.dim(f"Selection order: session override {ui.sym('arrow')} TKSFW_ROUTING {ui.sym('arrow')} selected {ui.sym('arrow')} provider match {ui.sym('arrow')} base-URL match {ui.sym('arrow')} default_routing"))
+            ui.hint(ui.cmd("ks routing use <table>") + ui.dim(" pins one for the project ") + ui.dim(ui.sym("dot")) + " " + ui.cmd("--session") + ui.dim(" this session only ") + ui.dim(ui.sym("dot")) + " " + ui.cmd("--clear") + ui.dim(" unpins"))
+        if not cur and not ui.plain:
+            ui.finding("warn", "no table is active for this shell", "`ks routing use <table>` or set TKSFW_ROUTING")
         sys.exit(0)
     if sub == "resolve":
         if len(args) < 2:
@@ -808,7 +1093,7 @@ def cmd_routing(home, args):
             if "--clear" in args:
                 had = rec.pop("routing", None)
                 write_session(proj, rec)
-                print(f"session {rec['token']}: override cleared" + (f" (was [routing.{had}])" if had else "") + " — project routing applies from its next spawn")
+                print(ui.mark("ok") + " session " + ui.ident(rec['token']) + ": override cleared" + (ui.dim(f" (was {had})") if had else "") + ui.dim(" — project routing applies from its next spawn"))
                 sys.exit(0)
             table = next((a for a in args[1:] if not a.startswith("--") and a != rec["token"]), None)
             if not table:
@@ -818,29 +1103,34 @@ def cmd_routing(home, args):
                 die(f"no [routing.{table}] table in {proj.config_toml()} (`ks routing list`)")
             rec["routing"] = table
             write_session(proj, rec)
-            print(f"session {rec['token']} ({rec.get('harness', '?')}) → [routing.{table}] for this session only; other sessions and the project pin are untouched")
+            print(ui.mark("ok") + " session " + ui.ident(rec['token']) + ui.dim(f" ({rec.get('harness', '?')})") + f" {ui.sym('arrow')} " + ui.ident(table) + ui.dim(" — THIS SESSION ONLY; other sessions and the project pin are untouched"))
             r = run([PY, rm, "--main", "--session-routing", table], cwd=proj.root, env=proj.env(), capture=True)
             try:
                 mm = json.loads(r.stdout).get(rec.get("harness") if rec.get("harness") in ("codex", "claude") else "claude") or {}
                 if mm.get("model"):
-                    print(f"  main session: `/model {mm['model']}` now (this session's launch defaults are not changed)")
+                    print("  main session " + ui.bold(mm['model']) + ui.dim(" — now: ") + ui.cmd(f"/model {mm['model']}") + ui.dim(" (launch defaults unchanged)"))
                 if rec.get("harness") == "claude":
-                    print(f"  Claude Code: built-in agents follow via alias; custom agents keep the project-wide frontmatter model — for an exact session use `TKSFW_ROUTING={table} claude` at launch")
+                    ui.finding("warn", "Claude Code: built-in agents follow via alias; custom agents keep the project-wide frontmatter model", f"exact session: `TKSFW_ROUTING={table} claude`")
             except Exception:
                 pass
-            print("→ takes effect at this session's next subagent spawn; the model is told at its next prompt")
+            ui.hint("takes effect at this session's next subagent spawn; the model is told at its next prompt")
             sys.exit(0)
         others = active_sessions(proj)
         if others and "--force" not in args:
-            die(f"routing use: {len(others)} session(s) active on this project (" + ", ".join(f"{s['token']}/{s.get('harness', '?')}/{s.get('operator') or '?'}" for s in others)
-                + ") would switch at their next spawn — `--session [token]` limits the change to one session, `--force` switches the project for all")
+            table_ = next((a for a in args[1:] if not a.startswith("--")), "<table>")
+            sys.stderr.write(ui.mark("fail") + f" routing use: {len(others)} session(s) active on this project " + ui.dim("— a project-wide switch changes their models at the next spawn") + "\n")
+            for s_ in others:
+                sys.stderr.write("  " + ui.ident(s_['token']) + f"  {(s_.get('harness') or '?').ljust(7)} {(s_.get('operator') or '?')[:22].ljust(22)} {(s_.get('host') or '?').ljust(12)} " + ui.dim(_ago(s_.get('last_seen'))) + "\n")
+            sys.stderr.write(ui.c(ui.sym("arrow"), "d") + " this session only: " + ui.cmd(f"ks routing use {table_} --session") + "\n")
+            sys.stderr.write(ui.c(ui.sym("arrow"), "d") + " all sessions anyway: " + ui.cmd(f"ks routing use {table_} --force") + "\n")
+            sys.exit(1)
         refuse_if_busy(proj, "routing use", args)
         path = proj.config_toml()
         text = open(path, encoding="utf-8").read()
         lines = [l for l in text.splitlines(keepends=True) if not re.match(r'^\s*selected\s*=', l)]
         if "--clear" in args:
             open(path, "w", encoding="utf-8").write("".join(lines))
-            print("routing selection cleared (automatic: TKSFW_ROUTING → provider match → default_routing)")
+            print(ui.mark("ok") + " routing unpinned " + ui.dim(f"(automatic: TKSFW_ROUTING {ui.sym('arrow')} provider match {ui.sym('arrow')} default_routing)"))
             apply_main_model(proj)
         else:
             if len(args) < 2:
@@ -856,12 +1146,16 @@ def cmd_routing(home, args):
             else:
                 lines.insert(0, ins)
             open(path, "w", encoding="utf-8").write("".join(lines))
-            print(f"routing pinned to [routing.{table}] — log it in changes.yaml (Layer: CORE)")
+            print(ui.mark("ok") + " routing pinned to " + ui.ident(table) + ui.dim(" (project-wide; every session, at its next spawn)"))
             apply_main_model(proj)
-        rc = run([PY, rm, "--check"], cwd=proj.root, env=proj.env()).returncode
-        if rc == 0:
+            ui.hint("log it in changes.yaml " + ui.dim("(Layer: CORE)"))
+        chk = run([PY, rm, "--check"], cwd=proj.root, env=proj.env(), capture=True)
+        if chk.returncode == 0:
             effect("spawn")
-        sys.exit(rc)
+        else:
+            sys.stdout.write(chk.stdout)
+            sys.stderr.write(chk.stderr)
+        sys.exit(chk.returncode)
     die("usage: ks routing show | check | resolve <agent> | use <table> | use --clear")
 
 
@@ -1054,26 +1348,44 @@ def cmd_harness(home, args):
 
 def cmd_doctor(home, args):
     fails, warns = 0, 0
+    findings = []
+    as_json = "--json" in args
+
+    def emit(kind, msg):
+        text, _sep, hint = msg.partition(" — ")
+        findings.append({"section": findings_section[0], "status": kind, "text": text, "hint": hint or None})
+        if not as_json:
+            ui.finding(kind, text, hint or None)
 
     def ok(msg):
-        print("  ok   ", msg)
+        emit("ok", msg)
 
     def warn(msg):
         nonlocal warns
         warns += 1
-        print("  WARN ", msg)
+        emit("warn", msg)
 
     def fail(msg):
         nonlocal fails
         fails += 1
-        print("  FAIL ", msg)
+        emit("fail", msg)
 
-    print("== runtime")
+    findings_section = [""]
+
+    def section(title, tail=""):
+        findings_section[0] = title
+        if not as_json:
+            ui.section(title, tail)
+
+    proj0 = Project(home, required=False)
+    if not as_json:
+        ui.header("doctor", project_name(proj0) if proj0.root else None, proj0.root if proj0.root else None)
+    section("runtime")
     v = sys.version_info
     (ok if v >= (3, 11) else fail)(f"python {platform.python_version()} at {PY}" + ("" if v >= (3, 11) else " — 3.11+ required (tomllib)"))
-    (ok if shutil.which("git") else warn)("git " + (run(["git", "--version"], capture=True).stdout.strip() if shutil.which("git") else "not found (worktrees unavailable)"))
-    print("== framework home")
-    ok(f"{home.kind} {home.version} at {home.path} (via {home.how})")
+    (ok if shutil.which("git") else warn)("git " + (run(["git", "--version"], capture=True).stdout.strip().replace("git version ", "") if shutil.which("git") else "not found — worktrees unavailable"))
+    section("framework home")
+    ok(f"{home.kind} {home.version} at {short_home(home.path)} (via {home.how})")
     cfg = user_toml()
     (ok if cfg.get("home") else warn)(f"user.toml home = {cfg.get('home') or 'not recorded — `ks self install`'}")
     r = run([PY, home.new_project, "--show-operator"], capture=True)
@@ -1083,7 +1395,7 @@ def cmd_doctor(home, args):
         warn(r.stdout.strip() + " — set the item: `ks operator set`")
     else:
         ok(r.stdout.strip())
-    print("== harnesses (user level)")
+    section("harnesses", ui.dim("user level"))
     codex_home = os.environ.get("CODEX_HOME") or os.path.join(os.path.expanduser("~"), ".codex")
     ccfg = os.path.join(codex_home, "config.toml")
     mk = os.path.join(os.path.expanduser("~"), ".agents", "plugins", "marketplace.json")
@@ -1146,17 +1458,17 @@ def cmd_doctor(home, args):
     for target in (os.path.join(codex_home, "AGENTS.md"), os.path.join(os.path.expanduser("~"), ".claude", "CLAUDE.md")):
         present = os.path.isfile(target) and STANZA_MARK in open(target, encoding="utf-8", errors="replace").read()
         (ok if present else warn)(f"bootstrap stanza in {target}: {'present' if present else 'absent — `ks self setup` (getting-started step 4)'}")
-    proj = Project(home, required=False)
+    proj = proj0
     if proj.root:
-        print(f"== project {proj.root}")
+        section("project")
         m = proj.manifest
-        (ok if m.get("enabled", True) is not False else warn)(f"armed: {m.get('enabled', True) is not False}")
+        (ok if m.get("enabled", True) is not False else warn)("armed" if m.get("enabled", True) is not False else "DISARMED — `ks project enable`")
         pv, iv = str(m.get("version", "?")), home.version
         (ok if pv == iv else warn)(f"version project {pv} / installed {iv}" + ("" if pv == iv else " — run `ks project update`"))
         d = run([PY, home.new_project, proj.root, "--drift", "--json"], capture=True)
         try:
             dj = json.loads(d.stdout)
-            (ok if not dj.get("drift") else warn)(f"drift: outdated {len(dj['outdated'])}, edited {len(dj['edited'])}, missing {len(dj['missing'])}")
+            (ok if not dj.get("drift") else warn)(f"drift: outdated {len(dj['outdated'])}, edited {len(dj['edited'])}, missing {len(dj['missing'])}" + ("" if not dj.get("drift") else " — `ks project drift`"))
         except Exception:
             warn("drift report unavailable")
         try:
@@ -1165,7 +1477,7 @@ def cmd_doctor(home, args):
         except Exception as e:
             warn(f"HIL threshold unreadable: {e}")
         if "/Library/CloudStorage/" in proj.root or "/Box/" in proj.root or "/Dropbox/" in proj.root:
-            warn("project lives in a cloud-synced folder — mtimes are unreliable (hooks hash content) and git worktrees are not recommended")
+            warn("project lives in a cloud-synced folder: mtimes are unreliable (hooks hash content); git worktrees are not recommended")
         for sf in (".claude/settings.json", ".claude/settings.local.json"):
             p = os.path.join(proj.root, sf)
             if os.path.isfile(p):
@@ -1185,8 +1497,8 @@ def cmd_doctor(home, args):
         rc = run([PY, os.path.join(proj.hooks, "route_model.py"), "--check"], cwd=proj.root, env=proj.env(), capture=True)
         (ok if rc.returncode == 0 else fail)("routing: " + rc.stdout.strip().splitlines()[0] if rc.stdout.strip() else "routing: no output")
         sess = active_sessions(proj)
-        (ok if len(sess) <= 1 else warn)(f"active sessions: {len(sess)}" + ("" if len(sess) <= 1 else " — ledgers are partitioned per session; tasks.md has one plan-writer")
-                                        + (" (closed ones the harness did not end: `ks project sessions close --stale`)" if len(sess) > 1 else ""))
+        (ok if len(sess) <= 1 else warn)(f"active sessions: {len(sess)}" + ("" if len(sess) <= 1 else " (ledgers are partitioned per session; tasks.md has one plan-writer)"
+                                        + " — closed ones the harness did not end: `ks project sessions close --stale`"))
         conf = sync_conflicts(proj)
         (ok if not conf else fail)("sync conflict copies: " + (", ".join(conf) + " — merge by hand into the canonical files, then delete" if conf else "none"))
         shards = [n for n in os.listdir(proj.workarea) if re.match(r"^(changes|lessons|handoffs|events|decisions)\.[0-9A-Za-z]{8}\.yaml$", n)] if os.path.isdir(proj.workarea) else []
@@ -1200,8 +1512,14 @@ def cmd_doctor(home, args):
         ch = [f for f in cur if prev.get(f) != cur[f]]
         (ok if prev and not ch else warn)("hook trust: " + ("acknowledged" if prev and not ch else f"{len(ch)} hook file(s) not acknowledged — Codex /hooks then `ks harness retrust --ack`"))
     else:
-        print("== project: not inside a TKSfw project")
-    print(f"\n{fails} FAIL · {warns} WARN")
+        section("project")
+        if not as_json:
+            print("  " + ui.dim("not inside a TKSfw project"))
+    if as_json:
+        print(json.dumps({"fail": fails, "warn": warns, "findings": findings}, indent=2))
+        sys.exit(1 if fails else 0)
+    print()
+    ui.section("result", (ui.c(f"{fails} fail", "r" if fails else "g") + ui.dim(f" {ui.sym('dot')} ") + ui.c(f"{warns} warn", "y" if warns else "g")))
     sys.exit(1 if fails else 0)
 
 
@@ -1294,12 +1612,30 @@ The main session runs on the judge tier of the active table: `ks routing use` / 
 to .claude/settings.local.json (Claude Code) and .codex/config.toml (Codex) for the next launch and print the
 `/model …` command to switch the running session now.
 
-Selection order at spawn: session override → TKSFW_ROUTING → `selected` → Codex `model_provider` (first table in file order
-with match.codex_model_provider, else table key) → Claude Code ANTHROPIC_BASE_URL prefix
-(match.claude_base_url) → `default_routing` → [routing.default] → deny.
+HOW A TABLE IS CHOSEN (first match wins)
+  1  session override      `ks routing use <table> --session`
+  2  TKSFW_ROUTING         environment variable, launch time
+  3  selected              pinned in config.toml by `ks routing use`
+  4  provider match        [routing.X].match codex_model_provider (first table in file order, else the table key)
+  5  base-URL match        [routing.X].match claude_base_url (ANTHROPIC_BASE_URL prefix)
+  6  default_routing       top of config.toml; then [routing.default]; otherwise the spawn is denied
+
+Selection order at spawn, in one line: session override → TKSFW_ROUTING → `selected` → provider match → base-URL
+match → `default_routing`.
+
+NOTES
+  ! A project-wide switch is refused while other sessions are active — they would change models at their next
+    spawn. Use `--session` for yours only, or `--force` to switch them all (each is told at its next prompt).
+  ! Claude Code custom agents keep their frontmatter model; built-ins follow via alias. Exact fresh session:
+    `TKSFW_ROUTING=<table> claude`.
+
 Shipped tables (IBM endpoint, provider "ibm"): ibm-anthropic-cc (Claude Code, 1M-context; the default),
 ibm-openai-cc (Claude Code, gpt-5.6-*[1m]), ibm-anthropic (Codex, Anthropic models; wins the provider
 match), ibm-openai (Codex, gpt-5.6-*), plus an openrouter example. Preferred harness: Claude Code.
+
+EXAMPLES
+  ks routing use ibm-openai-cc --session       this session on the OpenAI stack, others untouched
+  ks routing resolve report-builder            build tier → its model and effort, via the active table
 """,
     "hil": """ks hil — the Human-in-the-Loop threshold ([hil] in .agents/config.toml; AGENTS.md § Human in the Loop)
 
@@ -1381,15 +1717,75 @@ cloud-synced folder warning. Exit 0; FAIL lines name the step that fixes them.
 }
 
 
+VERBS = [
+    ("self", "install · setup · version · home", "put ks on PATH, one-shot user setup"),
+    ("operator", "set <name> · show", "who you are in the ledgers"),
+    ("project", "init · update · status · sessions · drift · enable · disable · reset", ""),
+    ("routing", "list · show · check · resolve <agent> · use <table> [--session] · use --clear", ""),
+    ("hil", "show · set", "human-in-the-loop threshold"),
+    ("layers", "resolve · pin · journal · section", "ARCHETYPE and SPEC files"),
+    ("ledger", "check · find <id> · digest · export · archive-plan · archive", ""),
+    ("harness", "sync · retrust", "Codex / Claude Code integration"),
+    ("doctor", "installation integrity, user level and project", ""),
+    ("dev", "build · test · release <version>", "repository checkout only"),
+]
+
+
+def help_lines(text):
+    """Light formatting for the per-verb guides: ALL-CAPS heading lines bold, `ks …` command lines cyan up to the
+    double space, `code` spans cyan."""
+    out = []
+    for line in text.rstrip("\n").splitlines():
+        if re.fullmatch(r"[A-Z][A-Z /–-]{2,}[A-Z](\s*\(.*\))?", line.strip()) and not line.startswith(" "):
+            out.append(ui.bold(line))
+        elif line.startswith("  ks "):
+            cmd_part, sep, rest = line[2:].partition("  ")
+            out.append("  " + ui.cmd(cmd_part) + (sep + ui.fmt(rest) if sep else ""))
+        elif line.startswith("  ! "):
+            out.append("  " + ui.mark("warn") + " " + ui.fmt(line[4:]))
+        else:
+            out.append(ui.fmt(line))
+    return out
+
+
 def cmd_help(home, args):
     if not args:
-        print(__doc__)
-        print("Run `ks help <command>` for the full guide of one command:", ", ".join(k for k in HELP if k != "help") + ".")
+        if ui.plain:
+            print(__doc__)
+            sys.exit(0)
+        ui.header("", None)
+        print(ui.bold("ks") + " " + ui.dim("— one front door for every framework operation"))
+        print()
+        ui.section("usage")
+        print(f"  ks {ui.cmd('<verb>')} [<action>] [options]")
+        print()
+        ui.section("examples")
+        ex = [("ks project init ~/work/acme", "arm a folder " + ui.dim("(plugin mode)")),
+              ("ks routing use openrouter --session", "switch this session's models only"),
+              ("ks doctor", "check the installation and this project")]
+        w = max(len(c) for c, _ in ex)
+        for c, d in ex:
+            print("  " + ui.cmd(c) + " " * (w - len(c) + 4) + d)
+        print()
+        ui.section("verbs")
+        w = max(len(a) for _v, a, _d in VERBS)
+        for v, a, d in VERBS:
+            print("  " + ui.cmd(v.ljust(10)) + "  " + a + ((" " * (w - len(a) + 4) + ui.dim(d)) if d else ""))
+        print()
+        ui.section("options")
+        for f, d in (("--plain", "one record per line, no header, colour or symbols " + ui.dim("(for scripts, hooks and the model)")),
+                     ("--json", "structured output where it exists " + ui.dim("(status, sessions, doctor, drift, layers, ledger)")),
+                     ("--no-color", "disable colour " + ui.dim("(NO_COLOR and TERM=dumb are honoured; --color forces it)")),
+                     ("--ascii", "ASCII marks OK WARN FAIL -> " + ui.dim("(automatic when the stream is not UTF-8)")),
+                     ("-h, --help", "")):
+            print("  " + ui.cmd(f.ljust(12)) + "  " + d)
+        print()
+        print(ui.cmd("ks help <verb>") + " for the full guide of one verb.  " + ui.dim("Standard library only, Python ≥ 3.11."))
         sys.exit(0)
     key = args[0].lstrip("-")
     if key not in HELP:
-        die(f"no help for {key!r}; commands: " + ", ".join(HELP))
-    print(HELP[key].rstrip("\n"))
+        die(f"no help for {key!r}", hint="ks help  (verbs: " + ", ".join(k for k in HELP if k != "help") + ")")
+    print("\n".join(help_lines(HELP[key])))
     sys.exit(0)
 
 
@@ -1398,7 +1794,9 @@ COMMANDS = {"self": cmd_self, "operator": cmd_operator, "project": cmd_project, 
 
 
 def main():
-    a = sys.argv[1:]
+    global ui
+    ui = UI(sys.argv[1:])
+    a = [x for x in sys.argv[1:] if x not in UI_FLAGS]
     if not a or a[0] in ("-h", "--help"):
         cmd_help(None, [])
     if len(a) >= 2 and a[1] in ("-h", "--help") and a[0] in HELP:
@@ -1406,7 +1804,7 @@ def main():
     if a[0] in ("--version", "version"):
         a = ["self", "version"]
     if a[0] not in COMMANDS:
-        die(f"unknown command {a[0]!r}\n" + __doc__)
+        die(f"unknown command {a[0]!r}", hint="ks help")
     COMMANDS[a[0]](Home(), a[1:])
 
 
