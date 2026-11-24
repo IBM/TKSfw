@@ -1,7 +1,10 @@
 <div align="center">
   <img src="docs/static/KeelStone_Logo_Small.png" alt="The KeelStone Framework Logo" title="The KeelStone Framework" height="200">
+
 # The KeelStone Framework
 </div>
+
+<br>
 
 ## Overview
 
@@ -25,7 +28,7 @@ It can be used in two ways:
 KeelStone currently works as a plug-in for Claude Code or Codex (more to come) and provides a series of **features & capabilities** to the agentic harness:
 
 - **Layered and reusable.** The Core stays the same across projects. Archetypes capture the invariant aspects for a specific project type, and project specifications capture one specific engagement/case. You can reuse them per project or per user.
-- **Clean separation** between framework files and project files.
+  - **Clean separation** between framework files and project files.
 - **Concurrent work from agents and humans**, supported through Git or Cloud-synced folders (for individuals and small teams with low concurrency).
 - **Flexible UIs**, using either a CLI or a desktop environment.
 - **Tailorable**, so you can extend or adapt the framework as you see fit.
