@@ -19,6 +19,8 @@ testing, design, translations, issue reports, and feedback.
 - Alexandre Porcides: Team Member on a Customer Project, Testing, Feedback
 - Pedro Baldanta: Testing, Feedback
 - Salvatore Corsaro: Testing, Feedback
+- David Pérez García: Testing, Feedback
+- Carlos Graña Muñoz: Testing, Feedback
 
 ## Special thanks
 

@@ -1,4 +1,70 @@
-# TKSfw — TKS agent method framework
+<div align="center">
+![The KeelStone Framework Logo](docs/static/KeelStone_Logo_Small.png "The KeelStone Framework")
+
+<br>
+
+# The KeelStone Framework
+</div>
+
+## Overview
+
+KeelStone helps teams or individuals hand off real, end-to-end work to AI agents, and get results that are consistent, traceable and ready for enterprise use.
+
+It can be used in two ways:
+
+| Use Case | What it is | Who it's for |
+|---|---|---|
+| **As a Framework to codify complex and repeatable work** | An open, enterprise-grade **Method-as-Code** framework for agentic harnesses | Organizations that want to encode *how* they deliver work |
+| **As a Software Product** | An enterprise-ready **multi-agent management and governance system** for agentic harnesses | End users ("prosumers") who delegate work to AI agents |
+
+>[!IMPORTANT]
+> What is an **agentic harness**: An agentic harness wraps an AI model and gives it what it needs to run as an agent: **tools**, **memory** and an **agentic loop**. Examples include Claude Code, Codex, IBM Bob and OpenCode.
+> KeelStone works **at the agent level, inside the harness**. It does not replace the harness. It tells the agent *how to work*.
+
+### How it works
+
+![The KeelStone Framework Architecture](docs/static/TKSfw-Architecture.png  "The KeelStone Framework Architecture")
+
+KeelStone currently works as a plug-in for Claude Code or Codex (more to come) and provides a series of **features & capabilities** to the agentic harness:
+
+- **Layered and reusable.** The Core stays the same across projects. Archetypes capture the invariant aspects for a specific project type, and project specifications capture one specific engagement/case. You can reuse them per project or per user.
+- **Clean separation** between framework files and project files.
+- **Concurrent work from agents and humans**, supported through Git or Cloud-synced folders (for individuals and small teams with low concurrency).
+- **Flexible UIs**, using either a CLI or a desktop environment.
+- **Tailorable**, so you can extend or adapt the framework as you see fit.
+
+KeelStone gives agents and humans a **standardized way to work together**, using a set of structured files on disk that provide:
+
+- **Context Grounding** for long-running, distributed jobs
+- **Resilience**, so restarts and re-runs pick up from the recorded state
+- **An audit trail** that AI can inspect
+
+Some of these files are:
+
+| Log | Purpose |
+|---|---|
+| **Decisions log** | Records decisions with unique IDs and cross-references (referential integrity), human-in-the-loop escalation criteria and an audit trail |
+| **Handoffs log** | Structures delegation between agents (BEGIN/END markers) and captures what each agent learned |
+| **Lessons log** | Creates positive feedback loops. Lessons are generalized over time to improve the framework, and include model-optimization primitives |
+| **Events log** | Keeps full provenance (*who, when, why*) using a defined schema of event types and statuses |
+
+In essence, KeelStone provides a "RAID log" that **articulates the relationship between agents and humans**. This is far more efficient and scalable than reading through long conversation histories (which might be distributed across different computers) and provide a better foundation to also use agents to inspect and evaluate what is happening within a project, either at run time or when everything has finished.
+
+### Key benefits
+
+| Capability | What you get |
+|---|---|
+| **Industrial-grade execution**: versioning, context and loops that improve themselves | Better reliability, less rework, consistent reproducibility, continuous improvement that is codified |
+| **Delegation**: to more agents, between teams, between professionals | More capacity, flexibility and scalability |
+| **Built-in governance**: audit trails, post-mortems, validation that is enforced and deterministic | Better quality, codified compliance, more security, a lower barrier to entry |
+| **Reusable use cases**: by project type, customer, scenario or offering | Faster execution and efficiency gains that compound over time |
+
+### What makes it different
+
+- **Open.** You can inspect, reuse, combine and extend it.
+- **Agnostic.** It works across domains, not just the software lifecycle, and across harnesses (currently **Claude Code** and **Codex**).
+- **Enterprise-ready.** It is traceable, auditable, predictable and verifiable, because it rests on ledgers and rules that enforce quality and conformance.
+
 ## Start here
 
 | You want to… | Read |
@@ -9,7 +75,6 @@
 | Understand a design decision | `docs/decisions/` (ADRs 0001–0009) |
 
 The rest of this file is for maintainers of the framework repository.
-
 
 Harness-neutral method framework for Codex CLI and Claude Code: an `AGENTS.md`-driven method
 (the CORE text, YAML ledgers, state snapshot, deliverables registry) plus the tooling that enforces
@@ -58,37 +123,17 @@ TKSfw/
 Edit only `template/` and `plugin-src/`. `plugins/*` is regenerated by the build (`tools/build_plugin.py`, or `ks dev build`) and checked by
 `tests/run_tests.py` (`build_plugin.py --check`), so a stale copy fails the tests.
 
-## Everyday commands
+## Documentation
 
-| Task | Command |
+| Document | Description |
 |---|---|
-| Run everything | `python3 tests/run_tests.py` |
-| Rebuild plugin + ZIPs | `python3 tools/build_plugin.py` |
-| New project (plugin installed) | `python3 tools/new_project.py /path/to/project --plugin-mode` |
-| New self-contained project | `python3 tools/new_project.py /path/to/project` |
-| Update a project to this version | `python3 tools/new_project.py /path/to/project --update` |
-| Disarm / re-arm a project | `python3 tools/new_project.py /path/to/project --disable` / `--enable` |
-| Set the operator name (once per user; `~/.config/tksfw/user.toml`) | `python3 tools/new_project.py --set-operator "Carlos Veira"` · `--show-operator` |
-| Everything above from one command | `python3 tools/ks self install` then `ks project init`, `ks project status`, `ks routing use ibm`, `ks ledger find <id> --refs`, `ks doctor` … (`docs/ks.md`) |
-| Same, from the installed plugin | `tksfw-init` skill (`$tksfw-init` / `/tksfw:tksfw-init`) — see docs/user-level.md |
-| Release | `./tools/release.sh 0.7.0` |
-| Show / validate model routing | `python3 .agents/hooks/route_model.py --print` / `--check` (in a project) |
-| Describe a project (archetype + spec) and start it | `KS_PROJECT.md` (archetype) + `KS_SPEC.md` (spec) at the project root — or `ks layers pin --archetype P --spec P`; `ks layers resolve`; the `ks-start` skill in the session (`$ks-start` Codex, `/tksfw:ks-start` Claude Code) |
-| Try the plugin locally (Claude Code) | `claude --plugin-dir plugins/tksfw` (session only) |
-| Try the plugin locally (Codex) | `codex plugin marketplace add .` → `/plugins` → install → restart → `/hooks` trust |
-
-## Two deployment shapes for a project
-
-| Shape | Project contains | Tooling comes from | When |
-|---|---|---|---|
-| Not a TKSfw project | no `.agents/.tksfw.json` | — | hooks are inert here (arming guard); `tksfw-init` creates an instance on request |
-| Full (in-project) | `AGENTS.md`, `.agents/{hooks,skills,workarea}`, `.codex/`, generated `.claude/` | the project itself (`sync_harness.py` mirrors hooks and skills for Claude Code) | no plugin installed; frozen copy per project; Box-synced projects |
-| Plugin mode | `AGENTS.md`, `CLAUDE.local.md`, `.agents/workarea/`, `.codex/config.toml`, `.claude/settings.json` | the installed `tksfw` plugin (both harnesses) | team members who install the plugin once; central updates |
-
-The same hook scripts serve both: they resolve the project root from `$CLAUDE_PROJECT_DIR` or by
-walking up from the current directory to `AGENTS.md`, and the ledger validator from the sibling
-`skills/yaml-log-entry/assets` (plugin) or `.agents/skills/...` (in-project). Runtime state always
-stays in the project's `.agents/workarea/.hook-state/`.
+| [Getting Started](docs/getting-started.md) | Go from zero to the first armed project |
+| [Deployment](docs/user-level.md) | KeelStone gets installed once per user and 'armed' on a per-project basis |
+| [Operations](docs/operations.md) | Description of each of the different procedures that KeelStone provides |
+| [The KeelStone CLI](docs/ks.md) | KeelStone provides `ks` command to facilitate its use and operation |
+| [Model Routing](docs/model-routing.md) | Explains how to configure Model Routing tables that Agents will use during execution sessions |
+| [MCP Tools](docs/mcp-tools.md) | KeelStone provides a second plugin with optional MCP servers |
+| [Build and Distribution](docs/distribution.md) | Procedure to build and distribute TKSfw plugins |
 
 ## Versioning
 

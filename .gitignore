@@ -1,16 +1,67 @@
 # build output (release ZIPs); plugins/tksfw/ IS committed (refreshed by tools/build_plugin.py)
 # dist/
-# python
-__pycache__/
-*.pyc
-# macOS / editors
-.DS_Store
-._*
-.obsidian/
-.claudian/
 # project runtime state must never be committed from a template test run
 template/.agents/workarea/.hook-state/
 template/.agents/workarea/STATE.md
 template/.claude/*
 !template/.claude/settings.json
 template/.codex/hooks.json
+
+# Global
+.DS_Store
+Thumbs.db
+
+# Secrets & credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.kdbx
+id_rsa
+id_ed25519
+*.tfvars
+*.tfvars.json
+*.tfstate
+*.tfstate.*
+.terraform/
+credentials*.json
+secrets.*
+!secrets.example.*
+
+# Dependencies
+node_modules/
+vendor/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Build output & caches
+build/
+dist/
+out/
+target/
+.cache/
+.pytest_cache/
+.mypy_cache/
+coverage/
+*.egg-info/
+
+# Logs & temp
+._*
+*.log
+logs/
+*.tmp
+*.bak
+*.swp
+*~
+
+# Local tools/agent state
+.idea/
+.vscode/
+.obsidian/
+.claudian/
+.claude/settings.local.json
