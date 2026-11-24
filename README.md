@@ -1,8 +1,5 @@
 <div align="center">
-
-![The KeelStone Framework Logo](docs/static/KeelStone_Logo_Small.png "The KeelStone Framework")
-
-<br>
+  <img src="docs/static/KeelStone_Logo_Small.png" alt="The KeelStone Framework Logo" title="The KeelStone Framework" height="200">
 
 # The KeelStone Framework
 </div>
