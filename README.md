@@ -1,4 +1,5 @@
 <div align="center">
+
 ![The KeelStone Framework Logo](docs/static/KeelStone_Logo_Small.png "The KeelStone Framework")
 
 <br>
